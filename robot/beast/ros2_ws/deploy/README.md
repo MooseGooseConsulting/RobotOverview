@@ -39,7 +39,7 @@ Default `BEAST_HOST` is `beast-01` (LAN / mDNS). Override when needed:
 
 ```bash
 BEAST_HOST=beast-01-ts robot/beast/ros2_ws/deploy/deploy-to-beast.sh   # Tailscale
-BEAST_HOST=192.168.0.187 robot/beast/ros2_ws/deploy/deploy-to-beast.sh # direct Wi-Fi IP
+BEAST_HOST=beast@192.168.0.187 robot/beast/ros2_ws/deploy/deploy-to-beast.sh # direct Wi-Fi IP
 ```
 
 `deploy-to-beast.sh` drives `$BEAST_HOST` through four steps: fast-forward the

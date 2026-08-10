@@ -50,6 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-humble-tf2-geometry-msgs \
       ros-humble-diagnostic-msgs \
       ros-humble-cv-bridge \
+      ros-humble-depthai-descriptions \
       libeigen3-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -69,7 +70,7 @@ RUN rosdep init 2>/dev/null || true \
  && rosdep update --rosdistro humble \
  && rosdep install --from-paths src --ignore-src -y -r \
       --rosdistro humble \
-      --skip-keys "depthai_ros_driver depthai_descriptions ugv_vision \
+      --skip-keys "depthai_ros_driver ugv_vision \
         nav2_behaviors nav2_costmap_2d nav2_lifecycle_manager \
         nav2_velocity_smoother rosbridge_server rosbridge_library \
         rviz2 joint_state_publisher_gui" \
@@ -108,6 +109,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-humble-tf2-geometry-msgs \
       ros-humble-diagnostic-msgs \
       ros-humble-cv-bridge \
+      ros-humble-depthai-descriptions \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /ws
