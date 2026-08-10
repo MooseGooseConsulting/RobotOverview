@@ -12,7 +12,7 @@
  * spec was already in `assets` as `stock-ups`.
  *
  * Searches assets (including the `specs` JSON, where a lot of the real detail
- * hides), insights, briefings, and asset interfaces.
+ * hides), terminals, sockets, insights, and briefings.
  *
  * Connection: HANGAR_DB_* or HANGAR_DATABASE_URL, resolved by the same code
  * the app uses. Host/db/user fall back to the LAN values published in
@@ -38,8 +38,10 @@ function parseArgs(argv: string[]) {
 
 function resolveClient(): Client {
   const configured = getHangarPoolConfig();
-  if (configured?.source === 'url') {
-    return new Client({ connectionString: configured.poolConfig.connectionString });
+  if (configured) {
+    // Pass through the app's PoolConfig for both url and structured sources so
+    // SSL (HANGAR_DB_SSLMODE) and validated host/db/user are not dropped.
+    return new Client(configured.poolConfig);
   }
 
   const password = process.env.HANGAR_DB_PASSWORD;
@@ -51,10 +53,7 @@ function resolveClient(): Client {
   }
 
   return new Client({
-    host: process.env.HANGAR_DB_HOST || LAN_DEFAULTS.host,
-    port: Number(process.env.HANGAR_DB_PORT) || LAN_DEFAULTS.port,
-    database: process.env.HANGAR_DB_NAME || LAN_DEFAULTS.database,
-    user: process.env.HANGAR_DB_USER || LAN_DEFAULTS.user,
+    ...LAN_DEFAULTS,
     password,
   });
 }
@@ -93,13 +92,17 @@ async function main() {
       'ASSETS',
       (
         await client.query(
-          `select id, kind, name, manufacturer, model, status, summary,
-                  power_volts, power_watts, power_rail, specs, limitations
+          `select id, kind, name, callsign, manufacturer, model, status, summary,
+                  description, power_volts, power_watts, power_rail, specs, limitations
              from assets
             where id ilike $1 or name ilike $1 or summary ilike $1
                or coalesce(description,'') ilike $1
+               or coalesce(callsign,'') ilike $1
                or coalesce(manufacturer,'') ilike $1
                or coalesce(model,'') ilike $1
+               or coalesce(power_rail,'') ilike $1
+               or coalesce(power_volts::text,'') ilike $1
+               or coalesce(power_watts::text,'') ilike $1
                or specs::text ilike $1
             order by id`,
           [like],
@@ -110,17 +113,24 @@ async function main() {
 
     // terminals, not asset_interfaces: the latter is just a join table
     // (asset_id, interface_type_id). Connector-level facts -- voltages, rails,
-    // "3S pack, 9-12.6V @ 2A" -- live here.
+    // "3S pack, 9-12.6V @ 2A" -- live here. Match parent asset fields so a
+    // search for stock-ups / battery also surfaces ups-charge-in rails.
     print(
       'TERMINALS (connectors / rails)',
       (
         await client.query(
-          `select id, asset_id, name, connector, role, note
-             from terminals
-            where id ilike $1 or name ilike $1
-               or coalesce(note,'') ilike $1
-               or coalesce(connector,'') ilike $1
-            order by asset_id, id`,
+          `select t.id, t.asset_id, a.name as asset_name, a.callsign as asset_callsign,
+                  t.name, t.connector, t.role, t.note
+             from terminals t
+             join assets a on a.id = t.asset_id
+            where t.id ilike $1 or t.name ilike $1
+               or coalesce(t.note,'') ilike $1
+               or coalesce(t.connector,'') ilike $1
+               or t.asset_id ilike $1
+               or a.name ilike $1
+               or coalesce(a.callsign,'') ilike $1
+               or coalesce(a.summary,'') ilike $1
+            order by t.asset_id, t.id`,
           [like],
         )
       ).rows,
@@ -137,6 +147,7 @@ async function main() {
             where id::text ilike $1 or name ilike $1
                or coalesce(note,'') ilike $1
                or coalesce(slot_group,'') ilike $1
+               or host_asset_id ilike $1
             order by host_asset_id, id`,
           [like],
         )
@@ -148,11 +159,19 @@ async function main() {
       'INSIGHTS',
       (
         await client.query(
-          `select id, title, confidence, source, captured_at, body
-             from insights
-            where id ilike $1 or title ilike $1 or body ilike $1
-               or coalesce(source,'') ilike $1
-            order by captured_at desc nulls last
+          `select i.id, i.title, i.confidence, i.source, i.captured_at, i.body
+             from insights i
+            where i.id ilike $1 or i.title ilike $1 or i.body ilike $1
+               or coalesce(i.source,'') ilike $1
+               or exists (
+                    select 1 from insight_assets ia
+                     where ia.insight_id = i.id and ia.asset_id ilike $1
+                  )
+               or exists (
+                    select 1 from insight_missions im
+                     where im.insight_id = i.id and im.mission_id ilike $1
+                  )
+            order by i.captured_at desc nulls last
             limit 25`,
           [like],
         )
@@ -164,10 +183,12 @@ async function main() {
       'BRIEFINGS',
       (
         await client.query(
-          `select id, title, kind, summary
+          `select id, title, kind, summary, tags, aliases, body_markdown
              from briefings
             where id ilike $1 or title ilike $1 or coalesce(summary,'') ilike $1
                or body_markdown ilike $1
+               or array_to_string(tags, ' ') ilike $1
+               or array_to_string(aliases, ' ') ilike $1
             order by id
             limit 25`,
           [like],
