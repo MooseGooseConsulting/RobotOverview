@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Copyright 2026 Coldaine
+# SPDX-License-Identifier: Apache-2.0
+#
+# beast-gamepad — start on-robot USB gamepad teleop (priority 150 rung).
+# Requires beast-ros-base (bringup + twist_mux) already running.
+# Plug an Xbox-360-compatible / SHANWAN pad into the Jetson, then run this.
+set -euo pipefail
+
+WS="${BEAST_WS:-/home/beast/beast/RobotOverview/robot/beast/ros2_ws}"
+
+if [ ! -f "$WS/install/setup.bash" ]; then
+  echo "missing $WS/install/setup.bash — deploy the ROS workspace first" >&2
+  exit 1
+fi
+
+# shellcheck disable=SC1091
+source /opt/ros/humble/setup.bash
+# shellcheck disable=SC1091
+source "$WS/install/setup.bash"
+
+if ! systemctl is-active --quiet beast-ros-base; then
+  echo "beast-ros-base is not active — start the base stack before gamepad teleop" >&2
+  exit 1
+fi
+
+if ! ls /dev/input/js* >/dev/null 2>&1; then
+  echo "WARNING: no /dev/input/js* yet — plug the USB gamepad in (joy_node will wait)" >&2
+fi
+
+echo "Starting gamepad teleop → /cmd_vel_joy_robot (mux priority 150)"
+echo "Clear the area. Ctrl+C stops this launch (ESP32 may need an explicit stop)."
+exec ros2 launch ugv_tools teleop_twist_joy.launch.py "$@"

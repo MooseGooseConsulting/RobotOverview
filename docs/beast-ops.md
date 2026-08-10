@@ -7,14 +7,22 @@ re-verify against the live robot before relying on anything stale.
 
 ## Quick connect
 
-**Connectivity 2026-08-10 (live):** Robot is powered and answering SSH on
-LAN. Prefer `ssh beast-01` (mDNS → `192.168.0.187` on `wlP1p1s0`) or
-`ssh beast@192.168.0.187` with the `hephastus_ed25519` key. **Ethernet
-(`enP8p1s0`) is unplugged** (`Link detected: no`). Earlier in the day
-Tailscale *network* was up (`100.107.16.72`) but **Tailscale SSH ACL
-blocked user `beast`** — do not treat `ssh beast-01-ts` as healthy until
-that ACL is fixed. Recommend a **UDM DHCP reservation for `192.168.0.187`**
-so the Wi-Fi lease stops drifting.
+**Connectivity 2026-08-10 (live):** Robot powered. Prefer
+`ssh beast-01-ts` (Tailscale `100.107.16.72`) — **ACL fixed** same day
+(`tag:robot` + user `beast` in `coldaine-homelab` policy; coldaine-homelab
+PR #377). LAN fallback: `ssh beast-01` / `ssh beast@192.168.0.187`
+(`wlP1p1s0`). **Ethernet unplugged.** Still recommend a **UDM DHCP
+reservation for `192.168.0.187`**.
+
+### Drive it right now
+
+| How | Steps |
+|---|---|
+| **Hangar Cockpit** (browser) | Open [https://hangar.moosegoose.xyz/cockpit](https://hangar.moosegoose.xyz/cockpit) while on the tailnet. Bridge: `wss://beast-01.tyrannosaurus-magellanic.ts.net/` (rosbridge via `beast-cockpit.service` + `tailscale serve`). Workstation shortcut: `tools/beast/Open-Beast-Cockpit.url` or `Open-Beast-Cockpit.ps1`. |
+| **USB gamepad on the robot** | Plug an Xbox-360-compatible / SHANWAN pad into the Jetson. On the robot Desktop double-click **BEAST Gamepad Teleop**, or SSH and run `beast-gamepad` (install with `robot/beast/ros2_ws/deploy/bin/install-operator-shortcuts.sh`). That launches `teleop_twist_joy` → `/cmd_vel_joy_robot` (mux priority **150**). **Not started at boot** — plug alone is not enough. |
+| **Keyboard teleop** | SSH: `source` the ROS install, then `ros2 run ugv_tools keyboard_ctrl` → `/cmd_vel_joy_operator` (priority **100**). |
+
+`beast-ros-base` must be active (`allow_motion` true). ESP32 **latches** last velocity — explicit stop / Ctrl+C the teleop launch; do not rely on yanking the pad alone. Detail: [`robot/beast/ros2_ws/docs/teleoperation.md`](../robot/beast/ros2_ws/docs/teleoperation.md).
 
 - **Docker on robot (verified 2026-08-10):** Docker Engine **29.6.1**
   (`docker.service` active). Pull-agent runtime prerequisite is already met.
@@ -41,6 +49,9 @@ so the Wi-Fi lease stops drifting.
   drive path live). Soft **WARN**: ESP32 pack-voltage serial tap empty on one
   verify pass (cross-check skipped); earlier pass had INA219 vs ESP32 delta
   **0.13–0.14 V**. Docker Engine still **29.6.1**; `beast-ros-base` **active**.
+  Later that day RobotOverview PR **#200** merged (image pipeline + these
+  Quick connect notes); robot checkout may still sit at `7481575` until the
+  next `deploy-to-beast.sh` / pull.
 
 **Historical — deliberate run-to-cutoff 2026-08-07 18:19 CDT** (robot has
 since been recharged and is online again as of 2026-08-10):
