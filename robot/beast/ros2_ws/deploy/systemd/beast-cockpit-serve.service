@@ -1,0 +1,22 @@
+# DISABLED BY DEFAULT, ON PURPOSE — same operator decision as beast-cockpit.service.
+#
+# Re-applies Tailscale Serve so Hangar can reach loopback rosbridge:
+#   https://beast-01.<tailnet>.ts.net/  →  http://127.0.0.1:9090
+# Policy must grant tag:robot tcp:443 (coldaine-homelab policy.hujson).
+# Homelab recipe: infra/network/tailscale/beast-01-serve.sh
+
+[Unit]
+Description=BEAST-01 Tailscale Serve for cockpit rosbridge (443 → 127.0.0.1:9090)
+Documentation=file:///home/beast/beast/RobotOverview/robot/beast/ros2_ws/docs/cockpit.md
+After=network-online.target tailscaled.service
+Wants=network-online.target
+Requires=tailscaled.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/tailscale serve --bg --https=443 http://127.0.0.1:9090
+ExecStartPost=/bin/sh -c 'tailscale serve status | grep -q 127.0.0.1:9090'
+
+[Install]
+WantedBy=multi-user.target

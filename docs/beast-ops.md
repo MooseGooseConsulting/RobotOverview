@@ -24,7 +24,7 @@ unplugged.** Still recommend a **UDM DHCP reservation for
 
 | How | Steps |
 |---|---|
-| **Hangar Cockpit** (browser) | Open [https://hangar.moosegoose.xyz/cockpit](https://hangar.moosegoose.xyz/cockpit) while on the tailnet. Bridge: `wss://beast-01.tyrannosaurus-magellanic.ts.net/` (rosbridge via `beast-cockpit.service` + `tailscale serve`). Workstation shortcut: `tools/beast/Open-Beast-Cockpit.url` or `Open-Beast-Cockpit.ps1`. |
+| **Hangar Cockpit** (browser) | Open [https://hangar.moosegoose.xyz/cockpit](https://hangar.moosegoose.xyz/cockpit) while on the tailnet. Bridge: `wss://beast-01.tyrannosaurus-magellanic.ts.net/` (rosbridge via `beast-cockpit.service` + `tailscale serve`). Workstation: `tools/beast/Open-Beast-Cockpit.ps1` (add `-Verify` to smoke-test TCP/WSS first) or `Verify-Beast-Cockpit.ps1`. Live ACL: `doppler run --project homelab --config dev -- pwsh -File scripts/Verify-BeastCockpitAcl.ps1` in coldaine-homelab. |
 | **USB gamepad on the robot** | Plug an Xbox-360-compatible / SHANWAN pad into the Jetson. On the robot Desktop double-click **BEAST Gamepad Teleop**, or SSH and run `beast-gamepad` (install with `robot/beast/ros2_ws/deploy/bin/install-operator-shortcuts.sh`). That launches `teleop_twist_joy` → `/cmd_vel_joy_robot` (mux priority **150**). **Not started at boot** — plug alone is not enough. |
 | **Keyboard teleop** | SSH: `source` the ROS install, then `ros2 run ugv_tools keyboard_ctrl` → `/cmd_vel_joy_operator` (priority **100**). |
 
