@@ -15,9 +15,12 @@ PR #377). **Cockpit WSS follow-up same day:** live ACL grant for
 Hangar connects to `wss://beast-01.tyrannosaurus-magellanic.ts.net/` via
 `tailscale serve` → `127.0.0.1:9090`; narrowing to SSH-only made the
 Command Deck show ROBOT UNREACHABLE while SSH still worked. Re-apply after
-editing `infra/network/tailscale/policy.hujson`. LAN fallback:
-`ssh beast-01` / `ssh beast@192.168.0.187` (`wlP1p1s0`). **Ethernet
-unplugged.** Still recommend a **UDM DHCP reservation for
+editing `infra/network/tailscale/policy.hujson`. **After any ACL apply or
+power cycle, reconnect Serve + smoke-test WSS** with
+`pwsh -File tools/beast/Reconnect-Beast-Cockpit.ps1` (waits for SSH, starts
+cockpit if needed, re-applies `tailscale serve`, runs `Verify-Beast-Cockpit`).
+LAN fallback: `ssh beast-01` / `ssh beast@192.168.0.187` (`wlP1p1s0`).
+**Ethernet unplugged.** Still recommend a **UDM DHCP reservation for
 `192.168.0.187`**.
 
 ### Drive it right now
