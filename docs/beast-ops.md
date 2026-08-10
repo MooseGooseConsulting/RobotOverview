@@ -10,9 +10,15 @@ re-verify against the live robot before relying on anything stale.
 **Connectivity 2026-08-10 (live):** Robot powered. Prefer
 `ssh beast-01-ts` (Tailscale `100.107.16.72`) — **ACL fixed** same day
 (`tag:robot` + user `beast` in `coldaine-homelab` policy; coldaine-homelab
-PR #377). LAN fallback: `ssh beast-01` / `ssh beast@192.168.0.187`
-(`wlP1p1s0`). **Ethernet unplugged.** Still recommend a **UDM DHCP
-reservation for `192.168.0.187`**.
+PR #377). **Cockpit WSS follow-up same day:** live ACL grant for
+`tag:robot` must include **`tcp:443`** (not only `tcp:22`/`icmp`) —
+Hangar connects to `wss://beast-01.tyrannosaurus-magellanic.ts.net/` via
+`tailscale serve` → `127.0.0.1:9090`; narrowing to SSH-only made the
+Command Deck show ROBOT UNREACHABLE while SSH still worked. Re-apply after
+editing `infra/network/tailscale/policy.hujson`. LAN fallback:
+`ssh beast-01` / `ssh beast@192.168.0.187` (`wlP1p1s0`). **Ethernet
+unplugged.** Still recommend a **UDM DHCP reservation for
+`192.168.0.187`**.
 
 ### Drive it right now
 
