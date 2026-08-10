@@ -7,24 +7,38 @@ re-verify against the live robot before relying on anything stale.
 
 ## Quick connect
 
-**ROBOT IS DOWN — deliberate run-to-cutoff 2026-08-07 18:19 CDT.** Charger
-unplugged mid-afternoon and the pack was run flat on purpose to measure the
-real dropout. **It will not answer `ssh` until it is charged and powered back
-on.** (That evening the robot had already been redeployed to the post-#182
-stack — the `beast_power_logger` CSV referenced below exists because of that
-deploy; the "Robot runs `724f975`" line in the paces block below predates it.)
+**Connectivity 2026-08-10 (live):** Robot is powered and answering SSH on
+LAN. Prefer `ssh beast-01` (mDNS → `192.168.0.187` on `wlP1p1s0`) or
+`ssh beast@192.168.0.187` with the `hephastus_ed25519` key. **Ethernet
+(`enP8p1s0`) is unplugged** (`Link detected: no`). Earlier in the day
+Tailscale *network* was up (`100.107.16.72`) but **Tailscale SSH ACL
+blocked user `beast`** — do not treat `ssh beast-01-ts` as healthy until
+that ACL is fixed. Recommend a **UDM DHCP reservation for `192.168.0.187`**
+so the Wi-Fi lease stops drifting.
 
-- **Deploy-blocked until the robot returns (2026-08-08):** the Phase-3
-  integration tier added three more `--verify-only` probes —
-  `beast_power_logger` present in `ros2 node list`, `power-log.csv` line count
-  growing over 6 s, and INA219-vs-ESP32 pack volts agreeing within 0.2 V. All
-  written but NOT robot-verified; exercise on first boot after recharge.
+- **Docker on robot (verified 2026-08-10):** Docker Engine **29.6.1**
+  (`docker.service` active). Pull-agent runtime prerequisite is already met.
+- **Deploy / pull ownership:** Canonical deploy manifests, `install-beast.sh`,
+  `beast-pull`, and `verify-beast` live in
+  `coldaine-homelab/deployments/beast-01/`. This repo still owns the ROS
+  source + `ghcr.io/moosegooseconsulting/beast-ros` image build
+  (`.github/workflows/beast-ros-image.yml`). `deploy-to-beast.sh` remains the
+  manual override / Phase 0 host sync (`BEAST_HOST` defaults to `beast-01`;
+  override to `beast-01-ts` or a raw IP as needed).
+- **Pack voltage (owed — do not invent):** Post-cutoff rested / live pack
+  volts are **not recorded in this block yet**. On the next live session,
+  read `/data/beast/power/power-log.csv` (and/or `/ugv/voltage`) and paste
+  dated numbers here. Historical cutoff analysis from 2026-08-07 is below.
+
+**Historical — deliberate run-to-cutoff 2026-08-07 18:19 CDT** (robot has
+since been recharged and is online again as of 2026-08-10):
 
 - **Cutoff pinned to a last-seen bound: ~8.3 V.** Last telemetry `8.368 V` at
   18:19:18 CDT (23:19:18Z); unreachable 21 s later; Tailscale offline. The
   true trip point is at or just below that last sample — the exact final row
   is on the robot at `/data/beast/power/power-log.csv` (fsynced per row) —
-  **read it on next boot** to pin the number precisely.
+  **still owed: re-read on a live session** to pin the number precisely and
+  record post-cutoff rested voltage.
 - **The inherited 9.0 V "0 %" is wrong as a hard floor — pessimistically so.**
   The robot ran a further **6 minutes and 0.7 V** below it. `soc.py`'s
   `PACK_EMPTY_V = 9.0` is a generic 3S table value, not this pack. (It remains
@@ -42,10 +56,6 @@ deploy; the "Robot runs `724f975`" line in the paces block below predates it.)
   record: 3× Molicel P30B, 3.0 Ah, 30 A continuous, verified from the purchase
   record 2026-07-24 (`src/components/datacore/beast-console/power-data.ts`) —
   ≈33 Wh nominal.
-  **To confirm:** if the pack needed charger voltage applied before it would
-  power on again, that is consistent with a latching protection board (an
-  exhausted high-resistance pack can look similar — treat as indicative, not
-  proof).
 - **Discharge rate accelerated over the run** (voltage is shunt-independent,
   so these are trustworthy; the charger-connected row is listed for context
   but is NOT comparable — the charger was carrying the load):
@@ -91,16 +101,9 @@ deploy; the "Robot runs `724f975`" line in the paces block below predates it.)
 - **Recommended: two thresholds, not one.** Operational 0 % / auto-shutdown at
   ~9.6 V (3.2 V/cell) leaves ~12 min of runtime and protects the cells; ~8.3 V
   is the measured hard-dead point, not a target.
-- **Recovery does NOT need the charger fix** (predicted, unverified until the next
-  boot). With the pack at ~8.3 V, the ~12.08 V charger has ~3.8 V of headroom and
-  should charge it back to roughly 80 % (it only falls short of the 12.6 V needed
-  for a *full* charge) — the pack already recovered from ~9.4 V to ~12.1 V on the
-  charger overnight 2026-08-06→07 (CSV rows to 06:46Z), but recovery from *this*
-  8.3 V cutoff has not been observed: the robot is still down. Plug in and power
-  on, then record the post-cutoff rested voltage. What stays blocked until the
-  ~12.08 V-at-the-pack finding is
-  resolved (multimeter at the barrel jack) is a **full**-charge-to-empty
-  capacity run — this run measured only the dropout anchor, not capacity.
+- **Recovery note (2026-08-07 prediction):** With the pack at ~8.3 V, the
+  ~12.08 V charger has ~3.8 V of headroom. **Live post-cutoff rested voltage
+  still owed** (placeholder above) — do not invent a number here.
 
 **Deploy + first drive paces 2026-08-07 (live, on battery, untethered):**
 

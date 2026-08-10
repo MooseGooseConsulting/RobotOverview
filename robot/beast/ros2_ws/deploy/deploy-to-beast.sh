@@ -9,7 +9,8 @@
 #   robot/beast/ros2_ws/deploy/deploy-to-beast.sh [ref] [--packages "p1 p2"]
 #   robot/beast/ros2_ws/deploy/deploy-to-beast.sh --verify-only
 #
-# What a full run does, over `ssh beast-01-ts` (Tailscale — stable; LAN IPs drift):
+# What a full run does, over SSH to $BEAST_HOST (default beast-01 / LAN mDNS;
+# override e.g. BEAST_HOST=beast-01-ts for Tailscale, or a direct Wi-Fi IP):
 #   1. fetch + fast-forward the on-robot checkout to <ref> (default origin/main);
 #      refuses to touch a dirty tree.
 #   2. colcon build --symlink-install the affected packages
@@ -19,6 +20,10 @@
 #      restart beast-ros-base and try-restart beast-cockpit (one sudo prompt).
 #   4. verify the live graph (see --verify-only below) and print a dated
 #      evidence block to paste into docs/beast-ops.md "Quick connect".
+#
+# Canonical pull deploy lives in coldaine-homelab/deployments/beast-01/
+# (install-beast.sh + beast-pull). This script is the manual override / Phase 0
+# source-sync path.
 #
 # --verify-only runs only step 4 (no sudo, read-only). Use it any time to
 # detect drift between the repo and the robot — the checks below encode the
@@ -56,7 +61,8 @@
 
 set -euo pipefail
 
-HOST="${BEAST_HOST:-beast-01-ts}"
+# Default LAN/mDNS. Override: BEAST_HOST=beast-01-ts or BEAST_HOST=192.168.0.187
+HOST="${BEAST_HOST:-beast-01}"
 REPO_DIR="/home/beast/beast/RobotOverview"
 WS_DIR="$REPO_DIR/robot/beast/ros2_ws"
 PACKAGES="beast_power beast_base ugv_bringup ugv_cockpit"
