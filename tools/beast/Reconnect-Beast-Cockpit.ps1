@@ -29,6 +29,7 @@ $ErrorActionPreference = 'Stop'
 $candidates = @(
     $(if ($HostName) { $HostName } else { $null })
     'beast-01-ts'
+    'beast@192.168.0.166'
     'beast@192.168.0.187'
     'beast-01'
 ) | Where-Object { $_ } | Select-Object -Unique

@@ -1,0 +1,49 @@
+#!/bin/bash
+# beast-link-watch — recover underlay + Tailscale if the link dies.
+# Runs every 60s via beast-link-watch.timer. Logs to journald.
+# Runs as root via systemd — no sudoers needed.
+# Installed 2026-08-10 after the cockpit outage (RTC clock race + Wi-Fi drop).
+set -euo pipefail
+
+WIFI_SSID="CastleMooseGoose"
+LOG_TAG="beast-link-watch"
+
+log() { logger -t "$LOG_TAG" -- "$*"; }
+
+# 1. Check if ANY default route has a reachable gateway.
+# Don't re-up Wi-Fi if Ethernet (or any other route) is working.
+gateway_reachable() {
+  local gw
+  gw=$(ip route show default 2>/dev/null | awk '/default/ {print $3; exit}')
+  if [ -z "$gw" ]; then return 1; fi
+  ping -c 1 -W 2 "$gw" >/dev/null 2>&1
+}
+
+if ! gateway_reachable; then
+  log "no reachable default route — re-uping $WIFI_SSID"
+  nmcli connection up "$WIFI_SSID" 2>&1 | logger -t "$LOG_TAG" || true
+  sleep 5
+  if ! gateway_reachable; then
+    log "still no reachable route — restarting NetworkManager"
+    systemctl try-restart NetworkManager 2>&1 | logger -t "$LOG_TAG" || true
+    sleep 10
+  fi
+  if gateway_reachable; then
+    log "underlay recovered"
+  else
+    log "underlay still down after NM restart"
+  fi
+fi
+
+# 2. Check Tailscale — only restart if we can CONFIRM it's offline.
+# Don't restart on "unknown" (transient status failure / daemon not responding).
+if gateway_reachable; then
+  TS_STATE=$(tailscale status --json 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("Self",{}).get("Online",False))' 2>/dev/null || echo "unknown")
+  if [ "$TS_STATE" = "False" ]; then
+    log "underlay up but Tailscale confirmed offline — restarting tailscaled"
+    systemctl try-restart tailscaled 2>&1 | logger -t "$LOG_TAG" || true
+    sleep 5
+  fi
+fi
+
+exit 0
