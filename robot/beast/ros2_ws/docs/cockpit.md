@@ -244,11 +244,13 @@ colcon build --packages-select ugv_bringup ugv_cockpit --symlink-install
 `ugv_bringup` is in that list because the cockpit's arming display depends on the two
 topics it now publishes — see [Safety state](#safety-state-the-cockpit-gates-on) below.
 
-### 2. Install the unit (still not enabled)
+### 2. Install the units (still not enabled)
 
 ```bash
 sudo install -D -m 0644 deploy/systemd/beast-cockpit.service \
   /etc/systemd/system/beast-cockpit.service
+sudo install -D -m 0644 deploy/systemd/beast-cockpit-serve.service \
+  /etc/systemd/system/beast-cockpit-serve.service
 sudo systemctl daemon-reload
 ```
 
@@ -258,11 +260,23 @@ The bridge binds `127.0.0.1:9090` and nothing else. `tailscale serve` terminates
 and is the **only** thing that fronts it:
 
 ```bash
+# Preferred (canonical recipe in coldaine-homelab):
+sudo sh infra/network/tailscale/beast-01-serve.sh
+# Equivalent one-liner:
 sudo tailscale serve --bg --https=443 http://127.0.0.1:9090
-sudo tailscale serve status
+tailscale serve status
 ```
 
 The cockpit then connects to `wss://beast-01.<tailnet>.ts.net/`.
+
+**ACL:** `tag:robot` must grant **`tcp:443`** (plus SSH/ICMP) from operator
+principals. SSH-only grants leave `ssh beast-01-ts` healthy while Hangar shows
+ROBOT UNREACHABLE. Verify from a workstation on the tailnet:
+
+```powershell
+doppler run --project homelab --config dev -- pwsh -File scripts/Verify-BeastCockpitAcl.ps1
+pwsh -File tools/beast/Verify-Beast-Cockpit.ps1
+```
 
 !!! note "No firewall hole is needed"
     Port 9090 is bound to loopback, so it is unreachable from the LAN and from the
@@ -275,13 +289,16 @@ The cockpit then connects to `wss://beast-01.<tailnet>.ts.net/`.
 
 ```bash
 sudo systemctl start beast-cockpit.service           # this session only
-sudo systemctl enable --now beast-cockpit.service    # every boot — think first
-sudo systemctl disable --now beast-cockpit.service   # close it again
+sudo systemctl enable --now beast-cockpit.service   # every boot — a decision
+# Serve oneshot uses RemainAfterExit — use restart to re-apply after ACL wipe
+sudo systemctl restart beast-cockpit-serve.service
+sudo systemctl enable --now beast-cockpit-serve.service  # optional, with cockpit
+sudo systemctl disable --now beast-cockpit.service  # close it again
 ```
 
-Leaving it enabled means the robot boots with a control socket listening. That is a
-reasonable choice for a robot that lives behind a tailnet; it is a choice, and it
-should be made on purpose.
+Leaving cockpit (+ serve) enabled means the robot boots with a control socket
+listening behind Tailscale Serve. That is a reasonable choice for a robot that
+lives behind a tailnet; it is a choice, and it should be made on purpose.
 
 ---
 

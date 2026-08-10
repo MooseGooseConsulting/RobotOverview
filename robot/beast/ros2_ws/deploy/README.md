@@ -33,6 +33,24 @@ robot/beast/ros2_ws/deploy/deploy-to-beast.sh            # deploy origin/main
 robot/beast/ros2_ws/deploy/deploy-to-beast.sh --verify-only   # drift check, read-only
 ```
 
+## Operator shortcuts (cockpit + gamepad)
+
+| Shortcut | Where | What |
+|---|---|---|
+| `tools/beast/Open-Beast-Cockpit.url` / `.ps1` | Workstation | Opens [https://hangar.moosegoose.xyz/cockpit](https://hangar.moosegoose.xyz/cockpit) |
+| `deploy/bin/beast-gamepad` | Robot (`/usr/local/bin` after install) | Launches USB gamepad teleop |
+| `deploy/desktop/beast-gamepad.desktop` | Robot `~/Desktop` after install | Double-click gamepad teleop |
+
+Install on the robot (Tailscale or LAN):
+
+```bash
+BEAST_HOST=beast-01-ts robot/beast/ros2_ws/deploy/bin/install-operator-shortcuts.sh
+```
+
+Gamepad is **not** part of `beast-ros-base` boot — plug the pad, then run the
+shortcut. Cockpit needs `beast-cockpit.service` active (it is on the live
+robot as of 2026-08-10).
+
 ### Host selection
 
 Default `BEAST_HOST` is `beast-01` (LAN / mDNS). Override when needed:

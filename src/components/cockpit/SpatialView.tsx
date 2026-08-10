@@ -199,7 +199,7 @@ export function SpatialView() {
             <span className="font-mono text-[10px] text-ink-dim max-w-[220px]">
               {scan.hasReceived
                 ? 'No /scan message inside the freshness window — points shown are the last received.'
-                : '/scan has published nothing since connect. The boot service runs use_lidar:=false.'}
+                : '/scan has published nothing since connect. Check beast-ros-base (use_lidar:=true), LD19 USB, and rosbridge topic allowlist.'}
             </span>
           </div>
         )}

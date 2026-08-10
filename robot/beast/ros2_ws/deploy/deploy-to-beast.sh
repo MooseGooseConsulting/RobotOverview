@@ -149,6 +149,20 @@ for svc in beast-ros-base beast-cockpit; do
     warn "$svc inactive (operator-disabled)"
   elif [ "$svc_state" = active ]; then
     ok "$svc active"
+    if [ "$svc" = beast-cockpit ]; then
+      # Bridge path: rosbridge loopback + Tailscale Serve (Hangar WSS on :443).
+      if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qx '127.0.0.1:9090'; then
+        ok "rosbridge listening on 127.0.0.1:9090"
+      else
+        bad "beast-cockpit active but nothing on 127.0.0.1:9090"
+      fi
+      serve_status="$(tailscale serve status 2>/dev/null || true)"
+      if printf '%s\n' "$serve_status" | grep -q '127.0.0.1:9090'; then
+        ok "tailscale serve fronts 127.0.0.1:9090"
+      else
+        bad "tailscale serve does not front 127.0.0.1:9090 (run beast-01-serve.sh)"
+      fi
+    fi
   else
     bad "$svc ${svc_state:-not active}"
   fi
@@ -381,10 +395,13 @@ ssh "${ssh_opts[@]}" "$HOST" "bash -lc 'cd \"$WS_DIR\" \
   && source /opt/ros/humble/setup.bash \
   && colcon build --packages-select $PACKAGES --symlink-install'"
 
-say "3/4 install storage/systemd units + restart"
+say "3/4 install storage/systemd/sudoers + restart"
 # One ssh session so a single sudo timestamp covers install, reload, restart.
+# After install-beast-sudoers.sh lands, later agent/ops SSH can use sudo -n for
+# the allowlisted beast-* / tailscale serve commands (Doppler becomes break-glass).
 remote_privileged="sudo install -m 0644 '$WS_DIR'/deploy/systemd/*.service /etc/systemd/system/ \
   && sudo install -m 0644 '$WS_DIR'/deploy/systemd/*.timer /etc/systemd/system/ \
+  && sudo bash '$WS_DIR'/deploy/bin/install-beast-sudoers.sh \
   && sudo '$WS_DIR'/deploy/storage/install.sh --apply \
   && sudo systemctl daemon-reload \
   && sudo systemctl restart beast-ros-base \

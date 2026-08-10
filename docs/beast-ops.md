@@ -7,14 +7,42 @@ re-verify against the live robot before relying on anything stale.
 
 ## Quick connect
 
-**Connectivity 2026-08-10 (live):** Robot is powered and answering SSH on
-LAN. Prefer `ssh beast-01` (mDNS → `192.168.0.187` on `wlP1p1s0`) or
-`ssh beast@192.168.0.187` with the `hephastus_ed25519` key. **Ethernet
-(`enP8p1s0`) is unplugged** (`Link detected: no`). Earlier in the day
-Tailscale *network* was up (`100.107.16.72`) but **Tailscale SSH ACL
-blocked user `beast`** — do not treat `ssh beast-01-ts` as healthy until
-that ACL is fixed. Recommend a **UDM DHCP reservation for `192.168.0.187`**
-so the Wi-Fi lease stops drifting.
+**Connectivity 2026-08-10 (live):** Robot powered. Prefer
+`ssh beast-01-ts` (Tailscale `100.107.16.72`) — **ACL fixed** same day
+(`tag:robot` + user `beast` in `coldaine-homelab` policy; coldaine-homelab
+PR #377). **Cockpit WSS follow-up same day:** live ACL grant for
+`tag:robot` must include **`tcp:443`** (not only `tcp:22`/`icmp`) —
+Hangar connects to `wss://beast-01.tyrannosaurus-magellanic.ts.net/` via
+`tailscale serve` → `127.0.0.1:9090`; narrowing to SSH-only made the
+Command Deck show ROBOT UNREACHABLE while SSH still worked. Re-apply after
+editing `infra/network/tailscale/policy.hujson`. **After any ACL apply or
+power cycle, reconnect Serve + smoke-test WSS** with
+`pwsh -File tools/beast/Reconnect-Beast-Cockpit.ps1` (waits for SSH, starts
+cockpit if needed, re-applies `tailscale serve`, runs `Verify-Beast-Cockpit`).
+LAN fallback: `ssh beast-01` / `ssh beast@192.168.0.187` (`wlP1p1s0`).
+**Ethernet unplugged.** Still recommend a **UDM DHCP reservation for
+`192.168.0.187`**.
+
+**Passwordless ops sudo (2026-08-10):** User `beast` has a scoped
+`/etc/sudoers.d/beast-ops` allowlist (not `NOPASSWD:ALL`) for
+`systemctl` on `beast-*` units, `daemon-reload`, and `tailscale serve`.
+Gate: `ssh beast-01-ts 'sudo -n systemctl is-active beast-cockpit && sudo -n tailscale serve status'`.
+Installed by `robot/beast/ros2_ws/deploy/bin/install-beast-sudoers.sh`
+(also wired into `deploy-to-beast.sh` step 3). Doppler
+`BEAST_JETSON_ADMIN_PASSWORD` is **break-glass / bootstrap only** —
+routine reconnect/verify should need SSH key alone. Persist Serve across
+reboot with `sudo -n systemctl enable --now beast-cockpit-serve` (same
+deliberate operator decision as enabling `beast-cockpit`).
+
+### Drive it right now
+
+| How | Steps |
+|---|---|
+| **Hangar Cockpit** (browser) | Open [https://hangar.moosegoose.xyz/cockpit](https://hangar.moosegoose.xyz/cockpit) while on the tailnet. Bridge: `wss://beast-01.tyrannosaurus-magellanic.ts.net/` (rosbridge via `beast-cockpit.service` + `tailscale serve`). Workstation: `tools/beast/Open-Beast-Cockpit.ps1` (add `-Verify` to smoke-test TCP/WSS first) or `Verify-Beast-Cockpit.ps1`. Live ACL: `doppler run --project homelab --config dev -- pwsh -File scripts/Verify-BeastCockpitAcl.ps1` in coldaine-homelab. |
+| **USB gamepad on the robot** | Plug an Xbox-360-compatible / SHANWAN pad into the Jetson. On the robot Desktop double-click **BEAST Gamepad Teleop**, or SSH and run `beast-gamepad` (install with `robot/beast/ros2_ws/deploy/bin/install-operator-shortcuts.sh`). That launches `teleop_twist_joy` → `/cmd_vel_joy_robot` (mux priority **150**). **Not started at boot** — plug alone is not enough. |
+| **Keyboard teleop** | SSH: `source` the ROS install, then `ros2 run ugv_tools keyboard_ctrl` → `/cmd_vel_joy_operator` (priority **100**). |
+
+`beast-ros-base` must be active (`allow_motion` true). ESP32 **latches** last velocity — **center the sticks** (or publish an explicit zero) before ending teleop; do not treat Ctrl+C or unplugging the pad as a stop. `beast-gamepad` sends a zero on exit as a backstop. Detail: [`robot/beast/ros2_ws/docs/teleoperation.md`](../robot/beast/ros2_ws/docs/teleoperation.md).
 
 - **Docker on robot (verified 2026-08-10):** Docker Engine **29.6.1**
   (`docker.service` active). Pull-agent runtime prerequisite is already met.
@@ -41,6 +69,9 @@ so the Wi-Fi lease stops drifting.
   drive path live). Soft **WARN**: ESP32 pack-voltage serial tap empty on one
   verify pass (cross-check skipped); earlier pass had INA219 vs ESP32 delta
   **0.13–0.14 V**. Docker Engine still **29.6.1**; `beast-ros-base` **active**.
+  Later that day RobotOverview PR **#200** merged (image pipeline + these
+  Quick connect notes); robot checkout may still sit at `7481575` until the
+  next `deploy-to-beast.sh` / pull.
 
 **Historical — deliberate run-to-cutoff 2026-08-07 18:19 CDT** (robot has
 since been recharged and is online again as of 2026-08-10):
@@ -420,7 +451,7 @@ Do not copy their values into this repository, shell history, or chat.
 |---|---|---|
 | Routine SSH from this workstation | `BEAST_JETSON_OPERATOR_SSH_PUBLIC_KEY_DESKTOP` | Matching public half for local `~/.ssh/hephastus_ed25519`; this is the key that authenticated successfully |
 | Alternate operator key | `BEAST_JETSON_OPERATOR_SSH_PUBLIC_KEY` | Separate operator-key record; it is not this workstation's key, and its installation was not needed for this verification |
-| `sudo` and recovery login | `BEAST_JETSON_ADMIN_PASSWORD` | Current password for the Jetson `beast` account; reset and live-verified 2026-08-02; not needed for key-only SSH |
+| `sudo` and recovery login | `BEAST_JETSON_ADMIN_PASSWORD` | Break-glass / bootstrap for the Jetson `beast` account (reset 2026-08-02). Routine `beast-*` / Serve ops use `/etc/sudoers.d/beast-ops` with SSH key only — do not pipe this password for those commands |
 | Current Wi-Fi association | `CASTLEMOOSEGOOSE_WIFI_PSK` | PSK for the live `CastleMooseGoose` SSID |
 | Tailnet administration/re-enrollment | `TAILSCALE_API_TOKEN` | Not needed for routine `ssh beast-01-ts`; only for Tailscale API or re-enrollment work |
 | Existing Beast access record | `BEAST_JETSON_SSH_ACCESS` | Connection and credential-name reference; not needed by the verified key-based paths |

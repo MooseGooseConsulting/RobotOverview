@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=BEAST Gamepad Teleop
+Comment=USB gamepad drive for BEAST-01 (requires beast-ros-base)
+Exec=gnome-terminal --title=BEAST-Gamepad -- /usr/local/bin/beast-gamepad
+Icon=input-gaming
+Terminal=false
+Categories=Robotics;Utility;
+StartupNotify=true
