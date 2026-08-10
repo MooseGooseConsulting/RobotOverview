@@ -25,20 +25,31 @@ so the Wi-Fi lease stops drifting.
   (`.github/workflows/beast-ros-image.yml`). `deploy-to-beast.sh` remains the
   manual override / Phase 0 host sync (`BEAST_HOST` defaults to `beast-01`;
   override to `beast-01-ts` or a raw IP as needed).
-- **Pack voltage (owed — do not invent):** Post-cutoff rested / live pack
-  volts are **not recorded in this block yet**. On the next live session,
-  read `/data/beast/power/power-log.csv` (and/or `/ugv/voltage`) and paste
-  dated numbers here. Historical cutoff analysis from 2026-08-07 is below.
+- **Pack voltage (verified 2026-08-10 ~11:15 CDT, LAN `beast-01`):** Live
+  `/data/beast/power/power-log.csv` rows at **12.232 V** then **12.228 V**
+  (UTC 16:15:06–07Z). Concurrent `/ugv/voltage` samples during deploy verify
+  were **12.220–12.232 V**. INA219 bus register (i2c-7 `0x41` reg `0x02`,
+  byte-swapped, 4 mV/LSB after `>>3`) decoded **12.212 V** earlier in the
+  same session — agrees with the logger within ~20 mV.
+- **Phase 0 deploy (verified 2026-08-10):** `deploy-to-beast.sh` with
+  `BEAST_HOST=beast-01`. Pre-sync robot HEAD was
+  `4644ac1` on deleted branch `beast/power-logger-node` (diverged; clean tree).
+  Checked out `main` @ **`7481575`** (`Merge pull request #199 …`), colcon
+  built `beast_power beast_base ugv_bringup ugv_cockpit`, systemd/storage
+  install + `beast-ros-base` restart. Post-deploy `--verify-only`: **all PASS**
+  (beast_power + logger in graph, sole `/ugv/voltage` publisher, log growing,
+  drive path live). Soft **WARN**: ESP32 pack-voltage serial tap empty on one
+  verify pass (cross-check skipped); earlier pass had INA219 vs ESP32 delta
+  **0.13–0.14 V**. Docker Engine still **29.6.1**; `beast-ros-base` **active**.
 
 **Historical — deliberate run-to-cutoff 2026-08-07 18:19 CDT** (robot has
 since been recharged and is online again as of 2026-08-10):
 
-- **Cutoff pinned to a last-seen bound: ~8.3 V.** Last telemetry `8.368 V` at
-  18:19:18 CDT (23:19:18Z); unreachable 21 s later; Tailscale offline. The
-  true trip point is at or just below that last sample — the exact final row
-  is on the robot at `/data/beast/power/power-log.csv` (fsynced per row) —
-  **still owed: re-read on a live session** to pin the number precisely and
-  record post-cutoff rested voltage.
+- **Cutoff pinned from on-robot CSV (re-read 2026-08-10):** minimum row
+  **`8.332 V`** at `2026-08-07T23:19:19.317Z`; last sub-9 V sample
+  **`8.348 V`** at `2026-08-07T23:19:21.318Z` in `/data/beast/power/power-log.csv`.
+  Earlier notes cited `8.368 V` at 18:19:18 CDT as a last-seen bound — the
+  fsynced file goes ~0.036 V lower. True trip is at or just below **8.332 V**.
 - **The inherited 9.0 V "0 %" is wrong as a hard floor — pessimistically so.**
   The robot ran a further **6 minutes and 0.7 V** below it. `soc.py`'s
   `PACK_EMPTY_V = 9.0` is a generic 3S table value, not this pack. (It remains

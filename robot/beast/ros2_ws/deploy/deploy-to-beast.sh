@@ -153,7 +153,16 @@ for svc in beast-ros-base beast-cockpit; do
   fi
 done
 
-nodes="$(ros2 node list 2>/dev/null || true)"
+# Graph discovery is racy right after daemon stop (UDP participant join).
+# Retry briefly before FAIL so functional checks are not false-negatives.
+nodes=""
+for _try in 1 2 3 4 5 6 7 8 9 10; do
+  nodes="$(ros2 node list 2>/dev/null || true)"
+  echo "$nodes" | grep -qx '/beast_power' \
+    && echo "$nodes" | grep -qx '/beast_power_logger' \
+    && break
+  sleep 1
+done
 echo "$nodes" | grep -qx '/beast_power' \
   && ok "beast_power running" || bad "beast_power not in node graph"
 echo "$nodes" | grep -qx '/ugv_safety_monitor' \
@@ -163,7 +172,12 @@ echo "$nodes" | grep -qx '/beast_power_logger' \
   && ok "beast_power_logger running" \
   || bad "beast_power_logger not in node graph (power CSV not being recorded)"
 
-vpubs="$(ros2 topic info /ugv/voltage 2>/dev/null | awk '/Publisher count/ {print $3}')"
+vpubs=""
+for _try in 1 2 3 4 5 6 7 8 9 10; do
+  vpubs="$(ros2 topic info /ugv/voltage 2>/dev/null | awk '/Publisher count/ {print $3}')"
+  [ "$vpubs" = "1" ] && break
+  sleep 1
+done
 [ "$vpubs" = "1" ] && ok "/ugv/voltage has exactly 1 publisher" \
   || bad "/ugv/voltage publisher count = ${vpubs:-unknown}"
 vowner="$(ros2 topic info /ugv/voltage -v 2>/dev/null | awk '/Node name/ {print $3; exit}')"
