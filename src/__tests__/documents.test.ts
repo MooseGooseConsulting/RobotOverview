@@ -7,6 +7,7 @@ import {
   resolveDocumentUrl,
   stripLibraryPrefix,
 } from '@/lib/documents';
+import { normalizeLibraryObjectKey } from '@/server/hangar/library';
 
 function doc(partial: Partial<DocumentRef> & Pick<DocumentRef, 'libraryPath'>): DocumentRef {
   return {
@@ -98,5 +99,31 @@ describe('groupDocumentsBySubsystem', () => {
     ]);
     // both fall back to order 999 (no numeric prefix) — key breaks the tie
     expect(groups.map((g) => g.subsystem.key)).toEqual(['aaa-unrecognized', 'zzz-unrecognized']);
+  });
+});
+
+describe('normalizeLibraryObjectKey', () => {
+  it('accepts catalog subsystem keys', () => {
+    expect(normalizeLibraryObjectKey(['05-Chassis-CAD', 'UGV_Beast_PT_AI_Kit_STEP.zip'])).toBe(
+      '05-Chassis-CAD/UGV_Beast_PT_AI_Kit_STEP.zip',
+    );
+  });
+
+  it('strips an accidental beast/ prefix', () => {
+    expect(normalizeLibraryObjectKey(['beast', '02-Driver-Board', 'x.pdf'])).toBe(
+      '02-Driver-Board/x.pdf',
+    );
+  });
+
+  it('rejects path traversal and unknown roots', () => {
+    expect(normalizeLibraryObjectKey(['05-Chassis-CAD', '..', 'secret'])).toBeNull();
+    expect(normalizeLibraryObjectKey(['not-a-subsystem', 'x.pdf'])).toBeNull();
+    expect(normalizeLibraryObjectKey([])).toBeNull();
+  });
+
+  it('decodes URI components', () => {
+    expect(normalizeLibraryObjectKey(['05-Chassis-CAD', 'UGV%20Beast.step'])).toBe(
+      '05-Chassis-CAD/UGV Beast.step',
+    );
   });
 });

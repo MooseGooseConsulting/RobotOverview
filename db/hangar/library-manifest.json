@@ -1,0 +1,251 @@
+{
+  "generatedAt": "2026-08-10T14:37:46.690Z",
+  "bucket": "hangar-library",
+  "catalogUploaded": 16,
+  "catalogTotal": 16,
+  "entries": [
+    {
+      "docId": "doc-gdb-schematic",
+      "objectKey": "02-Driver-Board/General_Driver_for_Robots_Schematic.pdf",
+      "status": "uploaded",
+      "expectedSha256": "dab698578c1b75bdf72a5ade4bada2d9f5a5da54f37737e1f41b0b2c59b9ce8a",
+      "downloadUrl": "https://files.waveshare.com/upload/3/37/General_Driver_for_Robots.pdf",
+      "bytes": 1008991,
+      "sha256": "dab698578c1b75bdf72a5ade4bada2d9f5a5da54f37737e1f41b0b2c59b9ce8a",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-library-staging\\02-Driver-Board\\General_Driver_for_Robots_Schematic.pdf",
+      "uploadedAt": "2026-08-10T14:37:42.462Z"
+    },
+    {
+      "docId": "doc-gdb-step",
+      "objectKey": "02-Driver-Board/General_Driver_for_Robots_STEP.zip",
+      "status": "uploaded",
+      "expectedSha256": "51e402703c5429a1068817a290a3078b994aecf87125f741ce0331ff1549eec8",
+      "downloadUrl": "https://files.waveshare.com/upload/8/8e/General_Driver_for_Robots_STEP.zip",
+      "bytes": 1098032,
+      "sha256": "51e402703c5429a1068817a290a3078b994aecf87125f741ce0331ff1549eec8",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-library-staging\\02-Driver-Board\\General_Driver_for_Robots_STEP.zip",
+      "uploadedAt": "2026-08-10T14:37:42.612Z"
+    },
+    {
+      "docId": "doc-ups-schematic",
+      "objectKey": "03-Power-UPS/Ups01_Schematic.pdf",
+      "status": "uploaded",
+      "expectedSha256": "ea654047e0c8ae1b8128ecf878ae69e976646ea504c1e6619432751eb452a3b2",
+      "downloadUrl": "https://www.waveshare.com/w/upload/5/53/Ups01.pdf",
+      "bytes": 1352928,
+      "sha256": "ea654047e0c8ae1b8128ecf878ae69e976646ea504c1e6619432751eb452a3b2",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-library-staging\\03-Power-UPS\\Ups01_Schematic.pdf",
+      "uploadedAt": "2026-08-10T14:37:42.766Z"
+    },
+    {
+      "docId": "doc-ups-code",
+      "objectKey": "03-Power-UPS/UPS_Module_3S_Code.zip",
+      "status": "uploaded",
+      "expectedSha256": "734edc42fc017c8128235a5240d9239344f465ef0f52810db93d1b658e7a9d4e",
+      "downloadUrl": "https://files.waveshare.com/upload/e/ea/UPS_Module_3S_Code.zip",
+      "bytes": 23084509,
+      "sha256": "734edc42fc017c8128235a5240d9239344f465ef0f52810db93d1b658e7a9d4e",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-library-staging\\03-Power-UPS\\UPS_Module_3S_Code.zip",
+      "uploadedAt": "2026-08-10T14:37:43.468Z"
+    },
+    {
+      "docId": "doc-st3215-manual",
+      "objectKey": "04-Servos/ST3215_Servo_User_Manual.pdf",
+      "status": "uploaded",
+      "expectedSha256": "f37f43544e674e5eaf87c5a134f575fb37d207f2269f6e8c60328d9a82918d49",
+      "downloadUrl": "https://files.waveshare.com/upload/f/f4/ST3215_Servo_User_Manual.pdf",
+      "bytes": 1606210,
+      "sha256": "f37f43544e674e5eaf87c5a134f575fb37d207f2269f6e8c60328d9a82918d49",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-library-staging\\04-Servos\\ST3215_Servo_User_Manual.pdf",
+      "uploadedAt": "2026-08-10T14:37:43.595Z"
+    },
+    {
+      "docId": "doc-st-protocol",
+      "objectKey": "04-Servos/ST_Servo_Communication_Protocol_Manual.pdf",
+      "status": "uploaded",
+      "expectedSha256": "3bf67ac6e28ac37e98a083ce1c32201801123b065d01632350c54fd1d184af5a",
+      "downloadUrl": "https://files.waveshare.com/upload/2/27/Communication_Protocol_User_Manual-EN%28191218-0923%29.pdf",
+      "bytes": 332610,
+      "sha256": "3bf67ac6e28ac37e98a083ce1c32201801123b065d01632350c54fd1d184af5a",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-library-staging\\04-Servos\\ST_Servo_Communication_Protocol_Manual.pdf",
+      "uploadedAt": "2026-08-10T14:37:43.675Z"
+    },
+    {
+      "docId": "doc-st-circuit",
+      "objectKey": "04-Servos/ST_Bus_Servo_Control_Circuit.pdf",
+      "status": "uploaded",
+      "expectedSha256": "2d732e7bbaa7fb0ca70da324030b41f50ec39033dba2cfa35234e2be323bcbf4",
+      "downloadUrl": "https://files.waveshare.com/upload/d/d3/Bus_servo_control_circuit.pdf",
+      "bytes": 141892,
+      "sha256": "2d732e7bbaa7fb0ca70da324030b41f50ec39033dba2cfa35234e2be323bcbf4",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-library-staging\\04-Servos\\ST_Bus_Servo_Control_Circuit.pdf",
+      "uploadedAt": "2026-08-10T14:37:43.749Z"
+    },
+    {
+      "docId": "doc-beast-cad",
+      "objectKey": "05-Chassis-CAD/UGV_Beast_PT_AI_Kit_STEP.zip",
+      "status": "uploaded",
+      "expectedSha256": "bf649936f7663c7e4520fe4e45aa02d0b5ae588e5c200229a1f2cbfdcd9b7631",
+      "downloadUrl": "https://files.waveshare.com/wiki/UGV-Beast/UGV_Beast_PT_AI_Kit_step.zip",
+      "bytes": 12303971,
+      "sha256": "bf649936f7663c7e4520fe4e45aa02d0b5ae588e5c200229a1f2cbfdcd9b7631",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-cad-lfs\\assets\\hardware\\pi\\UGV_Beast_PT_AI_Kit_step.zip",
+      "uploadedAt": "2026-08-10T14:37:44.031Z"
+    },
+    {
+      "docId": "doc-orin-3d",
+      "objectKey": "06-Jetson-Orin/UGV_Beast_PT_Jetson_Orin_3D.zip",
+      "status": "uploaded",
+      "expectedSha256": "56615c77a93b90b760e6e2277de55ff36fe8ff610f77d2fedb197ca0d6f879b4",
+      "downloadUrl": "https://files.waveshare.com/wiki/UGV-Beast-PT-Jetson-Orin-AI-Kit/UGV_Beast_PT_Jetson_Orin-3D.zip",
+      "bytes": 15378700,
+      "sha256": "56615c77a93b90b760e6e2277de55ff36fe8ff610f77d2fedb197ca0d6f879b4",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-cad-lfs\\assets\\hardware\\orin\\UGV_Beast_PT_Jetson_Orin-3D.zip",
+      "uploadedAt": "2026-08-10T14:37:44.470Z"
+    },
+    {
+      "docId": "doc-esp32-firmware",
+      "objectKey": "07-Code-Firmware/UGV01_BASE_ESP32_Firmware.zip",
+      "status": "uploaded",
+      "expectedSha256": "5daf339df0a8ca879230d806b8d5d62d65703b4e243b4827682077770bbef4e5",
+      "downloadUrl": "https://files.waveshare.com/upload/0/0c/UGV01_BASE.zip",
+      "bytes": 28761,
+      "sha256": "5daf339df0a8ca879230d806b8d5d62d65703b4e243b4827682077770bbef4e5",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-library-staging\\07-Code-Firmware\\UGV01_BASE_ESP32_Firmware.zip",
+      "uploadedAt": "2026-08-10T14:37:45.087Z"
+    },
+    {
+      "docId": "doc-cp210x-driver",
+      "objectKey": "07-Code-Firmware/CP210x_USB_TO_UART_Driver.zip",
+      "status": "uploaded",
+      "expectedSha256": "7cb2b9b40e5279e55409e84b3f018744b1aae9c06ac9779e549e7d19b5ad67b3",
+      "downloadUrl": "https://files.waveshare.com/wiki/common/CP210x_USB_TO_UART.zip",
+      "bytes": 4953661,
+      "sha256": "7cb2b9b40e5279e55409e84b3f018744b1aae9c06ac9779e549e7d19b5ad67b3",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-library-staging\\07-Code-Firmware\\CP210x_USB_TO_UART_Driver.zip",
+      "uploadedAt": "2026-08-10T14:37:45.268Z"
+    },
+    {
+      "docId": "doc-gdb-wiki",
+      "objectKey": "08-Wiki-Pages/General-Driver-for-Robots_Wiki.md",
+      "status": "uploaded",
+      "expectedSha256": null,
+      "downloadUrl": "https://www.waveshare.com/wiki/General_Driver_for_Robots",
+      "bytes": 40241,
+      "sha256": "385c4f788a47068cf28cb88130a2140ddf8e59b623469a04d3b5704b5c24b488",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-library-staging\\08-Wiki-Pages\\General-Driver-for-Robots_Wiki.md",
+      "uploadedAt": "2026-08-10T14:37:45.295Z"
+    },
+    {
+      "docId": "doc-ups-wiki",
+      "objectKey": "08-Wiki-Pages/UPS-Module-3S_Wiki.md",
+      "status": "uploaded",
+      "expectedSha256": null,
+      "downloadUrl": "https://www.waveshare.com/wiki/UPS_Module_3S",
+      "bytes": 35480,
+      "sha256": "8c48070165257ba1bd645555207da5c9f3a33c2cf3aca368a98764345168e3bb",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-library-staging\\08-Wiki-Pages\\UPS-Module-3S_Wiki.md",
+      "uploadedAt": "2026-08-10T14:37:45.358Z"
+    },
+    {
+      "docId": "doc-beast-wiki",
+      "objectKey": "08-Wiki-Pages/UGV-Beast_Wiki.md",
+      "status": "uploaded",
+      "expectedSha256": null,
+      "downloadUrl": "https://www.waveshare.com/wiki/UGV-Beast",
+      "bytes": 51940,
+      "sha256": "1baec389e89c7e59e6c40cb42db8352d1f861573dbf4882acbf393d1be80a385",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-library-staging\\08-Wiki-Pages\\UGV-Beast_Wiki.md",
+      "uploadedAt": "2026-08-10T14:37:45.411Z"
+    },
+    {
+      "docId": "doc-beast-product",
+      "objectKey": "08-Wiki-Pages/UGV-Beast_Product-Page.md",
+      "status": "uploaded",
+      "expectedSha256": null,
+      "downloadUrl": "https://www.waveshare.com/ugv-beast.htm",
+      "bytes": 225971,
+      "sha256": "ed0244aaf152842eab64fb4d475010fdadc30b1bf8a1bdab67ecd6304348092d",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-library-staging\\08-Wiki-Pages\\UGV-Beast_Product-Page.md",
+      "uploadedAt": "2026-08-10T14:37:45.480Z"
+    },
+    {
+      "docId": "doc-orin-wiki",
+      "objectKey": "08-Wiki-Pages/UGV-Beast-PT-Jetson-Orin-AI-Kit_Wiki.md",
+      "status": "uploaded",
+      "expectedSha256": null,
+      "downloadUrl": "https://www.waveshare.com/wiki/UGV_Beast_PT_Jetson_Orin_AI_Kit",
+      "bytes": 56693,
+      "sha256": "7c3beeff1500dbcf5c0970dcec649795198d4d82e46b28cd48444e306420e92a",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-library-staging\\08-Wiki-Pages\\UGV-Beast-PT-Jetson-Orin-AI-Kit_Wiki.md",
+      "uploadedAt": "2026-08-10T14:37:45.545Z"
+    },
+    {
+      "docId": "extra-pi-pt-3d",
+      "objectKey": "extra/UGV_Beast_PT_AI_Kit_3D.zip",
+      "status": "uploaded",
+      "expectedSha256": "33db3df8d1ad24a92a1a74ce0d5360ec78950fa421e48bc5e780acc76e038c9a",
+      "bytes": 307341,
+      "sha256": "33db3df8d1ad24a92a1a74ce0d5360ec78950fa421e48bc5e780acc76e038c9a",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-cad-lfs\\assets\\hardware\\pi\\UGV_Beast_PT_AI_Kit_3D.zip",
+      "uploadedAt": "2026-08-10T14:37:45.620Z"
+    },
+    {
+      "docId": "extra-pi4b-step",
+      "objectKey": "extra/UGV_Beast_PI4B_AI_Kit_step.zip",
+      "status": "uploaded",
+      "expectedSha256": "b52f72922132568b8728d14c39c783edca1bb13bd1b5f0c694bde3e15c577f27",
+      "bytes": 11096497,
+      "sha256": "b52f72922132568b8728d14c39c783edca1bb13bd1b5f0c694bde3e15c577f27",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-cad-lfs\\assets\\hardware\\pi\\UGV_Beast_PI4B_AI_Kit_step.zip",
+      "uploadedAt": "2026-08-10T14:37:45.910Z"
+    },
+    {
+      "docId": "extra-pi4b-3d",
+      "objectKey": "extra/UGV_Beast_PI4B_AI_Kit_3D.zip",
+      "status": "uploaded",
+      "expectedSha256": "cb7d51373314daa966dff26a30cb04d05adcf7c8d57e03341516f6b0f6e74259",
+      "bytes": 272014,
+      "sha256": "cb7d51373314daa966dff26a30cb04d05adcf7c8d57e03341516f6b0f6e74259",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-cad-lfs\\assets\\hardware\\pi\\UGV_Beast_PI4B_AI_Kit_3D.zip",
+      "uploadedAt": "2026-08-10T14:37:45.949Z"
+    },
+    {
+      "docId": "extra-rover-orin-step",
+      "objectKey": "extra/UGV_Rover_PT_Jetson_Orin_ROS2_Kit_STEP.zip",
+      "status": "uploaded",
+      "expectedSha256": null,
+      "bytes": 16007240,
+      "sha256": "eaa50ebdd9a648da45f1b0b54321167efa6540411a908e44e8c80d40e33b01ff",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-cad-lfs\\assets\\hardware\\orin\\UGV_Rover_PT_Jetson_Orin_ROS2_Kit_STEP.zip",
+      "uploadedAt": "2026-08-10T14:37:46.556Z"
+    },
+    {
+      "docId": "extra-rover-orin-2d",
+      "objectKey": "extra/UGV_Rover_Jetson_Orin_ROS2_Kit_2D.zip",
+      "status": "uploaded",
+      "expectedSha256": null,
+      "bytes": 1817387,
+      "sha256": "dbbeac8d878252ea0333ad6c2e96f3fd42d8fc03c65b3421c938c41deac31bf2",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-cad-lfs\\assets\\hardware\\orin\\UGV_Rover_Jetson_Orin_ROS2_Kit_2D.zip",
+      "uploadedAt": "2026-08-10T14:37:46.643Z"
+    },
+    {
+      "docId": "extra-driver-board-pdf",
+      "objectKey": "extra/DriverBoardBeastOrin.pdf",
+      "status": "uploaded",
+      "expectedSha256": "b8ccd10fdb738af05436e118429cfedab9dda072401d2b3a45dfb3b6fd9b8dd5",
+      "bytes": 1023807,
+      "sha256": "b8ccd10fdb738af05436e118429cfedab9dda072401d2b3a45dfb3b6fd9b8dd5",
+      "sourcePath": "D:\\_projects\\RobotOverview\\.tmp-cad-lfs\\assets\\hardware\\orin\\DriverBoardBeastOrin.pdf",
+      "uploadedAt": "2026-08-10T14:37:46.690Z"
+    }
+  ],
+  "n5Mirror": {
+    "host": "pve-n5",
+    "path": "/tank/dev-archive/hangar-library/",
+    "snapshot": "tank/dev-archive@hangar-library-2026-08-10",
+    "verifiedAt": "2026-08-10T14:45:00Z",
+    "note": "SHA256 spot-checked vs Garage for CAD STEP, Orin 3D, and driver schematic"
+  }
+}

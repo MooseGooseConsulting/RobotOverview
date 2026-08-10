@@ -26,9 +26,20 @@ data; the bytes live outside the repo. Verify against `src/` before relying on a
 
 ## Where the bytes live (hosting)
 
-The binaries are **not** in the repo or the container image. They are served from the Datacore
-library store (the homelab's cluster S3 / Garage), resolved via the plain runtime env var
-`DATACORE_LIBRARY_URL`. See `docs/deploy.md`.
+The binaries are **not** in the repo or the container image.
+
+- **Primary runtime store:** Garage bucket `hangar-library` (ClusterIP-only). Hangar proxies
+  downloads at `GET /api/hangar/library/<key>` so browsers never talk to S3.
+- **Open links:** `DATACORE_LIBRARY_URL=https://hangar.moosegoose.xyz/api/hangar/library`
+  (server-side env on the Hangar Deployment; see `docs/deploy.md`).
+- **Object keys:** `libraryPath` with the `beast/` prefix stripped
+  (e.g. `05-Chassis-CAD/UGV_Beast_PT_AI_Kit_STEP.zip`).
+- **Existence register:** `db/hangar/library-manifest.json` (SHA256, bytes, source, uploaded_at).
+  Rebuild/upload with `doppler run --project homelab --config dev -- npx tsx db/hangar/upload-library.ts`
+  against a Garage port-forward (`kubectl -n garage port-forward svc/garage 3900:3900`).
+- **Off-cluster mirror (required durability):** N5 ZFS
+  `/tank/dev-archive/hangar-library/` (layout matches object keys). Snapshot
+  `tank/dev-archive@hangar-library-2026-08-10`. Garage-on-Longhorn is not independent DR.
 
 - **Deliberately not `NEXT_PUBLIC_*`.** A `NEXT_PUBLIC_` var is string-inlined into the client
   bundle at `next build` time — the cluster could never set it after the image is built without a
@@ -59,39 +70,30 @@ Per-file source URLs and SHA256 hashes are recorded in
 `keyArtifactstosort/reference/EVIDENCE-MANIFEST.md` — the hash register that lives with the
 artifacts themselves. Use it to check provenance.
 
-## CAD archives (LFS branch)
+## CAD archives (Garage + N5)
 
-Seven Waveshare CAD archives live as Git LFS objects on the `data/hardware-cad-assets` branch —
-deliberately **not** on `main`, so an agent working in `main` sees no CAD and must not conclude
-the project has none. Fetch with:
+Catalog CAD rows and the non-catalog extras live in Garage `hangar-library` (and the N5 mirror).
+Do **not** merge CAD binaries onto `main`. The former `data/hardware-cad-assets` LFS side-stash
+was retired after Garage + N5 SHA256 proof on 2026-08-10.
 
-```bash
-git fetch origin data/hardware-cad-assets
-git checkout data/hardware-cad-assets -- <path>
-```
-
-| Archive | Contents | Trap |
+| Object key | Contents | Trap |
 | --- | --- | --- |
-| `UGV_Beast_PI4B_AI_Kit_3D.zip` | **2D drawings** (despite the name) | Title block reads "UGV Beast PT" — upstream mislabel; contents are genuinely the Pi kit |
-| `UGV_Beast_PI4B_AI_Kit_step.zip` | STEP geometry | — |
-| `UGV_Beast_PT_AI_Kit_3D.zip` | **2D drawings** (despite the name) | — |
-| `UGV_Beast_PT_AI_Kit_step.zip` | STEP geometry | — |
-| `UGV_Rover_Jetson_Orin_ROS2_Kit_2D.zip` | 2D drawings | **Rover, not Beast** |
-| `UGV_Rover_PT_Jetson_Orin_ROS2_Kit_STEP.zip` | STEP geometry | **Rover, not Beast** |
-| `UGV_Beast_PT_Jetson_Orin-3D.zip` | Beast Orin CAD, LFS oid `56615c77…` | The only true Beast Orin archive; was absent from the 2026-07-27 intake |
+| `05-Chassis-CAD/UGV_Beast_PT_AI_Kit_STEP.zip` | Beast PT STEP geometry (catalog) | Local LFS filename was `…_step.zip` (lowercase) |
+| `06-Jetson-Orin/UGV_Beast_PT_Jetson_Orin_3D.zip` | Beast Orin CAD (catalog) | Source filename uses a hyphen: `…Orin-3D.zip` |
+| `extra/UGV_Beast_PT_AI_Kit_3D.zip` | **2D drawings** (despite the name) | — |
+| `extra/UGV_Beast_PI4B_AI_Kit_step.zip` | Pi kit STEP | — |
+| `extra/UGV_Beast_PI4B_AI_Kit_3D.zip` | **2D drawings** (despite the name) | Title block reads "UGV Beast PT" |
+| `extra/UGV_Rover_Jetson_Orin_ROS2_Kit_2D.zip` | 2D drawings | **Rover, not Beast** |
+| `extra/UGV_Rover_PT_Jetson_Orin_ROS2_Kit_STEP.zip` | STEP geometry | **Rover, not Beast** |
 
-**Three naming traps, verified 2026-07-27:** `_3D.zip` archives contain 2D drawings (3D geometry
-is in `_step.zip`); both "Jetson Orin" archives are Rover kits; the PI4B `_3D.zip` title block
-says "PT". One archive uses non-ASCII internal paths (`尺寸图纸`) — extract with explicit UTF-8
-handling.
+**Three naming traps, verified 2026-07-27 (still true):** `_3D.zip` archives contain 2D drawings
+(3D geometry is in `_step` / `_STEP`); both "Rover … Orin" archives are Rover kits; the PI4B
+`_3D.zip` title block says "PT". One archive uses non-ASCII internal paths (`尺寸图纸`) —
+extract with explicit UTF-8 handling.
 
-Per-file SHA-256 values, verified archive contents, and duplicate status are in
-`keyArtifactstosort/INTAKE-REGISTER.md`; upstream hashes are independently in
-`keyArtifactstosort/reference/EVIDENCE-MANIFEST.md`. The 2026-07-27 pruning (six archives removed
-from the working tree as byte-identical LFS duplicates, plus the redistributable
-`flash_download_tool_3.9.5.exe`) is safe because of those two hash records; unmodified originals
-are also at `D:\_projects\_artifact-backups\RobotOverview-keyArtifactstosort-2026-07-27\`
-(same-volume deletion protection, **not** an off-volume backup).
+SHA-256 values for the uploaded set are in `db/hangar/library-manifest.json`. Historical intake
+notes remain in `keyArtifactstosort/INTAKE-REGISTER.md` and the evidence register (Datacore
+`beast-evidence-manifest` / `keyArtifactstosort/reference/EVIDENCE-MANIFEST.md` when present).
 
 What the CAD is *for* (mounting holes, mast planning, URDF, twin geometry) is tracked as work in
 [`docs/plans/2026-07-30-wiring-model-completion.md`](./plans/2026-07-30-wiring-model-completion.md).

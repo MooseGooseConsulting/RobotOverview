@@ -111,7 +111,7 @@ export const CORPUS_BRIEFINGS: CorpusBriefingMeta[] = [
     source: 'docs/hardware-library.md',
     kind: 'plan',
     summary:
-      'Seven Waveshare CAD archives on the data/hardware-cad-assets LFS branch, three filename traps that send agents to the wrong file, and fetch commands. The X1–X6 exploration work moved into the wiring-model plan.',
+      'Hardware Library hosting: Garage hangar-library + Hangar proxy Open links, N5 off-cluster mirror, CAD naming traps, and the library-manifest existence register. The X1–X6 exploration work moved into the wiring-model plan.',
     tags: ['cad', 'beast', 'mounting', 'jetson'],
     aliases: ['step', 'stl', 'mounting pattern', 'x1'],
     capturedAt: '2026-07-27',
