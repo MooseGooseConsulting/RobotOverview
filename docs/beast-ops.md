@@ -20,8 +20,10 @@ power cycle, reconnect Serve + smoke-test WSS** with
 `pwsh -File tools/beast/Reconnect-Beast-Cockpit.ps1` (waits for SSH, starts
 cockpit if needed, re-applies `tailscale serve`, runs `Verify-Beast-Cockpit`).
 LAN fallback: `ssh beast-01` / `ssh beast@192.168.0.187` (`wlP1p1s0`).
-**Ethernet unplugged.** Still recommend a **UDM DHCP reservation for
-`192.168.0.187`**.
+**Ethernet unplugged.** **UDM DHCP reservation set 2026-08-10:** Wi‑Fi MAC
+`20:bd:1d:d4:91:35` → `192.168.0.187` (client name `beast-01`, Local DNS
+enabled). Applies on the next DHCP renew/reassociate — does not revive a
+currently offline radio by itself.
 
 **Passwordless ops sudo (2026-08-10):** User `beast` has a scoped
 `/etc/sudoers.d/beast-ops` allowlist (not `NOPASSWD:ALL`) for
@@ -409,7 +411,7 @@ ssh -i ~/.ssh/hephastus_ed25519 -o HostKeyAlias=beast-01 beast@192.168.0.187
 | # | Path | Address | Notes |
 |---|---|---|---|
 | 1 | `ssh beast-01` | `beast-01.local` → `192.168.0.187` (mDNS/Wi-Fi) | **Verified working**; Windows may fail to resolve `.local` |
-| 2 | Direct Wi-Fi | `192.168.0.187` (`wlP1p1s0`) | **Verified working**; DHCP address and may drift |
+| 2 | Direct Wi-Fi | `192.168.0.187` (`wlP1p1s0`) | **UDM reserved 2026-08-10** (MAC `20:bd:1d:d4:91:35`); applies after next DHCP renew |
 | 3 | `ssh beast-01-ts` | `100.107.16.72` (`tailscale0`) | **Verified working**; Tailscale daemon is up |
 | 4 | Direct Ethernet | `192.168.0.166` (`enP8p1s0`) | **Verified working**; current wired fallback and preferred route when cable is connected |
 | 5 | USB gadget fallback | `192.168.55.1` (`usb0`) | **Not reachable now**; USB gadget interface is down |
