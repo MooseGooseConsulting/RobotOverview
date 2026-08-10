@@ -33,22 +33,14 @@ export async function GET(_request: Request, context: RouteContext) {
       return NextResponse.json({ ok: false, error: 'Not found' }, { status: 404 });
     }
 
-    const body = object.body as {
-      transformToByteArray?: () => Promise<Uint8Array>;
-    };
-    if (typeof body.transformToByteArray !== 'function') {
-      return NextResponse.json({ ok: false, error: 'Library object unreadable' }, { status: 502 });
-    }
-
-    const bytes = await body.transformToByteArray();
     const contentType = object.contentType || guessContentType(key);
     const filename = contentDispositionFilename(key);
 
-    return new NextResponse(Buffer.from(bytes), {
+    return new NextResponse(Buffer.from(object.bytes), {
       status: 200,
       headers: {
         'Content-Type': contentType,
-        'Content-Length': String(object.contentLength ?? bytes.byteLength),
+        'Content-Length': String(object.contentLength ?? object.bytes.byteLength),
         'Content-Disposition': `inline; filename="${filename}"`,
         'Cache-Control': 'private, max-age=3600',
         'X-Content-Type-Options': 'nosniff',
