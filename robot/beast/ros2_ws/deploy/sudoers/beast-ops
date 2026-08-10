@@ -111,12 +111,6 @@ Cmnd_Alias BEAST_SYSTEMCTL = \
 
 Cmnd_Alias BEAST_TAILSCALE = /usr/bin/tailscale serve *
 
-Cmnd_Alias BEAST_LINK_WATCH = \
-    /usr/bin/systemctl try-restart NetworkManager, \
-    /usr/bin/systemctl try-restart NetworkManager.service, \
-    /usr/bin/systemctl try-restart tailscaled, \
-    /usr/bin/systemctl try-restart tailscaled.service
-
 Cmnd_Alias BEAST_INSTALL_UNITS = /usr/local/sbin/beast-install-systemd-units
 
-beast ALL=(root) NOPASSWD: BEAST_SYSTEMCTL, BEAST_TAILSCALE, BEAST_INSTALL_UNITS, BEAST_LINK_WATCH
+beast ALL=(root) NOPASSWD: BEAST_SYSTEMCTL, BEAST_TAILSCALE, BEAST_INSTALL_UNITS
