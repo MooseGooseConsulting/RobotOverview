@@ -1,6 +1,6 @@
 ---
 title: Deployment — verified facts
-last_verified: 2026-07-31
+last_verified: 2026-08-10
 ---
 
 # Deployment — verified facts
@@ -24,8 +24,15 @@ manifests, secrets (via Doppler/ESO), Gateway listeners, and Flux reconciliation
   `ghcr.io/coldaine/robot-overview@sha256:177180e6…` (the PR #134 build, verified against
   the running pod) with `imagePullPolicy: IfNotPresent`. `:latest` + `Always` is retired.
 - **Database:** Logical DB `hangar` on CloudNativePG `pg18-core` (`data-platform`).
-  App env from Secret `hangar-runtime-secrets` (`HANGAR_DB_*`, `HANGAR_INGEST_TOKEN`).
+  App env from Secret `hangar-runtime-secrets` (`HANGAR_DB_*`, `HANGAR_INGEST_TOKEN`,
+  `DATACORE_LIBRARY_URL`, `HANGAR_LIBRARY_*`).
   Readiness probe is `GET /api/hangar/preflight` — a Ready pod means Postgres is reachable.
+- **Hardware library:** Garage bucket `hangar-library` (platform bootstrap + Hangar ESO keys).
+  Hangar serves `GET /api/hangar/library/…` (path-style S3 GET, ClusterIP Garage only).
+  Catalog Open links use `DATACORE_LIBRARY_URL=https://hangar.moosegoose.xyz/api/hangar/library`.
+  Existence register: `db/hangar/library-manifest.json` (16/16 catalog keys as of 2026-08-10).
+  Off-cluster mirror: N5 `/tank/dev-archive/hangar-library/` snapshot
+  `@hangar-library-2026-08-10` (SHA256 spot-checked vs Garage for CAD + schematic).
 - **UI spine:** Reconstructs HangarData from normalized tables at request time
   (`getHangarSpine` → `buildHangarDataFromDb`). Agents write via op-verb
   `POST /api/hangar/ingest` (Bearer `HANGAR_INGEST_TOKEN`) — verb table in
@@ -96,8 +103,9 @@ psql … -f db/hangar/seed.sql
 
 ## Known gaps
 
-- Datacore library store (`DATACORE_LIBRARY_URL` / Garage) is not wired — library "Open"
-  links stay offline by design until the bucket exists.
-- The pinned digest is the 2026-07-31 PR #134 build. Everything merged to `main` since then
-  is built to GHCR but **not deployed** until the next deliberate digest bump (step 2 above).
+- The pinned digest lags `main` until the next deliberate digest bump in
+  `coldaine-homelab/infra/k8s/apps/hangar/deployment.yaml` (step 2 above). The library proxy
+  ships only after that bump rolls the Hangar image.
+- Wiki catalog objects are fresh 2026-08-10 HTML captures (hashes unset in the upload source
+  map); the 2026-07-01 `.md` snapshots from UGV-Beast-Archive are gone.
 - Shipwright `Build` for Hangar is optional future work; not required for production today.
