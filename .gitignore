@@ -20,6 +20,12 @@ UGV-Beast-Archive/
 # Playwright/UI review scratch (node_modules inside)
 /.tmp/
 
+# Local library ingest / CAD LFS worktrees (never commit)
+.tmp-*/
+.tmp-library-staging/
+.tmp-cad-lfs/
+.tmp-n5-mirror/
+
 # Vendor source archives — re-downloadable, recorded in keyArtifactstosort/reference/INDEX.md
 keyArtifactstosort/reference/*.zip
 
