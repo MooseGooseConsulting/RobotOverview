@@ -1,5 +1,44 @@
 # AGENTS.md
 
+## Read this first: the facts are in Postgres, not in the repo
+
+**`grep` cannot find this project's facts.** Specs, hardware detail, connector pinouts,
+measured findings and prior research live in the Hangar database. The repo holds code,
+tests and docs — and `src/data/hangar.ts` is a **CI fixture that is stale by design and
+is the first thing `grep` hits**. Finding something plausible there is the failure mode,
+not the success case.
+
+So: **any time you are about to ask, assume, guess, estimate, or re-derive a fact about
+the hardware, the robot, the inventory, or past work — run this first.**
+
+```bash
+doppler run --project homelab --config dev -- npx tsx db/hangar/find.ts <term>
+doppler run --project homelab --config dev -- npx tsx db/hangar/find.ts --full <term>
+```
+
+Concrete triggers. If you catch yourself writing or thinking any of these, you owe a
+`find.ts` call before the sentence leaves your mouth:
+
+- "Can you tell me / send me / photograph / measure …?" — it is probably already recorded.
+- "I'll assume the pack is …", "presumably 12 V", "typically these are …"
+- "This isn't documented anywhere" / "we don't have a record of" — you have not checked yet.
+- "What is the … rated at?" for any part, cable, connector, rail, or unit.
+- Starting research on a topic — check `briefings` and `insights` before redoing it.
+- Reaching for `grep` to answer a *hardware* question rather than a *code* question.
+
+It searches `assets` (including the `specs` JSON, where most hardware detail hides),
+`terminals` (connectors, rails, voltages), `sockets`, `insights`, and `briefings`.
+Only ask Patrick for something after `find.ts` comes back empty — and say where you
+looked. Re-asking for recorded facts is the single most expensive mistake in this repo:
+on 2026-08-07 an agent asked him to photograph a battery and a charger whose specs were
+both already stored (`assets.stock-ups`, `terminals.ups-charge-in`).
+
+Two different questions, two different sources: the **DB** holds what the hardware
+**is**; **SSH to the robot** tells you what it is **doing** (see "Robot ground truth").
+Findings flow back the same way — see "Writing facts".
+
+## What this repo is
+
 The Hangar is Patrick's personal command center for his physical tech: inventory, wiki,
 want list, and a live portal to the robots it tracks — styled as a base-builder game
 (Next.js 16 / React 19 / Tailwind 4). Flagship unit: BEAST-01, a Waveshare UGV Beast.
@@ -22,8 +61,18 @@ Working on UI? Follow [`docs/rich-ui.md`](docs/rich-ui.md) — enrich surfaces, 
 
 ## Content workflow
 
+### Reading facts
+
+`db/hangar/find.ts` — see "Read this first" at the top of this file. Do not skip it
+because you are already mid-task; a wrong assumption laundered through three commits is
+more expensive than one query.
+
+### Writing facts
+
 Facts and research persist to Postgres via `POST /api/hangar/ingest` (Bearer
-`HANGAR_INGEST_TOKEN` from Doppler `homelab`/`dev`). **Never edit `src/data/hangar.ts`
+`HANGAR_INGEST_TOKEN` from Doppler `homelab`/`dev`). A session that learns something
+durable and writes it only to `docs/` or a commit message has not recorded it where the
+app can surface it — land an `append_insight` too. **Never edit `src/data/hangar.ts`
 or `src/data/datacore-corpus.ts` for live content** — they are CI fixtures and loud
 offline fallbacks only (regenerate corpus with `npx tsx db/hangar/gen-datacore-corpus.ts`).
 Types: `src/data/types.ts`. Schema/migrations: [`db/hangar/standup.md`](db/hangar/standup.md).
