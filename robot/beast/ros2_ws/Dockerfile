@@ -110,6 +110,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-humble-diagnostic-msgs \
       ros-humble-cv-bridge \
       ros-humble-depthai-descriptions \
+      speech-dispatcher \
+      speech-dispatcher-espeak \
+      espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /ws
