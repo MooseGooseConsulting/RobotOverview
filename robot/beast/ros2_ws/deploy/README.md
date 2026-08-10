@@ -1,10 +1,30 @@
 # Deploying to BEAST-01
 
-Merging to `main` does **not** put code on the robot — the robot runs its own
-checkout at `/home/beast/beast/RobotOverview` under systemd. This directory is
-the durable pipeline that closes that gap.
+## Canonical deploy (pull model)
 
-## The one command
+**Canonical deploy manifests live in the private
+[Coldaine/coldaine-homelab](https://github.com/Coldaine/coldaine-homelab)
+`deployments/beast-01/` tree**
+— install scripts, systemd/container run units, `manifest.yaml` (image
+digest), `beast-pull`, and `verify-beast`. Merging robot code to
+`RobotOverview` `main` builds
+`ghcr.io/moosegooseconsulting/beast-ros:sha-<SHA>` (see
+`.github/workflows/beast-ros-image.yml`); the homelab bump + on-robot pull
+agent land it when the robot is next online.
+
+First-time / host install: run `install-beast.sh` from that homelab tree.
+Ongoing updates: `beast-pull` (service + timer) — no same-day human deploy
+required once cut over.
+
+Live verify of the running graph (drive path, power CSV, …) is owned by
+homelab `verify-beast`, not this repo.
+
+## Manual override — `deploy-to-beast.sh` (Phase 0 / recovery)
+
+This directory still holds `deploy-to-beast.sh`: the **manual override** and
+Phase 0 source-sync path (SSH → git ff → colcon on the Jetson → restart host
+systemd). Use it when the pull agent is not yet cut over, or when you need a
+forced recovery deploy without waiting for a GHCR image.
 
 From any clone of this repo (Windows Git Bash, Linux, macOS):
 
@@ -13,15 +33,25 @@ robot/beast/ros2_ws/deploy/deploy-to-beast.sh            # deploy origin/main
 robot/beast/ros2_ws/deploy/deploy-to-beast.sh --verify-only   # drift check, read-only
 ```
 
-`deploy-to-beast.sh` drives `beast-01-ts` (Tailscale — stable; never hardcode
-LAN IPs) through four steps: fast-forward the on-robot checkout (refuses a
-dirty tree), `colcon build --symlink-install` the base service packages
-(`beast_power beast_base ugv_bringup ugv_cockpit`, override with `--packages`), install
-`deploy/storage/` payloads and `deploy/systemd/` service/timer units + `daemon-reload`,
-restart `beast-ros-base`, and `try-restart beast-cockpit` without activating an intentionally
-disabled cockpit, then verify the live graph and exit non-zero on any broken contract.
+### Host selection
 
-The verification contract is what "landed" means:
+Default `BEAST_HOST` is `beast-01` (LAN / mDNS). Override when needed:
+
+```bash
+BEAST_HOST=beast-01-ts robot/beast/ros2_ws/deploy/deploy-to-beast.sh   # Tailscale
+BEAST_HOST=beast@192.168.0.187 robot/beast/ros2_ws/deploy/deploy-to-beast.sh # direct Wi-Fi IP
+```
+
+`deploy-to-beast.sh` drives `$BEAST_HOST` through four steps: fast-forward the
+on-robot checkout (refuses a dirty tree), `colcon build --symlink-install` the
+base service packages (`beast_power beast_base ugv_bringup ugv_cockpit`,
+override with `--packages`), install `deploy/storage/` payloads and
+`deploy/systemd/` service/timer units + `daemon-reload`, restart
+`beast-ros-base`, and `try-restart beast-cockpit` without activating an
+intentionally disabled cockpit, then verify the live graph and exit non-zero
+on any broken contract.
+
+The verification contract is what "landed" means for the host systemd path:
 
 - `beast-ros-base` active; `beast-cockpit` active unless intentionally disabled
 - `beast_power` running and the **sole** publisher of `/ugv/voltage`
@@ -46,24 +76,20 @@ check. Run it *before* assuming any doc claim about the robot is current.
 
 ## House rules
 
-- **Every robot-facing merge gets deployed the same day.** Open the PR, merge,
-  then run the script. A merge without a deploy run is drift in progress —
-  2026-08-07 proved this (the INA219 cutover sat undeployed while docs
-  implied it was live).
-- After a deploy, paste the script's dated verification output into the
+- **After pull cutover, do not require same-day human deploys.** The pull
+  agent catches up on the robot's schedule. Until cutover, Phase 0 still uses
+  this script after robot-facing merges.
+- After a manual deploy, paste the script's dated verification output into the
   `docs/beast-ops.md` **Quick connect** block.
 - The restart is a brief stack outage — deploy parked, never mid-mission.
 - First-time Jetson setup follows the [Jetson UART gate and Beast software runbook](../../../../docs/beast-jetson-flash-runbook.md#jetson-uart-gate-and-beast-software). Use its `rosdep` procedure; this deploy script assumes the
   workspace already builds.
 
-Future option (not built): a GitHub Actions runner on the tailnet running
-`--verify-only` nightly and opening an issue on drift. The script's exit code
-is already shaped for that.
-
 ## Other units here
 
 `deploy/systemd/` also carries the cockpit, storage, and blackbox/mission
-record units — installed by the same script step.
+record units — still the Phase 0 / override copies. Canonical copies move to
+`coldaine-homelab/deployments/beast-01/systemd/` as that tree lands.
 
 Power logging is **not** a separate process to remember any more. The
 `beast_power_logger` node runs inside `bringup_lidar.launch.py` under

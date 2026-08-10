@@ -1,0 +1,37 @@
+# Keep the build context lean — only the packages COPY'd by the Dockerfile
+# are needed; ignore everything else under src/ and local build artifacts.
+build/
+install/
+log/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/test/
+docs/
+deploy/
+site/
+.git/
+.gitignore
+.gitattributes
+README.md
+**/*.onnx
+**/*.bin
+**/models/
+src/ugv_else/cartographer/
+src/ugv_else/costmap_converter/
+src/ugv_else/emcl2_ros2/
+src/ugv_else/explore_lite/
+src/ugv_else/gmapping/
+src/ugv_else/gz_ros2_control/
+src/ugv_else/robot_pose_publisher/
+src/ugv_else/teb_local_planner/
+src/ugv_else/vizanti/
+src/ugv_main/ugv_chat_ai/
+src/ugv_main/ugv_gazebo/
+src/ugv_main/ugv_msgs/
+src/ugv_main/ugv_nav/
+src/ugv_main/ugv_slam/
+src/ugv_main/ugv_tools/
+src/ugv_main/ugv_vision/
+src/ugv_main/ugv_voice/
+src/ugv_main/ugv_web_app/

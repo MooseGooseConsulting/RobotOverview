@@ -2,14 +2,16 @@
 # Copyright 2026 Coldaine
 # SPDX-License-Identifier: Apache-2.0
 #
-# deploy-to-beast.sh — the durable path for landing repo changes on BEAST-01.
+# deploy-to-beast.sh — manual override / Phase 0 source-sync path for BEAST-01.
+# Canonical pull deploy lives in coldaine-homelab/deployments/beast-01/.
 #
 # Run from any checkout of this repo (Windows Git Bash / Linux / macOS):
 #
 #   robot/beast/ros2_ws/deploy/deploy-to-beast.sh [ref] [--packages "p1 p2"]
 #   robot/beast/ros2_ws/deploy/deploy-to-beast.sh --verify-only
 #
-# What a full run does, over `ssh beast-01-ts` (Tailscale — stable; LAN IPs drift):
+# What a full run does, over SSH to $BEAST_HOST (default beast-01 / LAN mDNS;
+# override e.g. BEAST_HOST=beast-01-ts for Tailscale, or a direct Wi-Fi IP):
 #   1. fetch + fast-forward the on-robot checkout to <ref> (default origin/main);
 #      refuses to touch a dirty tree.
 #   2. colcon build --symlink-install the affected packages
@@ -19,6 +21,10 @@
 #      restart beast-ros-base and try-restart beast-cockpit (one sudo prompt).
 #   4. verify the live graph (see --verify-only below) and print a dated
 #      evidence block to paste into docs/beast-ops.md "Quick connect".
+#
+# Canonical pull deploy lives in coldaine-homelab/deployments/beast-01/
+# (install-beast.sh + beast-pull). This script is the manual override / Phase 0
+# source-sync path.
 #
 # --verify-only runs only step 4 (no sudo, read-only). Use it any time to
 # detect drift between the repo and the robot — the checks below encode the
@@ -56,7 +62,8 @@
 
 set -euo pipefail
 
-HOST="${BEAST_HOST:-beast-01-ts}"
+# Default LAN/mDNS. Override: BEAST_HOST=beast-01-ts or BEAST_HOST=192.168.0.187
+HOST="${BEAST_HOST:-beast-01}"
 REPO_DIR="/home/beast/beast/RobotOverview"
 WS_DIR="$REPO_DIR/robot/beast/ros2_ws"
 PACKAGES="beast_power beast_base ugv_bringup ugv_cockpit"
@@ -147,7 +154,16 @@ for svc in beast-ros-base beast-cockpit; do
   fi
 done
 
-nodes="$(ros2 node list 2>/dev/null || true)"
+# Graph discovery is racy right after daemon stop (UDP participant join).
+# Retry briefly before FAIL so functional checks are not false-negatives.
+nodes=""
+for _try in 1 2 3 4 5 6 7 8 9 10; do
+  nodes="$(ros2 node list 2>/dev/null || true)"
+  echo "$nodes" | grep -qx '/beast_power' \
+    && echo "$nodes" | grep -qx '/beast_power_logger' \
+    && break
+  sleep 1
+done
 echo "$nodes" | grep -qx '/beast_power' \
   && ok "beast_power running" || bad "beast_power not in node graph"
 echo "$nodes" | grep -qx '/ugv_safety_monitor' \
@@ -157,7 +173,12 @@ echo "$nodes" | grep -qx '/beast_power_logger' \
   && ok "beast_power_logger running" \
   || bad "beast_power_logger not in node graph (power CSV not being recorded)"
 
-vpubs="$(ros2 topic info /ugv/voltage 2>/dev/null | awk '/Publisher count/ {print $3}')"
+vpubs=""
+for _try in 1 2 3 4 5 6 7 8 9 10; do
+  vpubs="$(ros2 topic info /ugv/voltage 2>/dev/null | awk '/Publisher count/ {print $3}')"
+  [ "$vpubs" = "1" ] && break
+  sleep 1
+done
 [ "$vpubs" = "1" ] && ok "/ugv/voltage has exactly 1 publisher" \
   || bad "/ugv/voltage publisher count = ${vpubs:-unknown}"
 vowner="$(ros2 topic info /ugv/voltage -v 2>/dev/null | awk '/Node name/ {print $3; exit}')"
