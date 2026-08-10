@@ -25,9 +25,15 @@ const CHIPS: Array<{ tone: 'red' | 'amber'; text: string; title: string }> = [
   },
   {
     tone: 'amber',
+    text: 'OAK DEPTH = PASSIVE STEREO · USB2',
+    title:
+      'Depth is Luxonis stereo → TURBO JPEG for the browser, not a cleaned point cloud. Textureless/dark scenes look like noise. Live session 2026-07-31 negotiated USB SPEED: HIGH (USB 2.0) — cable/path limited; SUPER needs a known-USB3 path. Not a recorded archive: optics/scan stream live over rosbridge and are not persisted unless a bag/recorder is running.',
+  },
+  {
+    tone: 'amber',
     text: 'LiDAR BLIND SECTOR UNVERIFIED',
     title:
-      'The cropped 45°–134.5° sector has never been checked against a live /scan. Verify with ros2 topic echo before trusting the wedge.',
+      'The cropped 45°–134.5° sector has never been checked against a live /scan. Verify with ros2 topic echo before trusting the wedge. Boot stack is use_lidar:=true on beast-ros-base; empty Spatial view usually means unreachable bridge, stale graph, or the LD19 not publishing — not a deliberate lidar-off boot.',
   },
   {
     tone: 'amber',
