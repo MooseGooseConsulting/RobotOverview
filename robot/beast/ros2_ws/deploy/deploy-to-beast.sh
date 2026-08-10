@@ -395,10 +395,13 @@ ssh "${ssh_opts[@]}" "$HOST" "bash -lc 'cd \"$WS_DIR\" \
   && source /opt/ros/humble/setup.bash \
   && colcon build --packages-select $PACKAGES --symlink-install'"
 
-say "3/4 install storage/systemd units + restart"
+say "3/4 install storage/systemd/sudoers + restart"
 # One ssh session so a single sudo timestamp covers install, reload, restart.
+# After install-beast-sudoers.sh lands, later agent/ops SSH can use sudo -n for
+# the allowlisted beast-* / tailscale serve commands (Doppler becomes break-glass).
 remote_privileged="sudo install -m 0644 '$WS_DIR'/deploy/systemd/*.service /etc/systemd/system/ \
   && sudo install -m 0644 '$WS_DIR'/deploy/systemd/*.timer /etc/systemd/system/ \
+  && sudo bash '$WS_DIR'/deploy/bin/install-beast-sudoers.sh \
   && sudo '$WS_DIR'/deploy/storage/install.sh --apply \
   && sudo systemctl daemon-reload \
   && sudo systemctl restart beast-ros-base \

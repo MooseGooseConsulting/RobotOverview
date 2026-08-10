@@ -2,32 +2,44 @@
 # Copyright 2026 Coldaine
 # SPDX-License-Identifier: Apache-2.0
 #
-# beast-gamepad — start on-robot USB gamepad teleop (priority 150 rung).
+# beast-gamepad - start on-robot USB gamepad teleop (priority 150 rung).
 # Requires beast-ros-base (bringup + twist_mux) already running.
 # Plug an Xbox-360-compatible / SHANWAN pad into the Jetson, then run this.
-set -euo pipefail
+set -eo pipefail
 
 WS="${BEAST_WS:-/home/beast/beast/RobotOverview/robot/beast/ros2_ws}"
 
 if [ ! -f "$WS/install/setup.bash" ]; then
-  echo "missing $WS/install/setup.bash — deploy the ROS workspace first" >&2
+  echo "missing $WS/install/setup.bash - deploy the ROS workspace first" >&2
   exit 1
 fi
 
+# ROS setups reference unset vars — enable nounset only after sourcing.
 # shellcheck disable=SC1091
 source /opt/ros/humble/setup.bash
 # shellcheck disable=SC1091
 source "$WS/install/setup.bash"
+set -u
 
 if ! systemctl is-active --quiet beast-ros-base; then
-  echo "beast-ros-base is not active — start the base stack before gamepad teleop" >&2
+  echo "beast-ros-base is not active - start the base stack before gamepad teleop" >&2
   exit 1
 fi
 
 if ! ls /dev/input/js* >/dev/null 2>&1; then
-  echo "WARNING: no /dev/input/js* yet — plug the USB gamepad in (joy_node will wait)" >&2
+  echo "no /dev/input/js* — plug the USB gamepad in before launching (mapping is fixed at node start)" >&2
+  exit 1
 fi
 
+publish_stop() {
+  # ESP32 latches last velocity; Ctrl+C alone is not a stop.
+  ros2 topic pub --once /cmd_vel_joy_robot geometry_msgs/msg/Twist \
+    '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}' \
+    >/dev/null 2>&1 || true
+}
+
+trap publish_stop EXIT INT TERM
+
 echo "Starting gamepad teleop → /cmd_vel_joy_robot (mux priority 150)"
-echo "Clear the area. Ctrl+C stops this launch (ESP32 may need an explicit stop)."
-exec ros2 launch ugv_tools teleop_twist_joy.launch.py "$@"
+echo "Clear the area. Center sticks (zero publish) before exit; launcher also sends stop on Ctrl+C."
+ros2 launch ugv_tools teleop_twist_joy.launch.py "$@"

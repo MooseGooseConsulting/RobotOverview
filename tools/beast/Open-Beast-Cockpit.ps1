@@ -17,9 +17,17 @@ $bridge = if (-not [string]::IsNullOrWhiteSpace($env:BEAST_COCKPIT_WS_URL)) {
     'wss://beast-01.tyrannosaurus-magellanic.ts.net/'
 }
 
+$hangarDefaultBridge = 'wss://beast-01.tyrannosaurus-magellanic.ts.net/'
 $verifyScript = Join-Path $PSScriptRoot 'Verify-Beast-Cockpit.ps1'
 if ($Verify) {
-    & $verifyScript -WsUrl $bridge
+    # Hangar /cockpit uses the *deployed* server env, not this workstation.
+    # Default matches Hangar; if BEAST_COCKPIT_WS_URL is set locally, still
+    # smoke-test the Hangar default so -Verify matches what the browser opens.
+    $verifyUrl = if ($env:BEAST_COCKPIT_WS_URL) { $hangarDefaultBridge } else { $bridge }
+    if ($verifyUrl -ne $bridge) {
+        Write-Host "WARN  verifying Hangar default ($verifyUrl); local BEAST_COCKPIT_WS_URL=$bridge"
+    }
+    & $verifyScript -WsUrl $verifyUrl
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'Bridge verify failed — not opening Hangar. Fix ACL/serve/cockpit, then retry.'
         exit $LASTEXITCODE
@@ -31,7 +39,8 @@ if (-not $SkipOpen) {
     Write-Host "Opened $url"
 }
 
-Write-Host "Bridge default: $bridge"
+Write-Host "Hangar page: $url (bridge from Hangar server env; default $hangarDefaultBridge)"
+Write-Host "Workstation bridge hint: $bridge"
 Write-Host "Smoke test: pwsh -File $verifyScript"
 Write-Host "If ROBOT UNREACHABLE but ssh beast-01-ts works: tag:robot ACL needs tcp:443 + tailscale serve."
-Write-Host "On robot: systemctl is-active beast-cockpit; tailscale serve status"
+Write-Host "On robot: systemctl is-active beast-cockpit; sudo -n systemctl restart beast-cockpit-serve"

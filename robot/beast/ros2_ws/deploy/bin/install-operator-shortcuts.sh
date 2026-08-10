@@ -2,7 +2,7 @@
 # Copyright 2026 Coldaine
 # SPDX-License-Identifier: Apache-2.0
 #
-# install-operator-shortcuts.sh — install beast-gamepad + desktop launcher on BEAST-01.
+# install-operator-shortcuts.sh - install beast-gamepad + desktop launcher on BEAST-01.
 #   BEAST_HOST=beast-01-ts robot/beast/ros2_ws/deploy/bin/install-operator-shortcuts.sh
 set -euo pipefail
 
@@ -30,11 +30,12 @@ scp "${ssh_opts[@]}" \
   "$HOST:/tmp/"
 
 say "install"
-remote="sudo install -m 0755 /tmp/beast-gamepad /usr/local/bin/beast-gamepad \
-  && mkdir -p \"\$HOME/Desktop\" \
-  && install -m 0755 /tmp/beast-gamepad.desktop \"\$HOME/Desktop/beast-gamepad.desktop\" \
-  && gio set \"\$HOME/Desktop/beast-gamepad.desktop\" metadata::trusted true 2>/dev/null || true \
-  && echo installed"
+# Only gio metadata is best-effort; a failed install must fail the script.
+remote='sudo install -m 0755 /tmp/beast-gamepad /usr/local/bin/beast-gamepad \
+  && mkdir -p "$HOME/Desktop" \
+  && install -m 0755 /tmp/beast-gamepad.desktop "$HOME/Desktop/beast-gamepad.desktop" \
+  && { gio set "$HOME/Desktop/beast-gamepad.desktop" metadata::trusted true 2>/dev/null || true; } \
+  && echo installed'
 
 if [ -n "$sudo_pw" ]; then
   printf '%s\n' "$sudo_pw" \
@@ -43,4 +44,4 @@ else
   ssh -t "$HOST" "sudo -v && $remote"
 fi
 
-say "done — plug pad, then beast-gamepad or Desktop → BEAST Gamepad Teleop"
+say "done - plug pad, then beast-gamepad or Desktop → BEAST Gamepad Teleop"

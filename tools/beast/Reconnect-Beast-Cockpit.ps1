@@ -57,16 +57,28 @@ if (-not $sshHost) {
 }
 Write-Host "PASS  SSH $sshHost"
 
-$sudoPw = $env:BEAST_SUDO_PASSWORD
-$sudoSrc = '$BEAST_SUDO_PASSWORD'
-if ([string]::IsNullOrWhiteSpace($sudoPw) -and (Get-Command doppler -ErrorAction SilentlyContinue)) {
-    $sudoPw = doppler secrets get BEAST_JETSON_ADMIN_PASSWORD --project homelab --config dev --plain 2>$null
-    if (-not [string]::IsNullOrWhiteSpace($sudoPw)) { $sudoSrc = 'Doppler homelab/dev' }
+# Prefer scoped passwordless sudo (/etc/sudoers.d/beast-ops). Doppler only if -n fails.
+$needPw = $true
+$probe = & ssh -o BatchMode=yes -o ConnectTimeout=10 $sshHost 'sudo -n true 2>/dev/null; sudo -n systemctl is-active beast-cockpit >/dev/null 2>&1; echo $?'
+if ($probe -match '0') {
+    $needPw = $false
+    Write-Host 'sudo: passwordless beast-ops allowlist'
 }
-if ([string]::IsNullOrWhiteSpace($sudoPw)) {
-    Write-Host 'WARN  no sudo password — Serve/start may fail if passwordless sudo is unset'
-} else {
-    Write-Host "sudo: using $sudoSrc"
+
+$sudoPw = ''
+$sudoSrc = ''
+if ($needPw) {
+    $sudoPw = $env:BEAST_SUDO_PASSWORD
+    $sudoSrc = '$BEAST_SUDO_PASSWORD'
+    if ([string]::IsNullOrWhiteSpace($sudoPw) -and (Get-Command doppler -ErrorAction SilentlyContinue)) {
+        $sudoPw = doppler secrets get BEAST_JETSON_ADMIN_PASSWORD --project homelab --config dev --plain 2>$null
+        if (-not [string]::IsNullOrWhiteSpace($sudoPw)) { $sudoSrc = 'Doppler homelab/dev (break-glass)' }
+    }
+    if ([string]::IsNullOrWhiteSpace($sudoPw)) {
+        Write-Host 'WARN  no sudo password and passwordless sudo unset — Serve/start may fail'
+    } else {
+        Write-Host "sudo: using $sudoSrc"
+    }
 }
 
 $remoteBody = @'
@@ -80,15 +92,18 @@ if systemctl is-active --quiet beast-cockpit; then
   ok "beast-cockpit active"
 else
   warn "starting beast-cockpit"
-  sudo systemctl start beast-cockpit
+  sudo -n systemctl start beast-cockpit 2>/dev/null || sudo systemctl start beast-cockpit
   systemctl is-active --quiet beast-cockpit && ok "beast-cockpit started" || bad "beast-cockpit failed to start"
 fi
 
+# restart (not start): RemainAfterExit oneshot ignores start while already active
 if systemctl cat beast-cockpit-serve.service >/dev/null 2>&1; then
-  sudo systemctl start beast-cockpit-serve.service || true
+  sudo -n systemctl restart beast-cockpit-serve.service 2>/dev/null \
+    || sudo systemctl restart beast-cockpit-serve.service || true
 fi
 
-sudo tailscale serve --bg --https=443 http://127.0.0.1:9090
+sudo -n tailscale serve --bg --https=443 http://127.0.0.1:9090 2>/dev/null \
+  || sudo tailscale serve --bg --https=443 http://127.0.0.1:9090
 
 sleep 2
 ss -ltn 2>/dev/null | awk '{print $4}' | grep -qx '127.0.0.1:9090' \

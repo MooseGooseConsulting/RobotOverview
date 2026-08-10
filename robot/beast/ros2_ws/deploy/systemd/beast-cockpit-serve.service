@@ -4,19 +4,25 @@
 #   https://beast-01.<tailnet>.ts.net/  →  http://127.0.0.1:9090
 # Policy must grant tag:robot tcp:443 (coldaine-homelab policy.hujson).
 # Homelab recipe: infra/network/tailscale/beast-01-serve.sh
+#
+# RemainAfterExit keeps the unit "active" after boot apply. To re-apply Serve
+# after an ACL wipe without reboot: systemctl restart beast-cockpit-serve
+# (start alone is a no-op while active).
 
 [Unit]
 Description=BEAST-01 Tailscale Serve for cockpit rosbridge (443 → 127.0.0.1:9090)
 Documentation=file:///home/beast/beast/RobotOverview/robot/beast/ros2_ws/docs/cockpit.md
 After=network-online.target tailscaled.service
-Wants=network-online.target
-Requires=tailscaled.service
+Wants=network-online.target tailscaled.service
+ConditionPathExists=/usr/bin/tailscale
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/bin/tailscale serve --bg --https=443 http://127.0.0.1:9090
-ExecStartPost=/bin/sh -c 'tailscale serve status | grep -q 127.0.0.1:9090'
+# /bin/sh so CI systemd-analyze verify does not require the host binary path
+# as ExecStart (tailscale is robot-only). ConditionPathExists still gates runtime.
+ExecStart=/bin/sh -c '/usr/bin/tailscale serve --bg --https=443 http://127.0.0.1:9090'
+ExecStartPost=/bin/sh -c '/usr/bin/tailscale serve status | grep -q 127.0.0.1:9090'
 
 [Install]
 WantedBy=multi-user.target

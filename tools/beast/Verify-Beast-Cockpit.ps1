@@ -88,11 +88,14 @@ try {
 }
 
 if (-not $SkipTopic) {
+    # Prefer /ugv/voltage — always on when beast-ros-base is healthy.
+    # /cockpit/status is 1 Hz DiagnosticArray; rosbridge historically choked on
+    # wrong msg packages and byte level fields in some clients.
     $subscribe = @{
         op    = 'subscribe'
-        id    = 'verify-cockpit-status'
-        topic = '/cockpit/status'
-        type  = 'diagnostic_msgs/DiagnosticArray'
+        id    = 'verify-voltage'
+        topic = '/ugv/voltage'
+        type  = 'sensor_msgs/msg/BatteryState'
     } | ConvertTo-Json -Compress
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($subscribe)
     $segment = [ArraySegment[byte]]::new($bytes)
@@ -107,10 +110,11 @@ if (-not $SkipTopic) {
             $recvSeg = [ArraySegment[byte]]::new($buffer)
             $result = $ws.ReceiveAsync($recvSeg, $recvCts.Token).GetAwaiter().GetResult()
             $text = [System.Text.Encoding]::UTF8.GetString($buffer, 0, $result.Count)
-            if ($text -match '"topic"\s*:\s*"/cockpit/status"' -or $text -match '\\/cockpit\\/status') {
+            # rosbridge JSON-escapes slashes: "\/ugv\/voltage"
+            if ($text -match 'ugv(?:\\/|/)voltage' -and $text -match '"op"\s*:\s*"publish"') {
                 $got = $true
-                Write-Pass "/cockpit/status published over bridge"
-            } elseif ($text -match '"op"\s*:\s*"status"' -and $text -match 'error|Error|refused') {
+                Write-Pass '/ugv/voltage published over bridge'
+            } elseif ($text -match '"op"\s*:\s*"status"' -and $text -match 'error|Error|refused|Unable') {
                 Write-Fail "rosbridge status error: $($text.Substring(0, [Math]::Min(180, $text.Length)))"
                 break
             }
@@ -121,7 +125,7 @@ if (-not $SkipTopic) {
         }
     }
     if (-not $got -and $script:fail -eq 0) {
-        Write-Fail "/cockpit/status not received within ${TimeoutSec}s (cockpit_status node down?)"
+        Write-Fail "/ugv/voltage not received within ${TimeoutSec}s (bridge allowlist / beast_power?)"
     }
 }
 

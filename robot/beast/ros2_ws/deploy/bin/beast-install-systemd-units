@@ -1,0 +1,22 @@
+#!/bin/bash
+# Install/refresh BEAST systemd units from the workspace deploy tree.
+# Listed in /etc/sudoers.d/beast-ops so user `beast` can run it passwordless.
+set -euo pipefail
+
+WS_DIR="${BEAST_WS_DIR:-/home/beast/beast/RobotOverview/robot/beast/ros2_ws}"
+SRC="$WS_DIR/deploy/systemd"
+if [ ! -d "$SRC" ]; then
+  echo "missing systemd dir: $SRC" >&2
+  exit 1
+fi
+
+shopt -s nullglob
+units=("$SRC"/*.service "$SRC"/*.timer)
+if [ "${#units[@]}" -eq 0 ]; then
+  echo "no units under $SRC" >&2
+  exit 1
+fi
+
+install -m 0644 "${units[@]}" /etc/systemd/system/
+systemctl daemon-reload
+echo "installed ${#units[@]} unit(s) from $SRC"

@@ -244,11 +244,13 @@ colcon build --packages-select ugv_bringup ugv_cockpit --symlink-install
 `ugv_bringup` is in that list because the cockpit's arming display depends on the two
 topics it now publishes — see [Safety state](#safety-state-the-cockpit-gates-on) below.
 
-### 2. Install the unit (still not enabled)
+### 2. Install the units (still not enabled)
 
 ```bash
 sudo install -D -m 0644 deploy/systemd/beast-cockpit.service \
   /etc/systemd/system/beast-cockpit.service
+sudo install -D -m 0644 deploy/systemd/beast-cockpit-serve.service \
+  /etc/systemd/system/beast-cockpit-serve.service
 sudo systemctl daemon-reload
 ```
 
@@ -288,7 +290,8 @@ pwsh -File tools/beast/Verify-Beast-Cockpit.ps1
 ```bash
 sudo systemctl start beast-cockpit.service           # this session only
 sudo systemctl enable --now beast-cockpit.service   # every boot — a decision
-sudo systemctl start beast-cockpit-serve.service    # ensure tailscale serve → :9090
+# Serve oneshot uses RemainAfterExit — use restart to re-apply after ACL wipe
+sudo systemctl restart beast-cockpit-serve.service
 sudo systemctl enable --now beast-cockpit-serve.service  # optional, with cockpit
 sudo systemctl disable --now beast-cockpit.service  # close it again
 ```
