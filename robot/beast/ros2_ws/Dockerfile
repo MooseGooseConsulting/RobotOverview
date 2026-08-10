@@ -42,6 +42,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-humble-xacro \
       ros-humble-robot-state-publisher \
       ros-humble-joint-state-publisher \
+      ros-humble-controller-manager \
+      ros-humble-position-controllers \
+      ros-humble-joint-state-broadcaster \
       ros-humble-tf2 \
       ros-humble-tf2-ros \
       ros-humble-tf2-geometry-msgs \
@@ -69,8 +72,7 @@ RUN rosdep init 2>/dev/null || true \
       --skip-keys "depthai_ros_driver depthai_descriptions ugv_vision \
         nav2_behaviors nav2_costmap_2d nav2_lifecycle_manager \
         nav2_velocity_smoother rosbridge_server rosbridge_library \
-        rviz2 joint_state_publisher_gui controller_manager \
-        position_controllers joint_state_broadcaster" \
+        rviz2 joint_state_publisher_gui" \
  && rm -rf /var/lib/apt/lists/*
 
 SHELL ["/bin/bash", "-c"]
@@ -98,6 +100,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-humble-xacro \
       ros-humble-robot-state-publisher \
       ros-humble-joint-state-publisher \
+      ros-humble-controller-manager \
+      ros-humble-position-controllers \
+      ros-humble-joint-state-broadcaster \
       ros-humble-tf2 \
       ros-humble-tf2-ros \
       ros-humble-tf2-geometry-msgs \

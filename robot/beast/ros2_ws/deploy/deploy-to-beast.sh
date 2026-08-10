@@ -2,7 +2,8 @@
 # Copyright 2026 Coldaine
 # SPDX-License-Identifier: Apache-2.0
 #
-# deploy-to-beast.sh — the durable path for landing repo changes on BEAST-01.
+# deploy-to-beast.sh — manual override / Phase 0 source-sync path for BEAST-01.
+# Canonical pull deploy lives in coldaine-homelab/deployments/beast-01/.
 #
 # Run from any checkout of this repo (Windows Git Bash / Linux / macOS):
 #

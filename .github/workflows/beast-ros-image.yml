@@ -3,13 +3,29 @@ name: Build BEAST ROS image
 on:
   pull_request:
     paths:
-      - 'robot/beast/ros2_ws/**'
+      - 'robot/beast/ros2_ws/Dockerfile'
+      - 'robot/beast/ros2_ws/.dockerignore'
+      - 'robot/beast/ros2_ws/src/ugv_main/beast_power/**'
+      - 'robot/beast/ros2_ws/src/ugv_main/beast_base/**'
+      - 'robot/beast/ros2_ws/src/ugv_main/ugv_bringup/**'
+      - 'robot/beast/ros2_ws/src/ugv_main/ugv_cockpit/**'
+      - 'robot/beast/ros2_ws/src/ugv_main/ugv_description/**'
+      - 'robot/beast/ros2_ws/src/ugv_else/ldlidar/**'
+      - 'robot/beast/ros2_ws/src/ugv_else/rf2o_laser_odometry/**'
       - '.github/workflows/beast-ros-image.yml'
   push:
     branches:
       - main
     paths:
-      - 'robot/beast/ros2_ws/**'
+      - 'robot/beast/ros2_ws/Dockerfile'
+      - 'robot/beast/ros2_ws/.dockerignore'
+      - 'robot/beast/ros2_ws/src/ugv_main/beast_power/**'
+      - 'robot/beast/ros2_ws/src/ugv_main/beast_base/**'
+      - 'robot/beast/ros2_ws/src/ugv_main/ugv_bringup/**'
+      - 'robot/beast/ros2_ws/src/ugv_main/ugv_cockpit/**'
+      - 'robot/beast/ros2_ws/src/ugv_main/ugv_description/**'
+      - 'robot/beast/ros2_ws/src/ugv_else/ldlidar/**'
+      - 'robot/beast/ros2_ws/src/ugv_else/rf2o_laser_odometry/**'
       - '.github/workflows/beast-ros-image.yml'
   workflow_dispatch:
 

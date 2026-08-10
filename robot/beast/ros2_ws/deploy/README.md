@@ -2,9 +2,9 @@
 
 ## Canonical deploy (pull model)
 
-**Canonical deploy manifests live in
+**Canonical deploy manifests live in the private
 [Coldaine/coldaine-homelab](https://github.com/Coldaine/coldaine-homelab)
-`deployments/beast-01/` (private, 0 stars)**
+`deployments/beast-01/` tree**
 — install scripts, systemd/container run units, `manifest.yaml` (image
 digest), `beast-pull`, and `verify-beast`. Merging robot code to
 `RobotOverview` `main` builds
