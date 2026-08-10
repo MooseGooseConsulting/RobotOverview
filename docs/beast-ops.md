@@ -20,10 +20,16 @@ power cycle, reconnect Serve + smoke-test WSS** with
 `pwsh -File tools/beast/Reconnect-Beast-Cockpit.ps1` (waits for SSH, starts
 cockpit if needed, re-applies `tailscale serve`, runs `Verify-Beast-Cockpit`).
 LAN fallback: `ssh beast-01` / `ssh beast@192.168.0.187` (`wlP1p1s0`).
-**Ethernet unplugged.** **UDM DHCP reservation set 2026-08-10:** Wi‑Fi MAC
-`20:bd:1d:d4:91:35` → `192.168.0.187` (client name `beast-01`, Local DNS
-enabled). Applies on the next DHCP renew/reassociate — does not revive a
-currently offline radio by itself.
+**Ethernet unplugged.** **UDM DHCP reservations set 2026-08-10:**
+- Wi‑Fi MAC `20:bd:1d:d4:91:35` → `192.168.0.187` (name `beast-01`)
+- Ethernet MAC `4c:bb:47:a6:4e:bd` → `192.168.0.166` (name `beast-01-eth`)
+
+**Clock hardening (2026-08-10):** The Orin Nano dev kit has no RTC battery —
+cold boot starts at epoch 0. `tailscaled` started before NTP synced, rejected
+control plane certs as "not yet valid," and stayed offline. Fix: `fake-hwclock`
+(saves/restores time across reboots) + `tailscaled.service.d/time-sync.conf`
+(`After=time-sync.target`). `beast-link-watch` (60s timer) re-ups Wi‑Fi and
+restarts `tailscaled` if the underlay or Tailscale drops.
 
 **Passwordless ops sudo (2026-08-10):** User `beast` has a scoped
 `/etc/sudoers.d/beast-ops` allowlist (not `NOPASSWD:ALL`) for

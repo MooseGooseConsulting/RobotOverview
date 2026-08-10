@@ -1,0 +1,7 @@
+[Unit]
+Description=BEAST-01 link watchdog — recover underlay + Tailscale
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/beast-link-watch
