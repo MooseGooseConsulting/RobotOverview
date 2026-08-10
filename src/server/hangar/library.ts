@@ -74,7 +74,8 @@ export function createHangarLibraryClient(config: HangarLibraryConfig): S3Client
 }
 
 export interface LibraryObject {
-  body: ReadableStream<Uint8Array> | Blob | NodeJS.ReadableStream;
+  /** Fully buffered object bytes (client is closed before return). */
+  bytes: Uint8Array;
   contentType: string | undefined;
   contentLength: number | undefined;
   contentDisposition: string | undefined;
@@ -93,11 +94,15 @@ export async function getHangarLibraryObject(
         Key: key,
       }),
     );
-    if (!result.Body) return null;
+    if (!result.Body || typeof result.Body.transformToByteArray !== 'function') {
+      return null;
+    }
+    // Buffer before destroy — tearing down the client aborts an unread stream ("aborted").
+    const bytes = await result.Body.transformToByteArray();
     return {
-      body: result.Body as LibraryObject['body'],
+      bytes,
       contentType: result.ContentType,
-      contentLength: result.ContentLength,
+      contentLength: result.ContentLength ?? bytes.byteLength,
       contentDisposition: result.ContentDisposition,
     };
   } catch (error) {
