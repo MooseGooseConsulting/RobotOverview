@@ -92,7 +92,7 @@ if (-not $SkipTopic) {
         op    = 'subscribe'
         id    = 'verify-cockpit-status'
         topic = '/cockpit/status'
-        type  = 'ugv_cockpit_msgs/msg/CockpitStatus'
+        type  = 'diagnostic_msgs/DiagnosticArray'
     } | ConvertTo-Json -Compress
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($subscribe)
     $segment = [ArraySegment[byte]]::new($bytes)

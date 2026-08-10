@@ -9,9 +9,10 @@
     beast-ros-base / beast-cockpit → tailscale serve :443 → WSS smoke test.
 
   Sudo on the robot: BEAST_SUDO_PASSWORD, else Doppler BEAST_JETSON_ADMIN_PASSWORD.
+  Prefers beast-01-ts (Tailscale); falls back to LAN aliases.
 
 .PARAMETER HostName
-  SSH host (default tries beast-01-ts, then beast-01, then beast@192.168.0.187).
+  SSH host override.
 
 .PARAMETER WaitSec
   How long to wait for SSH before giving up (default 180).
@@ -24,11 +25,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Prefer Tailscale SSH — mDNS Host beast-01 often fails from this workstation.
 $candidates = @(
     $(if ($HostName) { $HostName } else { $null })
     'beast-01-ts'
-    'beast-01'
     'beast@192.168.0.187'
+    'beast-01'
 ) | Where-Object { $_ } | Select-Object -Unique
 
 function Test-Ssh([string]$Target) {
@@ -67,8 +69,7 @@ if ([string]::IsNullOrWhiteSpace($sudoPw)) {
     Write-Host "sudo: using $sudoSrc"
 }
 
-$remoteFile = Join-Path ([System.IO.Path]::GetTempPath()) ("beast-reconnect-{0}.sh" -f [guid]::NewGuid().ToString('n'))
-@'
+$remoteBody = @'
 set -euo pipefail
 ok(){ printf "PASS  %s\n" "$*"; }
 bad(){ printf "FAIL  %s\n" "$*"; exit 1; }
@@ -98,22 +99,20 @@ printf '%s\n' "$serve" | grep -q '127.0.0.1:9090' \
   && ok "tailscale serve fronts 9090" \
   || bad "tailscale serve not fronting 9090"
 printf '%s\n' "$serve"
-'@ | Set-Content -LiteralPath $remoteFile -Encoding utf8NoBOM
+'@
 
-try {
-    if (-not [string]::IsNullOrWhiteSpace($sudoPw)) {
-        # Cache sudo timestamp on the robot (password on stdin only), then run restore.
-        $sudoPw | & ssh -o BatchMode=yes -o ConnectTimeout=15 $sshHost "sudo -S -p '' -v"
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host 'FAIL  sudo -v on robot failed'
-            exit 1
-        }
-    }
-    Get-Content -LiteralPath $remoteFile -Raw | & ssh -o BatchMode=yes -o ConnectTimeout=20 $sshHost 'bash -s'
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-} finally {
-    Remove-Item -LiteralPath $remoteFile -Force -ErrorAction SilentlyContinue
-}
+$runner = @'
+set -euo pipefail
+read -r SUDO_PW || true
+if [ -n "${SUDO_PW:-}" ]; then
+  printf '%s\n' "$SUDO_PW" | sudo -S -p '' -v
+fi
+exec bash -s
+'@
+
+$payload = ($(if ($sudoPw) { $sudoPw } else { '' })) + "`n" + $remoteBody
+$payload | & ssh -o BatchMode=yes -o ConnectTimeout=20 $sshHost $runner
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if (-not $SkipVerify) {
     $verify = Join-Path $PSScriptRoot 'Verify-Beast-Cockpit.ps1'
