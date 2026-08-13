@@ -144,12 +144,36 @@ describe('rosClient and hooks', () => {
     });
 
     // Voltage hook should see new value, but odom hook MUST stay referentially stable!
-    // Only real volts are carried — an inbound `percentage` is ignored, never surfaced.
+    // SOC is carried since 2026-08-13 (beast_power's OCV table is honest);
+    // absent from the message it surfaces as null, never a fake 0.
     expect(voltageHook.result.current.voltage).toBe(11.5);
-    expect(voltageHook.result.current).not.toHaveProperty('percentage');
+    expect(voltageHook.result.current.percentage).toBeNull();
     expect(voltageHook.result.current.hasReceived).toBe(true);
     expect(voltageHook.result.current).not.toBe(initialVoltage);
     expect(odomHook.result.current).toBe(initialOdom); // REFERENTIALLY EQUAL
+  });
+
+  it('carries a finite OCV percentage and nulls a NaN one', () => {
+    openSocket();
+    const voltageHook = renderHook(() => useCockpitVoltage());
+
+    act(() => {
+      MockWebSocket.latestInstance?.triggerMessage({
+        op: 'publish',
+        topic: '/ugv/voltage',
+        msg: { voltage: 11.5, percentage: 0.64, present: true },
+      });
+    });
+    expect(voltageHook.result.current.percentage).toBeCloseTo(0.64, 5);
+
+    act(() => {
+      MockWebSocket.latestInstance?.triggerMessage({
+        op: 'publish',
+        topic: '/ugv/voltage',
+        msg: { voltage: 11.5, percentage: NaN, present: true },
+      });
+    });
+    expect(voltageHook.result.current.percentage).toBeNull();
   });
 
   // BatteryState honesty gates (2026-08-07): current is a measurement only when

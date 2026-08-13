@@ -104,6 +104,7 @@ export interface InboundMsg {
   format?: string;
   voltage?: number;
   current?: number;
+  percentage?: number;
   power_supply_status?: number;
   present?: boolean;
   header?: { stamp?: { sec?: number; nanosec?: number } };
@@ -200,11 +201,16 @@ export interface CockpitVoltage extends SliceMeta {
    * Signed pack amps (positive = charging), or null. Carried only when the
    * publisher fills power_supply_status — bringup's legacy dummy current
    * arrives as 0.0 with status UNKNOWN and is nulled at ingest so it can never
-   * render as a real 0.0 A draw. (SOC stays deliberately un-carried: usable
-   * OCV endpoints are pinned in beast_power/soc.py, but the cockpit banner
-   * stays voltage-only until mid-curve rest samples earn a %.)
+   * render as a real 0.0 A draw.
    */
   current: number | null;
+  /**
+   * State of charge 0..1 from the 3S OCV table (beast_power/soc.py), or null
+   * when the publisher reports NaN/no sensor. OCV-only: reads LOW under load
+   * and HIGH while charging — consumers alarming on SOC must gate on charging
+   * state. NaN arrives as null via the rosbridge NaN repair above.
+   */
+  percentage: number | null;
   /** sensor_msgs/BatteryState power_supply_status (1=CHARGING … 4=FULL), null if unreported/UNKNOWN-0. */
   powerSupplyStatus: number | null;
   /** BatteryState.present — false is the publisher's own absent-sensor report. */
@@ -415,7 +421,7 @@ function blankScan(): ScanData {
 }
 
 function blankVoltage(): VoltageData {
-  return { voltage: null, current: null, powerSupplyStatus: null, present: null };
+  return { voltage: null, current: null, percentage: null, powerSupplyStatus: null, present: null };
 }
 
 let voltageData: VoltageData = blankVoltage();
@@ -764,7 +770,7 @@ function releaseImageUrls() {
 // SSR compatible Server Snapshots (stable references)
 const serverState = {
   connection: 'disconnected' as ConnectionState,
-  voltage: { voltage: null, current: null, powerSupplyStatus: null, present: null, ...blankMeta() } as CockpitVoltage,
+  voltage: { voltage: null, current: null, percentage: null, powerSupplyStatus: null, present: null, ...blankMeta() } as CockpitVoltage,
   odom: { x: null, y: null, yaw: null, linearSpeed: null, angularSpeed: null, ...blankMeta() } as CockpitOdom,
   imu: { ax: null, ay: null, az: null, gx: null, gy: null, gz: null, ...blankMeta() } as CockpitImu,
   map: { width: 0, height: 0, resolution: 0.05, originX: 0, originY: 0, data: [], ...blankMeta() } as CockpitMap,
@@ -1072,6 +1078,7 @@ export const rosClient = {
         voltageData = {
           voltage: present === false ? null : finite(msg.voltage),
           current: measured ? finite(msg.current) : null,
+          percentage: present === false ? null : finite(msg.percentage),
           powerSupplyStatus: status !== null && status > 0 ? status : null,
           present,
         };
