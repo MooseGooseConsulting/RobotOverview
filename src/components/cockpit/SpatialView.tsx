@@ -95,7 +95,7 @@ export function SpatialView() {
     );
     ctx.fillStyle = 'rgba(239,68,68,0.35)';
     ctx.fillText(
-      'ORIENTATION UNVERIFIED',
+      'REAR MAST · VERIFIED 2026-08-10',
       Cx + mid.dx * wedgeR * 0.72,
       Cy + mid.dy * wedgeR * 0.72 + 11,
     );
