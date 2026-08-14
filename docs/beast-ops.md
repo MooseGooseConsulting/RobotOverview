@@ -7,6 +7,17 @@ re-verify against the live robot before relying on anything stale.
 
 ## Quick connect
 
+**Wi-Fi telemetry + dark-period autopsy (2026-08-10 ~23:00 UTC):** The 22:38Z
+full-dark event (Tailscale + Ethernet + Wi-Fi all dead) was **3S pack
+exhaustion**, not Wi-Fi — power log fell through 9.23 V at 22:30Z
+(0.73% pack, discharging) and hit cutoff at the UDM last-seen 22:38:46Z;
+board rebooted 22:49Z once the charger was attached. New monitor:
+`beast-wifi-telemetry.timer` samples Wi-Fi/link quality every 60s into
+`/var/log/beast/wifi-telemetry.jsonl` (signal, band, BSSID, route,
+Tailscale, deauth reason on transitions). journald is now **persistent**
+(`/var/log/journal` created 2026-08-10 — previously volatile, all
+pre-reboot logs were lost).
+
 **Connectivity 2026-08-10 (live):** Robot powered. Prefer
 `ssh beast-01-ts` (Tailscale `100.107.16.72`) — **ACL fixed** same day
 (`tag:robot` + user `beast` in `coldaine-homelab` policy; coldaine-homelab

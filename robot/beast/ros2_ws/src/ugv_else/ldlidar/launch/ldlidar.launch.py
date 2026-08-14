@@ -80,13 +80,13 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'angle_crop_min',
             default_value=EnvironmentVariable(
-                'UGV_LIDAR_ANGLE_CROP_MIN', default_value='225.0'
+                'UGV_LIDAR_ANGLE_CROP_MIN', default_value='218.0'
             ),
         ),
         DeclareLaunchArgument(
             'angle_crop_max',
             default_value=EnvironmentVariable(
-                'UGV_LIDAR_ANGLE_CROP_MAX', default_value='315.0'
+                'UGV_LIDAR_ANGLE_CROP_MAX', default_value='322.0'
             ),
         ),
         DeclareLaunchArgument(

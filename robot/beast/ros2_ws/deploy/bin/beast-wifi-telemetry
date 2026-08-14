@@ -1,0 +1,204 @@
+#!/bin/bash
+# beast-wifi-telemetry — append one Wi-Fi link-quality JSON line per minute.
+# Runs via beast-wifi-telemetry.timer. Logs to /var/log/beast/wifi-telemetry.jsonl.
+# Installed 2026-08-10 after Wi-Fi dark period (UDM session ended 22:38Z with no
+# retained mid-session deauth codes on the Orin — need continuous evidence).
+set -euo pipefail
+
+if [ -f /etc/beast/ugv.env ]; then
+  # Honor UGV_WIFI_INTERFACE from the live robot env. Temporarily relax -u
+  # so an unset optional key in that file cannot abort the sample.
+  set +u
+  # shellcheck disable=SC1091
+  . /etc/beast/ugv.env
+  set -u
+fi
+IFACE="${UGV_WIFI_INTERFACE:-${BEAST_WIFI_IFACE:-wlP1p1s0}}"
+LOG_DIR=/var/log/beast
+LOG_FILE="$LOG_DIR/wifi-telemetry.jsonl"
+STATE_FILE=/run/beast-wifi-telemetry.state
+LOG_TAG=beast-wifi-telemetry
+
+mkdir -p "$LOG_DIR"
+
+gateway_reachable() {
+  local gw
+  gw=$(ip route show default 2>/dev/null | awk '/default/ {print $3; exit}')
+  if [ -z "$gw" ]; then return 1; fi
+  ping -c 1 -W 2 "$gw" >/dev/null 2>&1
+}
+
+ts_online() {
+  tailscale status --json 2>/dev/null | python3 -c \
+    'import sys,json; d=json.load(sys.stdin); print("true" if d.get("Self",{}).get("Online",False) else "false")' \
+    2>/dev/null || echo "false"
+}
+
+# Parse `iw dev <iface> link` into env-ish lines.
+link_raw=$(iw dev "$IFACE" link 2>/dev/null || true)
+if echo "$link_raw" | grep -q '^Connected to '; then
+  connected=true
+  bssid=$(echo "$link_raw" | awk '/^Connected to /{print $3; exit}')
+  ssid=$(echo "$link_raw" | awk -F': ' '/SSID:/{print $2; exit}')
+  freq=$(echo "$link_raw" | awk '/freq:/{print $2; exit}')
+  signal=$(echo "$link_raw" | awk '/signal:/{print $2; exit}')
+  rx_bitrate=$(echo "$link_raw" | awk -F': ' '/rx bitrate:/{print $2; exit}')
+  tx_bitrate=$(echo "$link_raw" | awk -F': ' '/tx bitrate:/{print $2; exit}')
+else
+  connected=false
+  bssid=""
+  ssid=""
+  freq=""
+  signal=""
+  rx_bitrate=""
+  tx_bitrate=""
+fi
+
+# Channel / band from freq (MHz) or iw info fallback.
+channel=""
+band=""
+if [ -n "${freq:-}" ]; then
+  # Approximate band from freq when iw link only gives MHz.
+  if [ "$freq" -ge 59000 ] 2>/dev/null; then
+    band="60GHz"
+  elif [ "$freq" -ge 5000 ] 2>/dev/null; then
+    band="5GHz"
+  elif [ "$freq" -ge 2400 ] 2>/dev/null; then
+    band="2.4GHz"
+  else
+    band="unknown"
+  fi
+fi
+info_raw=$(iw dev "$IFACE" info 2>/dev/null || true)
+if [ -z "$channel" ]; then
+  channel=$(echo "$info_raw" | awk '/channel/{print $2; exit}')
+fi
+if [ -z "$band" ] && echo "$info_raw" | grep -q 'channel'; then
+  # Prefer band inferred from channel number when freq missing.
+  if [ -n "${channel:-}" ] && [ "$channel" -ge 36 ] 2>/dev/null; then
+    band="5GHz"
+  elif [ -n "${channel:-}" ]; then
+    band="2.4GHz"
+  fi
+fi
+
+tx_power=$(echo "$info_raw" | awk '/txpower/{print $2; exit}')
+# `iw get power_save` exits non-zero when the iface has vanished; pipefail
+# plus set -e would abort the sample. Treat a missing iface as "unknown".
+powersave=$(iw dev "$IFACE" get power_save 2>/dev/null | awk '{print $NF; exit}' || true)
+# Fall back to NM connection powersave if iw missing.
+if [ -z "${powersave:-}" ]; then
+  conn=$(nmcli -t -f NAME,TYPE,DEVICE connection show --active 2>/dev/null \
+    | awk -F: -v iface="$IFACE" '$2=="802-11-wireless" && $3==iface {print $1; exit}')
+  if [ -n "${conn:-}" ]; then
+    powersave=$(nmcli -g 802-11-wireless.powersave connection show "$conn" 2>/dev/null || true)
+  fi
+fi
+
+if gateway_reachable; then route_ok=true; else route_ok=false; fi
+ts_ok=$(ts_online)
+
+# v2 (2026-08-13): link-quality counters from the station dump + iwlwifi
+# firmware-error count, so retries/beacon loss/driver crashes land in the
+# same JSONL timeline as the signal series.
+station_raw=$(iw dev "$IFACE" station dump 2>/dev/null || true)
+# station dump fields are "name:\tvalue" (colon TAB) - awk -F': ' misses them.
+tx_retries=$(echo "$station_raw" | awk -F':' '/tx retries:/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
+tx_failed=$(echo "$station_raw" | awk -F':' '/tx failed:/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
+beacon_loss=$(echo "$station_raw" | awk -F':' '/beacon loss:/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
+beacon_rx=$(echo "$station_raw" | awk -F':' '/beacon rx:/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
+exp_tput=$(echo "$station_raw" | awk -F':' '/expected throughput:/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
+fw_errors=$(dmesg 2>/dev/null | grep -icE 'iwlwifi.*(error|fail|crash|Microcode)' || true)
+[ -z "$fw_errors" ] && fw_errors=0
+
+prev_connected=""
+if [ -f "$STATE_FILE" ]; then
+  prev_connected=$(cat "$STATE_FILE" 2>/dev/null || true)
+fi
+transition=false
+deauth_line=""
+if [ -n "$prev_connected" ] && [ "$prev_connected" != "$connected" ]; then
+  transition=true
+  deauth_line=$(journalctl -u NetworkManager -u wpa_supplicant --since "-10 min" --no-pager -o short-iso 2>/dev/null \
+    | grep -iE 'CTRL-EVENT-DISCONNECTED|deauth|disassoc|reason|state change:.*(disconnect|deactiv)|Connection to .* lost' \
+    | tail -1 || true)
+fi
+printf '%s\n' "$connected" > "$STATE_FILE"
+
+# Emit one JSON object via python for safe escaping.
+export BT_TS BT_CONNECTED BT_SSID BT_BSSID BT_CHANNEL BT_FREQ BT_BAND \
+  BT_SIGNAL BT_TX BT_RX BT_TXPOWER BT_PS BT_ROUTE BT_TS_OK BT_TRANS BT_DEAUTH \
+  BT_TX_RETRIES BT_TX_FAILED BT_BEACON_LOSS BT_BEACON_RX BT_EXP_TPUT BT_FW_ERRORS
+BT_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+BT_CONNECTED=$connected
+BT_SSID=${ssid:-}
+BT_BSSID=${bssid:-}
+BT_CHANNEL=${channel:-}
+BT_FREQ=${freq:-}
+BT_BAND=${band:-}
+BT_SIGNAL=${signal:-}
+BT_TX=${tx_bitrate:-}
+BT_RX=${rx_bitrate:-}
+BT_TXPOWER=${tx_power:-}
+BT_PS=${powersave:-}
+BT_ROUTE=$route_ok
+BT_TS_OK=$ts_ok
+BT_TRANS=$transition
+BT_DEAUTH=${deauth_line:-}
+BT_TX_RETRIES=${tx_retries:-}
+BT_TX_FAILED=${tx_failed:-}
+BT_BEACON_LOSS=${beacon_loss:-}
+BT_BEACON_RX=${beacon_rx:-}
+BT_EXP_TPUT=${exp_tput:-}
+BT_FW_ERRORS=${fw_errors:-0}
+
+python3 - <<'PY' >>"$LOG_FILE"
+import json, os, re
+
+def num_or_str(v):
+    if v is None or v == "":
+        return None
+    try:
+        if re.fullmatch(r"-?\d+", v):
+            return int(v)
+        if re.fullmatch(r"-?\d+\.\d+", v):
+            return float(v)
+    except Exception:
+        pass
+    return v
+
+def as_bool(v):
+    return str(v).lower() == "true"
+
+obj = {
+    "ts": os.environ.get("BT_TS"),
+    "connected": as_bool(os.environ.get("BT_CONNECTED")),
+    "ssid": os.environ.get("BT_SSID") or None,
+    "bssid": os.environ.get("BT_BSSID") or None,
+    "channel": num_or_str(os.environ.get("BT_CHANNEL")),
+    "freq_mhz": num_or_str(os.environ.get("BT_FREQ")),
+    "band": os.environ.get("BT_BAND") or None,
+    "signal_dbm": num_or_str(os.environ.get("BT_SIGNAL")),
+    "tx_bitrate": os.environ.get("BT_TX") or None,
+    "rx_bitrate": os.environ.get("BT_RX") or None,
+    "tx_power_dbm": num_or_str(os.environ.get("BT_TXPOWER")),
+    "powersave": os.environ.get("BT_PS") or None,
+    "default_route_reachable": as_bool(os.environ.get("BT_ROUTE")),
+    "tailscale_online": as_bool(os.environ.get("BT_TS_OK")),
+    "tx_retries": num_or_str(os.environ.get("BT_TX_RETRIES")),
+    "tx_failed": num_or_str(os.environ.get("BT_TX_FAILED")),
+    "beacon_loss": num_or_str(os.environ.get("BT_BEACON_LOSS")),
+    "beacon_rx": num_or_str(os.environ.get("BT_BEACON_RX")),
+    "expected_throughput": os.environ.get("BT_EXP_TPUT") or None,
+    "iwlwifi_fw_errors": num_or_str(os.environ.get("BT_FW_ERRORS")),
+}
+if as_bool(os.environ.get("BT_TRANS")):
+    obj["transition"] = True
+    line = os.environ.get("BT_DEAUTH") or ""
+    obj["last_deauth_reason_line"] = line or None
+
+print(json.dumps(obj, separators=(",", ":")))
+PY
+
+logger -t "$LOG_TAG" -- "sample connected=$connected signal=${signal:--} route=$route_ok ts=$ts_ok"
+exit 0

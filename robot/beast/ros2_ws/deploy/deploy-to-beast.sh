@@ -492,9 +492,11 @@ install_bin_if_needed() {
 install_bin_if_needed "\$ws/deploy/bin/beast-wifi-watch" /usr/local/sbin/beast-wifi-watch
 install_bin_if_needed "\$ws/deploy/bin/beast-link-watch" /usr/local/sbin/beast-link-watch
 install_bin_if_needed "\$ws/deploy/bin/beast-slam-save" /usr/local/sbin/beast-slam-save
+install_bin_if_needed "\$ws/deploy/bin/beast-wifi-telemetry" /usr/local/sbin/beast-wifi-telemetry
 sudo -n /usr/bin/systemctl daemon-reload
 # wifi-watch binary already matched the tree above; do not restart it
 # (older sudoers copies may lack try-restart beast-wifi-watch).
+sudo -n /usr/bin/systemctl enable --now beast-wifi-telemetry.timer
 sudo -n /usr/bin/systemctl restart beast-ros-base
 sudo -n /usr/bin/systemctl try-restart beast-cockpit
 # Deliberately not: beast-slam
@@ -520,8 +522,10 @@ elif [ "$pw_rc" -eq 2 ] && resolve_break_glass_sudo; then
   remote_break_glass="sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-link-watch /usr/local/sbin/beast-link-watch \
     && sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-wifi-watch /usr/local/sbin/beast-wifi-watch \
     && sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-slam-save /usr/local/sbin/beast-slam-save \
+    && sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-wifi-telemetry /usr/local/sbin/beast-wifi-telemetry \
     && sudo -n /usr/local/sbin/beast-install-systemd-units \
     && sudo -n systemctl daemon-reload \
+    && sudo -n systemctl enable --now beast-wifi-telemetry.timer \
     && sudo -n systemctl try-restart beast-wifi-watch \
     && sudo -n systemctl restart beast-ros-base \
     && sudo -n systemctl try-restart beast-cockpit \
