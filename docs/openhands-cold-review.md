@@ -43,8 +43,11 @@ not debug the workflow.
 Create an org GitHub App named **OpenHands Cold Review** (expected slug
 `openhands-cold-review`, posts as `openhands-cold-review[bot]`):
 
-- Permissions: `contents: read`, `pull-requests: write`, `issues: write`,
-  `metadata: read`
+- Permissions: near-blanket, same shape as `cold-claude-code` (38 of 39
+  repository permissions except `Single file`, nearly all Read and write;
+  org grants with the same withhold list — no member management, no PAT
+  admin, no Copilot Business). The Action only *uses* PR/issue write;
+  the extra scopes are so later plugin/Canvas/check-run work does not bounce.
 - No webhook (GitHub Actions is the event delivery)
 - No org seat
 - Install **only** on `MooseGooseConsulting/RobotOverview`

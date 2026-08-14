@@ -11,12 +11,16 @@ on:
       - 'tools/ci/**'
       - '.github/workflows/ci-tools-tests.yml'
       - '.github/workflows/deploy-pin.yml'
+      - '.github/workflows/cold-review.yml'
+      - '.agents/skills/custom-codereview-guide.md'
   push:
     branches: [main]
     paths:
       - 'tools/ci/**'
       - '.github/workflows/ci-tools-tests.yml'
       - '.github/workflows/deploy-pin.yml'
+      - '.github/workflows/cold-review.yml'
+      - '.agents/skills/custom-codereview-guide.md'
 
 permissions:
   contents: read
@@ -34,5 +38,17 @@ jobs:
           # Same floor as the robot-side lanes so one interpreter covers both.
           python-version: '3.10'
 
-      - run: pip install pytest
+      - run: pip install pytest pyyaml
       - run: python -m pytest tools/ci -q
+
+  actionlint-cold-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      # Context7 checked: rhysd/actionlint — download script, then lint one file.
+      - name: Lint cold-review.yml
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color .github/workflows/cold-review.yml

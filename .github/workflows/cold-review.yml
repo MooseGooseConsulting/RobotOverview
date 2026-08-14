@@ -16,7 +16,7 @@
 #    secret. Do not debug.
 #
 # 2. GitHub App "OpenHands Cold Review" (slug openhands-cold-review):
-#    - Permissions: contents:read, pull-requests:write, issues:write, metadata:read
+#    - Permissions: near-blanket (cold-claude-code shape; 38/39 repo perms)
 #    - No webhook (Actions delivers events)
 #    - Install ONLY on MooseGooseConsulting/RobotOverview
 #    - App ID → environment variable OPENHANDS_COLD_REVIEW_APP_ID
