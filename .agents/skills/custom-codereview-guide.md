@@ -12,15 +12,14 @@ Provide concise, constructive, actionable feedback focusing on correctness, safe
 
 ## Architectural Boundaries
 
-1. **Monorepo Separation (Web App vs Robot Brain):**
-   - **Hangar Web App** (`src/`, `db/`, `public/`): Next.js 16 / React 19 / Tailwind 4. Deployed to the homelab Kubernetes cluster.
-   - **BEAST-01 Robot Brain** (`robot/beast/ros2_ws/`): ROS 2 Humble workspace running on the Jetson Orin Nano.
-   - **Rule:** Never import robot ROS packages into the web client runtime, and never deploy web UI dependencies to the Jetson robot runtime.
+1. **Monorepo Separation (Hangar vs BEAST-01):**
+   - **Hangar** (`src/`, `db/`, `public/`): Next.js 16, React 19, Tailwind 4, Vitest. Deployed to the homelab Kubernetes cluster. **Never imports ROS 2.**
+   - **BEAST-01** (`robot/beast/ros2_ws/`): ROS 2 Humble workspace on the Jetson Orin Nano. **Never imports Next.js or React.**
+   - Sharing a git repo does not collapse the runtime boundary. Reject Hangar code that pulls in ROS 2 packages, and reject robot-brain code that pulls in Next.js/React/web-app dependencies.
 
-2. **Hardware Facts Ground Truth:**
-   - Physical facts, pinouts, voltages, and hardware specs live in Postgres (`db/hangar/find.ts`).
-   - `src/data/hangar.ts` is a static CI test fixture, not hardware ground truth.
-   - Reviewers must reject guesses or hardcoded assumptions about hardware ratings and connector wiring.
+2. **Postgres schema is truth; query it via `db/hangar/find.ts`:**
+   - Physical facts, pinouts, voltages, and hardware specs live in Postgres. Reviewers must reject guesses or hardcoded assumptions about hardware ratings and connector wiring.
+   - Look those facts up with `db/hangar/find.ts`. Do not treat `src/data/hangar.ts` as ground truth — that file is a static CI test fixture.
 
 ## Engineering & Org Standards
 
