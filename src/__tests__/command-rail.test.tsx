@@ -369,7 +369,14 @@ describe("CommandRail control lifecycle", () => {
     expect(readout).toHaveTextContent(`X +${DEFAULT_STRAIGHT.toFixed(2)} m/s · Z +0.00 rad/s`);
 
     // The word is CEILING, not cap — it is what FAST reaches, not a limiter.
-    expect(screen.getByText(/Ceiling 1\.30 m\/s · 1\.00 rad\/s · 10 Hz held/)).toBeInTheDocument();
+    // Derived from the constants: this readout is the operator's only view of
+    // the one number that caps the whole unclamped chain, so it must track the
+    // constant rather than assert a literal that silently goes stale.
+    expect(
+      screen.getByText(
+        `Ceiling ${LINEAR_MAX.toFixed(2)} m/s · ${ANGULAR_MAX.toFixed(2)} rad/s · 10 Hz held`,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("clicking a throttle button changes the preset for pointer operators", () => {

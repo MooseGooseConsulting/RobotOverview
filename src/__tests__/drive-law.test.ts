@@ -34,9 +34,9 @@ const PRECISION = 12;
 
 describe('drive-law constants — Waveshare parity', () => {
   it('carries Waveshare ugv_rpi/config.yaml args_config verbatim', () => {
-    // max_speed / min_rate / mid_rate / max_rate. If these drift, the port has
-    // stopped being a port.
-    expect(LINEAR_MAX).toBe(1.3);
+    // min_rate / mid_rate / max_rate. If these drift, the port has stopped
+    // being a port. `max_speed` is deliberately NOT carried over — see the
+    // ceiling test below.
     expect([...RATE_PRESETS]).toEqual([0.3, 0.66, 1.0]);
     expect(RATE_BOOST).toBe(1.0);
     // Waveshare boots at min_rate (`var speed_rate = 0.3`).
@@ -62,11 +62,28 @@ describe('drive-law constants — Waveshare parity', () => {
     expect(STOP_TAIL_COUNT * STOP_TAIL_INTERVAL_MS).toBeLessThan(500);
   });
 
-  it('SLOW is the everyday default and is faster than the 0.2 m/s it replaces', () => {
-    expect(straightSpeedAt(0)).toBeCloseTo(0.39, 6);
-    expect(straightSpeedAt(1)).toBeCloseTo(0.858, 6);
-    expect(straightSpeedAt(2)).toBeCloseTo(1.3, 6);
-    expect(straightSpeedAt(RATE_DEFAULT_INDEX)).toBeGreaterThan(0.2);
+  it('keeps every commandable speed inside the documented uncalibrated ceiling', () => {
+    // Waveshare's `max_speed = 1.3` is a T:1 track-speed scalar that the Pi
+    // clamped server-side. We send T:13 — a Twist, in m/s — into a chain with
+    // no clamp, no cmd_vel watchdog, and an ESP32 that latches. The flash
+    // runbook caps the uncharacterized magnitude at 0.2 until it is measured,
+    // so carrying 1.3 across that wire-format change would be a unit error,
+    // not a port. Raising this is a measurement; see LINEAR_MAX's comment.
+    const DOCUMENTED_UNCALIBRATED_CEILING = 0.2; // beast-jetson-flash-runbook.md
+    expect(LINEAR_MAX).toBeLessThanOrEqual(DOCUMENTED_UNCALIBRATED_CEILING);
+
+    // The ladder is a set of dimensionless ratios scaling that ceiling, so the
+    // feel is preserved in shape whatever the ceiling becomes.
+    RATE_PRESETS.forEach((rate, index) => {
+      expect(straightSpeedAt(index)).toBeCloseTo(LINEAR_MAX * rate, 6);
+    });
+
+    // Nothing the operator can press — including SHIFT boost at the top preset
+    // — may exceed the ceiling.
+    expect(straightSpeedAt(RATE_PRESETS.length - 1)).toBeCloseTo(LINEAR_MAX * RATE_BOOST, 6);
+    expect(Math.max(...RATE_PRESETS.map((_, i) => straightSpeedAt(i)))).toBeLessThanOrEqual(
+      DOCUMENTED_UNCALIBRATED_CEILING,
+    );
   });
 });
 
