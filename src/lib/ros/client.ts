@@ -56,24 +56,36 @@ const TOPIC_THROTTLE_MS: Record<string, number> = {
   '/map': 1000,
 };
 
+/**
+ * Occupancy render stays; these topics are NOT put on the wire at connect.
+ * Humble rosbridge 2.0.7 JSON-serializes OccupancyGrid and fragments anything
+ * over `max_message_size` (10 MB). Protocol 2.1.0 added subscribe `qos`; 2.0.7
+ * ignores it. Live 2026-08-14: `/map` is 4185×6765, origin (−203, −335) —
+ * ~85 MB JSON, 8–9 fragments of 10 MB. Four leftover cockpit clients each
+ * blocked the bridge ~37 s sending those parts, so `/scan` (10 Hz, QoS-
+ * compatible RELIABLE pub → BEST_EFFORT rosbridge sub) never reached the
+ * browser. This client also does not reassemble `op: fragment`.
+ */
+export const DEFERRED_WIRE_TOPICS = ['/map'] as const;
+
 // ── LiDAR BLIND-SECTOR CROP ─────────────────────────────────────────────────
-// The single source of truth for the cropped sector. The scan parser deletes
-// this range and SpatialView draws its wedge from the SAME constant through the
-// SAME ROS→canvas mapping the points use, so the picture cannot drift from the
-// deletion again (before this, the crop removed ROS 45°–134.5° while the wedge
-// was drawn across the canvas rear — a 90° lie).
-//
-// !! ORIENTATION IS UNVERIFIED AGAINST THE PHYSICAL ROBOT !!
-// These bounds came from a bin-index calculation, not from a live scan. In ROS
-// REP-103 body frame (+x forward, +y left) 45°–134.5° is the robot's LEFT side,
-// which is NOT obviously where the LD19's occluded arc should be — the mast and
-// the OAK-D sit elsewhere. Before trusting this display:
-//   ros2 topic echo /scan --once     # which index range is `inf`?
-// and reconcile that index range with angle_min/angle_increment. TODO tracked
-// with the beast-paces shakedown (`.claude/skills/beast-paces/SKILL.md`); it
-// needs the robot powered and stationary, so it is deliberately NOT changed
-// here. This PR only makes the drawing agree with the code.
-export const LIDAR_CROP_SECTOR_DEG = { startDeg: 45, endDeg: 134.5 } as const;
+// The single source of truth for scan orientation and the blind sector. The
+// scan parser rotates every point by LIDAR_SCAN_TO_BODY_YAW_DEG and drops the
+// LIDAR_CROP_SECTOR_DEG range; SpatialView draws its wedge from the SAME
+// constants through the SAME ROS→canvas mapping the points use, so the picture
+// cannot drift from the deletion.
+// Scan→body yaw: the LD19 publishes in base_lidar_link, whose URDF joint is
+// rpy 0 0 +90° (ugv_description/urdf/bases/ugv_beast.xacro), so scan bearing θ
+// lands at BODY bearing θ + 90° (REP-103: 0° forward, +90° left). Verified
+// live 2026-08-10: robot square-on to a wall measured at 39 in / 0.99 m from
+// the LiDAR read 1.00–1.02 m across scan 255–285° — scan 270° = body forward.
+// The parser rotates every point by this constant before use.
+export const LIDAR_SCAN_TO_BODY_YAW_DEG = 90 as const;
+
+// Blind sector in BODY frame. The driver crops scan 38°–142°
+// (/etc/beast/ugv.env crop 218–322; the published masked band is mirrored:
+// [360−max, 360−min]) — rear mast occlusion plus margin. +90° ⇒ body 128–232.
+export const LIDAR_CROP_SECTOR_DEG = { startDeg: 128, endDeg: 232 } as const;
 
 /**
  * Map a ROS scan bearing (rad, +x forward / +y left) to the top-down canvas the
@@ -879,6 +891,15 @@ export const rosClient = {
             const success = data.values?.success ?? data.result === true;
             pending.resolve({ ok: success, message: data.values?.message ?? null });
           }
+        } else if (data.op === 'fragment') {
+          // Humble 2.0.7 fragments oversized /map dumps. We do not reassemble
+          // 80 MB JSON; drop /map so /scan can use the socket.
+          this.unsubscribeTopic('/map');
+          recordBridgeFault(
+            'warning',
+            'oversized topic fragmented; unsubscribed /map so /scan can flow',
+            'sub:/map',
+          );
         } else if (data.op === 'status') {
           const level = data.level === 'error' ? 'error' : data.level === 'warning' ? 'warning' : null;
           if (level) {
@@ -908,6 +929,7 @@ export const rosClient = {
     socket.send(JSON.stringify({ op: 'set_level', level: 'warning' }));
 
     ROS_SUBSCRIPTIONS.forEach(({ topic, type }) => {
+      if ((DEFERRED_WIRE_TOPICS as readonly string[]).includes(topic)) return;
       const isImage = (IMAGE_TOPICS as readonly string[]).includes(topic);
       socket?.send(JSON.stringify({
         op: 'subscribe',
@@ -931,6 +953,16 @@ export const rosClient = {
         type,
       }));
     });
+  },
+
+  unsubscribeTopic(topic: string): boolean {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify({
+      op: 'unsubscribe',
+      id: opId('unsub', topic),
+      topic,
+    }));
+    return true;
   },
 
   publish(topic: string, msg: unknown): boolean {
@@ -1159,7 +1191,8 @@ export const rosClient = {
             continue;
           }
 
-          const angle = angleMin + i * angleIncrement;
+          // Rotate scan bearing into the body frame — see LIDAR_SCAN_TO_BODY_YAW_DEG.
+          const angle = angleMin + i * angleIncrement + (LIDAR_SCAN_TO_BODY_YAW_DEG * Math.PI) / 180;
           let normDeg = ((angle * 180.0) / Math.PI) % 360;
           if (normDeg < 0) normDeg += 360;
 

@@ -15,6 +15,8 @@ import {
   ROS_PUBLICATIONS,
   SET_ALLOW_MOTION_SERVICE,
   LIDAR_CROP_SECTOR_DEG,
+  LIDAR_SCAN_TO_BODY_YAW_DEG,
+  DEFERRED_WIRE_TOPICS,
 } from '@/lib/ros/client';
 import { renderHook, act } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
@@ -242,9 +244,14 @@ describe('rosClient and hooks', () => {
     it('puts those exact types on the wire, with attributable ids', () => {
       const ws = openSocket();
       const ops = wireOps(ws);
+      const deferred = new Set<string>(DEFERRED_WIRE_TOPICS);
 
       Object.entries(EXPECTED_SUBSCRIPTIONS).forEach(([topic, type]) => {
         const op = ops.find((o) => o.op === 'subscribe' && o.topic === topic);
+        if (deferred.has(topic)) {
+          expect(op, `${topic} must stay off the wire until the grid is room-scale`).toBeUndefined();
+          return;
+        }
         expect(op, `no subscribe for ${topic}`).toBeTruthy();
         expect(op!.type).toBe(type);
         // Without ids, a glob-whitelist denial is unattributable.
@@ -278,6 +285,28 @@ describe('rosClient and hooks', () => {
     it('raises the bridge status level so refusals are not silent', () => {
       const ws = openSocket();
       expect(wireOps(ws).some((o) => o.op === 'set_level')).toBe(true);
+    });
+
+    it('does not auto-subscribe /map — the live 4185×6765 grid starves /scan', () => {
+      const ws = openSocket();
+      const topics = wireOps(ws)
+        .filter((o) => o.op === 'subscribe')
+        .map((o) => o.topic);
+      expect(topics).not.toContain('/map');
+      expect(topics).toContain('/scan');
+      expect(topics).toContain('/tf');
+    });
+
+    it('unsubscribes /map when the bridge starts fragmenting an oversized dump', () => {
+      const ws = openSocket();
+      ws.send.mockClear();
+      const bridgeHook = renderHook(() => useCockpitBridge());
+      act(() => {
+        ws.triggerMessage({ op: 'fragment', id: 'sub:/map', num: 0, total: 8 });
+      });
+      const unsub = wireOps(ws).find((o) => o.op === 'unsubscribe' && o.topic === '/map');
+      expect(unsub).toBeTruthy();
+      expect(bridgeHook.result.current.faults[0]?.msg).toMatch(/fragmented/);
     });
   });
 
@@ -379,8 +408,10 @@ describe('rosClient and hooks', () => {
 
   // ── LiDAR CROP ────────────────────────────────────────────────────────────
   describe('LiDAR blind-sector crop', () => {
-    // 360 bins starting at 0 rad with a 1° increment, so bin index == bearing in
-    // degrees and sector membership is exact rather than approximate.
+    // 360 bins starting at 0 rad with a 1° increment, so bin index == SCAN
+    // bearing in degrees. The parser rotates every point by
+    // LIDAR_SCAN_TO_BODY_YAW_DEG into the body frame, then applies the
+    // body-frame crop sector — so retained body bearings are bin + yaw.
     const send360 = () => {
       const ranges = Array(360).fill(2.0);
       act(() => {
@@ -400,7 +431,7 @@ describe('rosClient and hooks', () => {
     };
 
     const degreesOf = (points: Array<{ angle: number }>) =>
-      points.map((p) => Math.round((p.angle * 180) / Math.PI));
+      points.map((p) => Math.round(((p.angle * 180) / Math.PI) % 360));
 
     it('drops exactly the declared sector and keeps everything else', () => {
       openSocket();
@@ -417,15 +448,47 @@ describe('rosClient and hooks', () => {
       const retained = degreesOf(scanHook.result.current.points);
 
       // Absolute membership on BOTH sides — not just "fewer than 360".
-      expect(retained).toEqual(expectedRetained);
-      expect(retained).toHaveLength(270);
+      // (Order differs: points arrive in scan-bin order, so body bearings are
+      // rotated by the +90° scan→body yaw. Compare as sets.)
+      expect([...retained].sort((a, b) => a - b)).toEqual(expectedRetained);
+      expect(retained).toHaveLength(360 - (endDeg - startDeg) - 1);
       expectedDropped.forEach((deg) => expect(retained).not.toContain(deg));
 
-      // Boundary bins, spelled out: 44 kept, 45 dropped, 134 dropped, 135 kept.
-      expect(retained).toContain(44);
-      expect(retained).not.toContain(45);
-      expect(retained).not.toContain(134);
-      expect(retained).toContain(135);
+      // Boundary bins, spelled out from the declared sector.
+      expect(retained).toContain((startDeg - 1 + 360) % 360);
+      expect(retained).not.toContain(startDeg);
+      expect(retained).not.toContain(endDeg);
+      expect(retained).toContain((endDeg + 1) % 360);
+    });
+
+    it('rotates scan bearings into the body frame (verified wall test)', () => {
+      openSocket();
+      const scanHook = renderHook(() => useCockpitScan());
+      // Single return at scan 270° — the 2026-08-10 wall test proved this is
+      // body FORWARD (URDF base_lidar_link yaw +90°).
+      const ranges = Array(360).fill(NaN);
+      ranges[270] = 1.0;
+      act(() => {
+        MockWebSocket.latestInstance?.triggerMessage({
+          op: 'publish',
+          topic: '/scan',
+          msg: {
+            ranges,
+            angle_min: 0,
+            angle_max: Math.PI * 2,
+            angle_increment: (Math.PI * 2) / 360,
+            range_min: 0.1,
+            range_max: 10.0,
+          },
+        });
+      });
+
+      const pts = scanHook.result.current.points;
+      expect(pts).toHaveLength(1);
+      // Body forward: x ≈ +1 m, y ≈ 0.
+      expect(pts[0].x).toBeCloseTo(1.0, 5);
+      expect(pts[0].y).toBeCloseTo(0.0, 5);
+      expect(LIDAR_SCAN_TO_BODY_YAW_DEG).toBe(90);
     });
 
     it('measures the scan rate from arrivals rather than asserting a nominal one', () => {
