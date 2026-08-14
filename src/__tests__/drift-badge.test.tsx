@@ -21,7 +21,12 @@ const orphan: Terminal = {
 function renderFor(extra: Terminal[], compact = false) {
   const all = [...terminals, ...extra];
   return render(
-    <DriftBadge layout={buildBoardLayout(units, all, nets)} terminals={all} compact={compact} />,
+    <DriftBadge
+      layout={buildBoardLayout(units, all, nets)}
+      terminals={all}
+      units={units}
+      compact={compact}
+    />,
   );
 }
 
@@ -62,9 +67,26 @@ describe('DriftBadge', () => {
     // Unit pages render a 64px-tall preview with no room to expand. Silence
     // there would hide drift on every unit page, so the count still shows.
     renderFor([stray, orphan], true);
-    const button = screen.getByRole('button', { name: /2 unplaced terminals/i });
-    expect(button).toBeDisabled();
-    fireEvent.click(button);
+    // Inert text, not a control: the preview sits inside a card-wide <Link>,
+    // where a nested button is invalid and a disabled one eats the card click.
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.getByText(/2 unplaced terminals/i)).toBeInTheDocument();
     expect(screen.queryByText(/no authored edge/i)).not.toBeInTheDocument();
+  });
+
+  it('attributes each entry to its owning unit', () => {
+    // Connector names repeat across units — the seed already has "USB Host
+    // Ports" on both the Pi and the Orin — so a bare name cannot tell an
+    // operator which placement to fix.
+    const dupA: Terminal = { id: 'zz-dup-a', unitId: 'pi5', name: 'USB Host Ports' };
+    const dupB: Terminal = { id: 'zz-dup-b', unitId: 'orin-nano', name: 'USB Host Ports' };
+    renderFor([dupA, dupB]);
+    fireEvent.click(screen.getByRole('button'));
+
+    const items = screen.getAllByRole('listitem').map((li) => li.textContent ?? '');
+    const dupes = items.filter((t) => t.includes('USB Host Ports'));
+    expect(dupes).toHaveLength(2);
+    // Same connector name, but the rows are distinguishable.
+    expect(new Set(dupes).size).toBe(2);
   });
 });

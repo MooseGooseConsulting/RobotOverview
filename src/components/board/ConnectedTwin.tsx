@@ -111,7 +111,7 @@ export function ConnectedTwin({ variant = 'full' }: { variant?: 'full' | 'previe
         {canvas}
         {/* Count only: the preview has no room to expand, but staying silent
             here would hide drift on every unit page. */}
-        <DriftBadge layout={layout} terminals={terminals} compact />
+        <DriftBadge layout={layout} terminals={terminals} units={units} compact />
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-void/70 via-transparent to-transparent" />
         <div className="pointer-events-none absolute bottom-3 left-4 font-mono text-[10px] uppercase tracking-[0.2em] text-cyan">
           Connected Twin · {terminals.length} terminals · {nets.length} nets
@@ -130,7 +130,7 @@ export function ConnectedTwin({ variant = 'full' }: { variant?: 'full' | 'previe
 
       <div className="panel corner-bracket blueprint-grid relative h-[74vh] min-h-[520px] overflow-hidden">
         {canvas}
-        <DriftBadge layout={layout} terminals={terminals} />
+        <DriftBadge layout={layout} terminals={terminals} units={units} />
         <NetInspector
           net={selectedNet}
           units={units}
