@@ -11,8 +11,12 @@
 [Unit]
 Description=BEAST-01 slam_toolbox online_async (persistent 2D map)
 Documentation=file:///home/beast/beast/RobotOverview/robot/beast/ros2_ws/docs/cockpit.md
-After=beast-ros-base.service network-online.target
-Wants=beast-ros-base.service
+# time-sync.target: on a cold boot this unit used to start at epoch 0
+# (fake-hwclock), then die with karto::Exception when NTP jumped the clock —
+# journalctl showed a launch-log dir dated 1969-12-31. Same fix pattern as
+# deploy/systemd/tailscaled.service.d/time-sync.conf.
+After=beast-ros-base.service network-online.target time-sync.target
+Wants=beast-ros-base.service time-sync.target
 ConditionPathExists=/opt/ros/humble/share/slam_toolbox/launch/online_async_launch.py
 
 [Service]
@@ -24,12 +28,30 @@ Group=beast
 WorkingDirectory=/home/beast/beast/RobotOverview/robot/beast/ros2_ws
 EnvironmentFile=-/etc/beast/ugv.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/setup.bash && exec ros2 launch slam_toolbox online_async_launch.py slam_params_file:=/home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/config/slam_toolbox_beast.yaml'
+# FRESH by default; resume is opt-in via the /data/beast/maps/resume flag.
+# Resume-by-default crash-looped this unit 397 times on 2026-08-14: the node
+# segfaulted seconds after deserializing the 6.4 MB posegraph, and slam_toolbox
+# Humble gives no graceful path out of a poisoned map file. Touch the flag to
+# resume /data/beast/maps/beast-map on the next start; ExecStop saves to that
+# same store either way, so fresh runs still persist their result.
+ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/setup.bash && cfg=/home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/config/slam_toolbox_beast_fresh.yaml; [ -e /data/beast/maps/resume ] && cfg=/home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/config/slam_toolbox_beast.yaml; exec ros2 launch slam_toolbox online_async_launch.py slam_params_file:=$cfg'
 # Save the posegraph while the node is still up; failures must not mask the
 # stop. systemd terminates the main process with SIGTERM after this returns.
 # Workspace copy, not /usr/local/sbin, so a tree deploy updates the saver
 # without a root install of the script.
-ExecStop=/bin/sh -c 'exec /home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-slam-save || true'
+#
+# The '-' prefix is the ONLY thing keeping a failed save from failing the
+# unit: the previous '|| true' sat after an `exec`, which replaces the shell,
+# so it was unreachable — a save failure (or the script's missing exec bit)
+# exit-coded the unit into Restart=on-failure forever, even when the main
+# process had exited 0.
+#
+# KNOWN GAP, deliberate: `ros2 launch` exits 0 when the slam node dies, so a
+# mid-run node crash leaves this unit "inactive (dead), success" — silently
+# not mapping — rather than restarting. Restart=on-failure cannot see it.
+# The cockpit's map staleness is the operator-visible signal today; fixing it
+# properly means a launch wrapper that propagates node death, not unit tricks.
+ExecStop=-/bin/sh -c 'exec /home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-slam-save'
 Restart=on-failure
 RestartSec=10
 # beast-slam-save's worst case is ~38 s (8 s /map read + two 15 s service

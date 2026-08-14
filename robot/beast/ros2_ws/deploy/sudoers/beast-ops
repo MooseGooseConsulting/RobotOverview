@@ -144,6 +144,28 @@ Cmnd_Alias BEAST_SYSTEMCTL = \
     /usr/bin/systemctl unmask beast-pull.timer, \
     /usr/bin/systemctl list-timers beast-pull.timer, \
     /usr/bin/systemctl list-timers beast-pull.timer --no-pager, \
+    /usr/bin/systemctl start beast-slam, \
+    /usr/bin/systemctl start beast-slam.service, \
+    /usr/bin/systemctl stop beast-slam, \
+    /usr/bin/systemctl stop beast-slam.service, \
+    /usr/bin/systemctl restart beast-slam, \
+    /usr/bin/systemctl restart beast-slam.service, \
+    /usr/bin/systemctl try-restart beast-slam, \
+    /usr/bin/systemctl try-restart beast-slam.service, \
+    /usr/bin/systemctl status beast-slam, \
+    /usr/bin/systemctl status beast-slam.service, \
+    /usr/bin/systemctl is-active beast-slam, \
+    /usr/bin/systemctl is-active beast-slam.service, \
+    /usr/bin/systemctl is-enabled beast-slam, \
+    /usr/bin/systemctl is-enabled beast-slam.service, \
+    /usr/bin/systemctl enable beast-slam, \
+    /usr/bin/systemctl enable beast-slam.service, \
+    /usr/bin/systemctl enable --now beast-slam, \
+    /usr/bin/systemctl enable --now beast-slam.service, \
+    /usr/bin/systemctl disable beast-slam, \
+    /usr/bin/systemctl disable beast-slam.service, \
+    /usr/bin/systemctl disable --now beast-slam, \
+    /usr/bin/systemctl disable --now beast-slam.service, \
     /usr/bin/systemctl start beast-wifi-watch, \
     /usr/bin/systemctl start beast-wifi-watch.service, \
     /usr/bin/systemctl stop beast-wifi-watch, \
