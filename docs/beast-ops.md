@@ -35,38 +35,31 @@ Pulse default sink is the USB HAT (`SSS1629A5`); `spd-say` returned in <5 s
 (`hangar audio path` test). `beast-ros-base` gets `XDG_RUNTIME_DIR=/run/user/1000`.
 Do not treat the NVMe stem as the 15:19 map.
 
-**Power-log / charge ceiling 2026-08-14 ~02:40Z:** SSH **down**
-(`beast-01-ts` / LAN / Ethernet all timed out; Tailscale last-seen ~02:31Z).
-Last live CSV read **2026-08-14T02:26Z**: `/data/beast/power/power-log.csv`
-**26,658 rows** (2026-08-07→14), last sample **8.784 V / −1.63 A**. Raw file
-peak **12.404 V** is a **1970-01-01 epoch-0 boot row** — clock garbage, not a
-full charge; **not quarantined** (robot unreachable). Honest rest high-water
-**12.1–12.2 V** (13k+ `|I|<0.15 A` rows); dated live **12.232 V** (2026-08-10).
-Chemistry **12.6 V never seen**. Charger is a stiff CV float at **~12.08 V**
-(2026-08-07 probe) — pack tops ~80% on the generic 3S table and stops. Epoch-0
-GC (`power-log.csv.bak-2026-08-14-pre-gc` + `power-log-garbage-epoch0.csv`) is
-**owed** on next SSH. Barrel-jack multimeter still owed (Schottky vs 12 V brick).
+**Full-charge boot + charge ceiling 2026-08-14 ~06:00Z (live):** Watched the
+05:49Z cold boot right after a completed charge. Seconds after power-on the
+pack read **12.400 V @ −0.06 A** (near-rest; epoch-0-clock row), first
+clean-clock rows **12.328 V** under ~0.72 A. Clean-log all-time Vmax is
+**12.364 V** (2026-08-13T19:28Z). Chemistry **12.6 V still never seen** —
+charger CV float ~12.08 V (2026-08-07 probe). SOC 100 % pin is now
+**12.364 V** (`PACK_USABLE_FULL_V`); old 12.232 V pin reads ~95 %. **Epoch-0
+GC done**: 338 rows (incl. ~80 from this very boot — fake-hwclock does not
+stop early units seeing 1969) quarantined to `power-log-garbage-epoch0.csv`,
+backup `power-log.csv.bak-2026-08-14-pre-gc`, log now 27k clean rows.
+Barrel-jack multimeter still owed (Schottky vs 12 V brick).
 
-**Usable SOC + coulomb persist 2026-08-14 (repo, not yet on robot):**
-`/ugv/voltage.percentage` is usable-range OCV: **8.332 V = 0 %**,
-**12.232 V = 100 %** (Quick-connect pin; SSH was down so no new clean-log
-Vmax). Chemistry 12.6 V table is kept as `_3S_OCV_CHEM` only. Mid-curve
-knees still generic. `beast_power_logger` resumes `charge_mah` /
-`energy_wh` from the last real-clock CSV row (no more zero on
-`beast-ros-base` restart). Integral is still **logic-rail only**. Cockpit
-banner stays voltage-only. Deploy + epoch-0 GC owed when the pack is up.
-
-**Deploy 2026-08-14 01:35Z (live):** Robot checkout is
-`feat/cockpit-map-render` @ **`ace52b8`** (OLED-first `beast_audio` + deploy
-script can push an unpushed local ref). `topics_sub_glob` still admits
-`/scan` `/tf` and **denies `/map`**. `beast-wifi-watch` still `iw event -t -f`
-(installed binary == git). `beast-slam` was **not** restarted (stayed
-active). `beast-ros-base` + `beast-cockpit` restarted; 443→9090 up. Running
-`beast_audio` writes OLED T:3 **before** `spd-say`. Live crop env still
-218–322 (not in this tree’s `ugv.env.example`). Untracked leftovers still
-on disk: slam unit/config + `beast-wifi-telemetry` (not in this branch).
-`power-log.csv` resumed after the **ros-base** restart (not slam) — do not
-treat that as a slam fix. `/ugv/voltage` ~10.86 V at verify.
+**Deploy 2026-08-14 05:58Z (live, all 15 verify PASS):** Robot checkout is
+`feat/cockpit-map-render` @ **`edae18d`** (usable-range SOC on clean-log
+Vmax, coulomb persist, `/map` over rosbridge, cockpit-serve retry,
+deploy pushes via `refs/deploy/incoming` staging ref — re-deploying the
+checked-out branch used to hit `receive.denyCurrentBranch`). Coulomb
+resume verified live: logger logged `resumed −93.0 mAh / −1.14 Wh` after
+the GC restart instead of zeroing. New SOC publishing (12.268 V → 96.5 %).
+`beast-cockpit-serve` failed at boot again (tailscaled pre-NTP,
+"unexpected state: NoState") — retry-loop unit installed + restarted,
+now active; WSS verified end-to-end from workstation
+(`Verify-Beast-Cockpit.ps1` all PASS). Deploy WARN: sudoers can't
+passwordless-install `/usr/local/sbin/beast-link-watch` +
+`beast-slam-save` (existing copies left). `/ugv/voltage` 12.27 V at verify.
 
 **Clock hardening (2026-08-10):** The Orin Nano dev kit has no RTC battery —
 cold boot starts at epoch 0. `tailscaled` started before NTP synced, rejected
