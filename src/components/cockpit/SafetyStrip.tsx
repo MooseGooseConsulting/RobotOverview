@@ -141,11 +141,26 @@ export function SafetyStrip() {
     voltage === null ? 0 : Math.max(0, Math.min(100, ((voltage - minVolts) / (maxVolts - minVolts)) * 100));
   const isLowVoltage = voltage !== null && voltage < motionFloorVolts;
   const voltStale = volts.stale && volts.hasReceived;
+  // Voltage-only pack alert (2026-08-13): the pack died twice on 2026-08-10
+  // with nothing reaching the operator. Live /ugv/voltage has no honest SOC
+  // (HonestyRail — usable OCV endpoints are pinned; mid-curve is still generic; % is not shown) so the banner keys off
+  // volts alone. Suppressed while CHARGING/FULL (bus reads high on charge)
+  // and while stale/absent.
+  //   warn:     ≤ 10.8 V
+  //   critical: ≤ 10.2 V
+  const psStatus = volts.powerSupplyStatus ?? null;
+  const isChargingNow = psStatus === 1 || psStatus === 4; // CHARGING | FULL
+  const packLevel: 'ok' | 'warn' | 'critical' =
+    voltage === null || voltStale || isChargingNow
+      ? 'ok'
+      : voltage <= 10.2
+        ? 'critical'
+        : voltage <= 10.8
+          ? 'warn'
+          : 'ok';
   // Current is pre-gated at ingest: non-null only when the publisher filled
   // power_supply_status (a real measurement, not bringup's dummy 0.0).
   const current = voltStale ? null : (volts.current ?? null);
-  const psStatus = volts.powerSupplyStatus ?? null;
-  const isChargingNow = psStatus === 1 || psStatus === 4; // CHARGING | FULL
 
   return (
     <motion.section
@@ -156,6 +171,24 @@ export function SafetyStrip() {
     >
       {/* SCANLINE SHEEN EFFECT */}
       <div className="pointer-events-none absolute inset-0 z-0 bg-[repeating-linear-gradient(0deg,rgba(255,255,255,0.015)_0_1px,transparent_1px_3px)] opacity-50" />
+
+      {/* ── PACK ALERT BANNER (persistent while low; voltage only) ── */}
+      {packLevel !== 'ok' && (
+        <div
+          role="alert"
+          className={clsx(
+            'col-span-full z-10 flex items-center gap-2 rounded-md border px-3 py-1.5 font-mono text-[11px] font-bold tracking-wider uppercase',
+            packLevel === 'critical'
+              ? 'border-red-500 bg-red-950/70 text-red-300 text-glow-red animate-pulse'
+              : 'border-amber-500/60 bg-amber-950/50 text-amber-300 text-glow-amber',
+          )}
+        >
+          <ShieldAlert className="h-4 w-4 shrink-0" />
+          {packLevel === 'critical'
+            ? `CRITICAL PACK — ${voltage?.toFixed(2)} V — charge now, BMS cutoff near`
+            : `LOW PACK — ${voltage?.toFixed(2)} V — plan a charge stop`}
+        </div>
+      )}
 
       {/* ── MOTION AUTHORITY (DISARM / RE-ARM) ──── */}
       <button
@@ -271,9 +304,11 @@ export function SafetyStrip() {
               'font-mono text-lg font-black',
               voltage === null || voltStale
                 ? 'text-ink-dim line-through decoration-1'
-                : isLowVoltage
-                  ? 'text-amber-400 text-glow-amber'
-                  : 'text-cyan text-glow-cyan',
+                : packLevel === 'critical'
+                  ? 'text-red-400 text-glow-red'
+                  : packLevel === 'warn' || isLowVoltage
+                    ? 'text-amber-400 text-glow-amber'
+                    : 'text-cyan text-glow-cyan',
             )}
           >
             {voltage === null ? '— V' : `${voltage.toFixed(2)} V`}
@@ -311,9 +346,13 @@ export function SafetyStrip() {
               ? 'no /ugv/voltage publisher'
               : voltStale
                 ? 'STALE — last value shown'
-                : isLowVoltage
-                  ? 'LOW - CHARGE FIRST'
-                  : 'Ok'}
+                : packLevel === 'critical'
+                  ? 'CRITICAL — CHARGE NOW'
+                  : packLevel === 'warn'
+                    ? 'LOW PACK — CHARGE SOON'
+                    : isLowVoltage
+                      ? 'LOW - CHARGE FIRST'
+                      : 'Ok'}
           </span>
           {/* Measured logic-rail current — absent (not 0.0 A) until a publisher
               fills power_supply_status; positive = charging. The INA219 shunt

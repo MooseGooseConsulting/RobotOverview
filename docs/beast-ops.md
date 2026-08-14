@@ -24,6 +24,43 @@ LAN fallback: `ssh beast-01` / `ssh beast@192.168.0.187` (`wlP1p1s0`).
 - Wi‑Fi MAC `20:bd:1d:d4:91:35` → `192.168.0.187` (name `beast-01`)
 - Ethernet MAC `4c:bb:47:a6:4e:bd` → `192.168.0.166` (name `beast-01-eth`)
 
+**Map + voice 2026-08-14 02:15Z (live):** Fresh slam (no posegraph) publishes
+**69×74** @ 5 cm, origin (−1.92, −1.34) — ~3.5×3.7 m. Saved to
+`/data/beast/maps/beast-map.*`. Prior 180×122 stem is in
+`bak-2026-08-14-pre-remap` / `bak-2026-08-14-stem-at-stop`. `beast-slam-save`
+refuses grids over 250k cells (the live exploded raster was 9629×7612).
+rosbridge `topics_sub_glob` admits `/map` again; client unsubscribes if
+`MAP_MAX_CELLS` is exceeded or the bridge fragments. Cockpit chip: **MAP 3.5×3.7 m**.
+Pulse default sink is the USB HAT (`SSS1629A5`); `spd-say` returned in <5 s
+(`hangar audio path` test). `beast-ros-base` gets `XDG_RUNTIME_DIR=/run/user/1000`.
+Do not treat the NVMe stem as the 15:19 map.
+
+**Full-charge boot + charge ceiling 2026-08-14 ~06:00Z (live):** Watched the
+05:49Z cold boot right after a completed charge. Seconds after power-on the
+pack read **12.400 V @ −0.06 A** (near-rest; epoch-0-clock row), first
+clean-clock rows **12.328 V** under ~0.72 A. Clean-log all-time Vmax is
+**12.364 V** (2026-08-13T19:28Z). Chemistry **12.6 V still never seen** —
+charger CV float ~12.08 V (2026-08-07 probe). SOC 100 % pin is now
+**12.364 V** (`PACK_USABLE_FULL_V`); old 12.232 V pin reads ~95 %. **Epoch-0
+GC done**: 338 rows (incl. ~80 from this very boot — fake-hwclock does not
+stop early units seeing 1969) quarantined to `power-log-garbage-epoch0.csv`,
+backup `power-log.csv.bak-2026-08-14-pre-gc`, log now 27k clean rows.
+Barrel-jack multimeter still owed (Schottky vs 12 V brick).
+
+**Deploy 2026-08-14 05:58Z (live, all 15 verify PASS):** Robot checkout is
+`feat/cockpit-map-render` @ **`edae18d`** (usable-range SOC on clean-log
+Vmax, coulomb persist, `/map` over rosbridge, cockpit-serve retry,
+deploy pushes via `refs/deploy/incoming` staging ref — re-deploying the
+checked-out branch used to hit `receive.denyCurrentBranch`). Coulomb
+resume verified live: logger logged `resumed −93.0 mAh / −1.14 Wh` after
+the GC restart instead of zeroing. New SOC publishing (12.268 V → 96.5 %).
+`beast-cockpit-serve` failed at boot again (tailscaled pre-NTP,
+"unexpected state: NoState") — retry-loop unit installed + restarted,
+now active; WSS verified end-to-end from workstation
+(`Verify-Beast-Cockpit.ps1` all PASS). Deploy WARN: sudoers can't
+passwordless-install `/usr/local/sbin/beast-link-watch` +
+`beast-slam-save` (existing copies left). `/ugv/voltage` 12.27 V at verify.
+
 **Clock hardening (2026-08-10):** The Orin Nano dev kit has no RTC battery —
 cold boot starts at epoch 0. `tailscaled` started before NTP synced, rejected
 control plane certs as "not yet valid," and stayed offline. Fix: `fake-hwclock`
@@ -519,11 +556,11 @@ publishing drive commands. Update this block, dated, whenever a session learns a
 | Topic / field | Trust? | Reality |
 |---|---|---|
 | `/ugv/voltage` → `voltage` | Real | Pack bus volts from ESP32 `v` |
-| `/ugv/voltage` → `percentage` | **Fake** | `V / 12.6` — not SOC; lies under load / while charging |
+| `/ugv/voltage` → `percentage` | **Provisional** | Usable-range OCV since `edae18d` (8.332 V = 0 %, 12.364 V = 100 %); mid-curve knees still generic; sags under load. The old fake `V / 12.6` is gone |
 | `/ugv/voltage` → `current`, `charge`, `capacity`, `temperature`, `power_supply_status` | **Cutover-dependent** | `beast_power` supplies signed current/status after deployment; charge/capacity/temperature remain NaN |
 | `/imu/raw`, `/imu/mag` scales | Assumed | Waveshare ICM-20948 LSB factors; not calibrated here; `frame_id` is `base_link` (wrong frame) |
 | `/odom/odom_raw` | Partial | `odl`/`odr` ÷100 assumed cm→m; `L`/`R` are ESP32 wheel speeds, not fused pose |
-| Charging / true SOC | **Provisional** | `beast_power` publishes current and a generic 3S voltage estimate; shunt and SOC curve remain uncalibrated, and charging is observability only |
+| Charging / true SOC | **Provisional** | `beast_power` publishes usable-range OCV % (8.332–12.364 V) and logic-rail current; mid-curve and pack shunt still open; charging is observability only |
 
 Source: module docstring + inline `FAKE` / `DUMMY` / `ASSUMED` / `HACK` in
 [`robot/beast/ros2_ws/src/ugv_main/beast_base/beast_base/base_node.py`](../robot/beast/ros2_ws/src/ugv_main/beast_base/beast_base/base_node.py)

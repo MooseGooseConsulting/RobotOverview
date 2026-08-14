@@ -1,0 +1,16 @@
+[Unit]
+Description=BEAST-01 Wi-Fi event capture (iw event -t -f -> /var/log/beast/wifi-events.jsonl)
+After=network-pre.target
+Wants=network-pre.target
+# CI (systemd-analyze verify) has no /usr/local/sbin payload installed; the real
+# install lands it via deploy-to-beast.sh.
+ConditionPathExists=/usr/local/sbin/beast-wifi-watch
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -c 'exec /usr/local/sbin/beast-wifi-watch'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

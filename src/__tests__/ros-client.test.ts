@@ -6,6 +6,8 @@ import {
   useCockpitOdom,
   useCockpitOverheadClearance,
   useCockpitScan,
+  useCockpitMap,
+  useCockpitMapOdom,
   useCockpitStatus,
   useCockpitBridge,
   useCockpitDiagnostics,
@@ -13,6 +15,9 @@ import {
   ROS_PUBLICATIONS,
   SET_ALLOW_MOTION_SERVICE,
   LIDAR_CROP_SECTOR_DEG,
+  LIDAR_SCAN_TO_BODY_YAW_DEG,
+  DEFERRED_WIRE_TOPICS,
+  MAP_MAX_CELLS,
 } from '@/lib/ros/client';
 import { renderHook, act } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
@@ -210,6 +215,10 @@ describe('rosClient and hooks', () => {
       '/ugv/allow_motion': 'std_msgs/msg/Bool',
       '/oak/rgb/image_raw/compressed': 'sensor_msgs/msg/CompressedImage',
       '/cockpit/depth/compressed': 'sensor_msgs/msg/CompressedImage',
+      // Phase E: occupancy grid + the map→odom link for robot-on-map placement.
+      // Robot-side whitelist mirrors these in ugv_cockpit/launch/rosbridge.launch.py.
+      '/map': 'nav_msgs/msg/OccupancyGrid',
+      '/tf': 'tf2_msgs/msg/TFMessage',
     };
 
     const EXPECTED_PUBLICATIONS: Record<string, string> = {
@@ -236,9 +245,14 @@ describe('rosClient and hooks', () => {
     it('puts those exact types on the wire, with attributable ids', () => {
       const ws = openSocket();
       const ops = wireOps(ws);
+      const deferred = new Set<string>(DEFERRED_WIRE_TOPICS);
 
       Object.entries(EXPECTED_SUBSCRIPTIONS).forEach(([topic, type]) => {
         const op = ops.find((o) => o.op === 'subscribe' && o.topic === topic);
+        if (deferred.has(topic)) {
+          expect(op, `${topic} must stay off the wire until the grid is room-scale`).toBeUndefined();
+          return;
+        }
         expect(op, `no subscribe for ${topic}`).toBeTruthy();
         expect(op!.type).toBe(type);
         // Without ids, a glob-whitelist denial is unattributable.
@@ -272,6 +286,29 @@ describe('rosClient and hooks', () => {
     it('raises the bridge status level so refusals are not silent', () => {
       const ws = openSocket();
       expect(wireOps(ws).some((o) => o.op === 'set_level')).toBe(true);
+    });
+
+    it('auto-subscribes /map now that the live grid is room-scale', () => {
+      const ws = openSocket();
+      const topics = wireOps(ws)
+        .filter((o) => o.op === 'subscribe')
+        .map((o) => o.topic);
+      expect(topics).toContain('/map');
+      expect(topics).toContain('/scan');
+      expect(topics).toContain('/tf');
+      expect(DEFERRED_WIRE_TOPICS).not.toContain('/map');
+    });
+
+    it('unsubscribes /map when the bridge starts fragmenting an oversized dump', () => {
+      const ws = openSocket();
+      ws.send.mockClear();
+      const bridgeHook = renderHook(() => useCockpitBridge());
+      act(() => {
+        ws.triggerMessage({ op: 'fragment', id: 'sub:/map', num: 0, total: 8 });
+      });
+      const unsub = wireOps(ws).find((o) => o.op === 'unsubscribe' && o.topic === '/map');
+      expect(unsub).toBeTruthy();
+      expect(bridgeHook.result.current.faults[0]?.msg).toMatch(/fragmented/);
     });
   });
 
@@ -373,8 +410,10 @@ describe('rosClient and hooks', () => {
 
   // ── LiDAR CROP ────────────────────────────────────────────────────────────
   describe('LiDAR blind-sector crop', () => {
-    // 360 bins starting at 0 rad with a 1° increment, so bin index == bearing in
-    // degrees and sector membership is exact rather than approximate.
+    // 360 bins starting at 0 rad with a 1° increment, so bin index == SCAN
+    // bearing in degrees. The parser rotates every point by
+    // LIDAR_SCAN_TO_BODY_YAW_DEG into the body frame, then applies the
+    // body-frame crop sector — so retained body bearings are bin + yaw.
     const send360 = () => {
       const ranges = Array(360).fill(2.0);
       act(() => {
@@ -394,7 +433,7 @@ describe('rosClient and hooks', () => {
     };
 
     const degreesOf = (points: Array<{ angle: number }>) =>
-      points.map((p) => Math.round((p.angle * 180) / Math.PI));
+      points.map((p) => Math.round(((p.angle * 180) / Math.PI) % 360));
 
     it('drops exactly the declared sector and keeps everything else', () => {
       openSocket();
@@ -411,15 +450,47 @@ describe('rosClient and hooks', () => {
       const retained = degreesOf(scanHook.result.current.points);
 
       // Absolute membership on BOTH sides — not just "fewer than 360".
-      expect(retained).toEqual(expectedRetained);
-      expect(retained).toHaveLength(270);
+      // (Order differs: points arrive in scan-bin order, so body bearings are
+      // rotated by the +90° scan→body yaw. Compare as sets.)
+      expect([...retained].sort((a, b) => a - b)).toEqual(expectedRetained);
+      expect(retained).toHaveLength(360 - (endDeg - startDeg) - 1);
       expectedDropped.forEach((deg) => expect(retained).not.toContain(deg));
 
-      // Boundary bins, spelled out: 44 kept, 45 dropped, 134 dropped, 135 kept.
-      expect(retained).toContain(44);
-      expect(retained).not.toContain(45);
-      expect(retained).not.toContain(134);
-      expect(retained).toContain(135);
+      // Boundary bins, spelled out from the declared sector.
+      expect(retained).toContain((startDeg - 1 + 360) % 360);
+      expect(retained).not.toContain(startDeg);
+      expect(retained).not.toContain(endDeg);
+      expect(retained).toContain((endDeg + 1) % 360);
+    });
+
+    it('rotates scan bearings into the body frame (verified wall test)', () => {
+      openSocket();
+      const scanHook = renderHook(() => useCockpitScan());
+      // Single return at scan 270° — the 2026-08-10 wall test proved this is
+      // body FORWARD (URDF base_lidar_link yaw +90°).
+      const ranges = Array(360).fill(NaN);
+      ranges[270] = 1.0;
+      act(() => {
+        MockWebSocket.latestInstance?.triggerMessage({
+          op: 'publish',
+          topic: '/scan',
+          msg: {
+            ranges,
+            angle_min: 0,
+            angle_max: Math.PI * 2,
+            angle_increment: (Math.PI * 2) / 360,
+            range_min: 0.1,
+            range_max: 10.0,
+          },
+        });
+      });
+
+      const pts = scanHook.result.current.points;
+      expect(pts).toHaveLength(1);
+      // Body forward: x ≈ +1 m, y ≈ 0.
+      expect(pts[0].x).toBeCloseTo(1.0, 5);
+      expect(pts[0].y).toBeCloseTo(0.0, 5);
+      expect(LIDAR_SCAN_TO_BODY_YAW_DEG).toBe(90);
     });
 
     it('measures the scan rate from arrivals rather than asserting a nominal one', () => {
@@ -434,6 +505,114 @@ describe('rosClient and hooks', () => {
       });
       send360();
       expect(scanHook.result.current.intervalMs).toBeCloseTo(100, 0);
+    });
+  });
+
+  // ── MAP INGEST (/map + /tf) ───────────────────────────────────────────────
+  describe('map ingest', () => {
+    it('parses the occupancy grid with its origin and resolution', () => {
+      openSocket();
+      const mapHook = renderHook(() => useCockpitMap());
+      act(() => {
+        MockWebSocket.latestInstance?.triggerMessage({
+          op: 'publish',
+          topic: '/map',
+          msg: {
+            info: {
+              width: 3,
+              height: 2,
+              resolution: 0.05,
+              origin: { position: { x: -1.5, y: -2.0 } },
+            },
+            data: [-1, 0, 50, 100, 0, -1],
+          },
+        });
+      });
+      const m = mapHook.result.current;
+      expect(m.width).toBe(3);
+      expect(m.height).toBe(2);
+      expect(m.resolution).toBeCloseTo(0.05, 6);
+      expect(m.originX).toBeCloseTo(-1.5, 6);
+      expect(m.originY).toBeCloseTo(-2.0, 6);
+      expect(m.data).toEqual([-1, 0, 50, 100, 0, -1]);
+      expect(m.hasReceived).toBe(true);
+    });
+
+    it('unsubscribes /map when the grid exceeds MAP_MAX_CELLS', () => {
+      const ws = openSocket();
+      const mapHook = renderHook(() => useCockpitMap());
+      const bridgeHook = renderHook(() => useCockpitBridge());
+      const width = 600;
+      const height = 500;
+      expect(width * height).toBeGreaterThan(MAP_MAX_CELLS);
+      ws.send.mockClear();
+      act(() => {
+        MockWebSocket.latestInstance?.triggerMessage({
+          op: 'publish',
+          topic: '/map',
+          msg: {
+            info: { width, height, resolution: 0.05, origin: { position: { x: 0, y: 0 } } },
+            data: new Array(width * height).fill(0),
+          },
+        });
+      });
+      expect(mapHook.result.current.hasReceived).toBe(false);
+      const unsub = wireOps(ws).find((o) => o.op === 'unsubscribe' && o.topic === '/map');
+      expect(unsub).toBeTruthy();
+      expect(bridgeHook.result.current.faults[0]?.msg).toMatch(/exceeds/);
+    });
+
+    it('rejects a grid whose data does not match its dimensions', () => {
+      openSocket();
+      const mapHook = renderHook(() => useCockpitMap());
+      act(() => {
+        MockWebSocket.latestInstance?.triggerMessage({
+          op: 'publish',
+          topic: '/map',
+          msg: {
+            info: { width: 4, height: 4, resolution: 0.05, origin: { position: { x: 0, y: 0 } } },
+            data: [0, 1], // 2 cells for a 4x4 claim
+          },
+        });
+      });
+      // Rejected at ingest: a size-mismatched grid never enters the store.
+      expect(mapHook.result.current.hasReceived).toBe(false);
+      expect(mapHook.result.current.data).toHaveLength(0);
+    });
+
+    it('extracts only the map→odom link from the /tf firehose', () => {
+      openSocket();
+      const moHook = renderHook(() => useCockpitMapOdom());
+      act(() => {
+        MockWebSocket.latestInstance?.triggerMessage({
+          op: 'publish',
+          topic: '/tf',
+          msg: {
+            transforms: [
+              // noise: some other link — must be ignored
+              {
+                header: { frame_id: 'odom' },
+                child_frame_id: 'base_footprint',
+                transform: { translation: { x: 9, y: 9 }, rotation: { z: 0, w: 1 } },
+              },
+              {
+                header: { frame_id: 'map' },
+                child_frame_id: 'odom',
+                // 90° about z: z = sin(45°), w = cos(45°)
+                transform: {
+                  translation: { x: 1.25, y: -0.5 },
+                  rotation: { z: Math.SQRT1_2, w: Math.SQRT1_2 },
+                },
+              },
+            ],
+          },
+        });
+      });
+      const mo = moHook.result.current;
+      expect(mo.x).toBeCloseTo(1.25, 6);
+      expect(mo.y).toBeCloseTo(-0.5, 6);
+      expect(mo.yaw).toBeCloseTo(Math.PI / 2, 5);
+      expect(mo.hasReceived).toBe(true);
     });
   });
 

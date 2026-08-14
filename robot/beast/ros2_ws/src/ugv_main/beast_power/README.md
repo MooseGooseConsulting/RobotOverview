@@ -57,7 +57,10 @@ colcon test --packages-select beast_power
 1. Wire the driver-board I²C header → Jetson 40-pin (GND/SCL/SDA only). **Done 2026-08-07.**
 2. Verify 3.3 V levels; `i2cdetect` → record bus + address in `docs/beast-ops.md`.
 3. Confirm shunt sign (`current_sign`) so positive amps = charging.
-4. Refine 3S OCV table against logged pack voltage (`beast_power_logger`), and
-   set real capacity from a full-to-cutoff `charge_mah` integral.
+4. **Endpoints done 2026-08-14.** `voltage_to_soc` publishes usable-range OCV
+   (8.332 V hard cutoff → 0 %, 12.364 V clean-log full-charge high → 100 %).
+   Mid-curve rest-step samples and a pack-side shunt (3.0 Ah capacity) are
+   still open. `charge_mah` now resumes from the last CSV row across logger
+   restarts; it remains logic-rail truth, not pack capacity.
 5. Keep `/ugv/charging_active` as observability only until a separately approved
    charging-policy design exists; it is not a motion interlock.

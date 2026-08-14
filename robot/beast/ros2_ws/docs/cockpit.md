@@ -101,7 +101,7 @@ below; the lock topic remains configured for CLI operators over SSH.
 
 `/ugv/voltage`, `/scan`, `/odom`, `/imu/raw`, `/diagnostics`, `/cockpit/status`,
 `/ugv/allow_motion`, `/ugv/watchdog_state`, `/cockpit/overhead_clearance`, `/cockpit/depth/compressed`,
-`/oak/rgb/image_raw/compressed`. Telemetry only — nothing here can move anything — but
+`/oak/rgb/image_raw/compressed`, `/map`, `/tf`. Telemetry only — nothing here can move anything — but
 the list stays closed so a client cannot enumerate and read whatever a later PR adds.
 
 !!! note "`/imu/raw`, not `/imu/data`"

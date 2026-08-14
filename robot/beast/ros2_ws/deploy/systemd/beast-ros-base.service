@@ -9,10 +9,13 @@ Type=simple
 User=beast
 Group=beast
 # i2c: beast_power reads the driver-board INA219 on /dev/i2c-7 (root:i2c).
-SupplementaryGroups=dialout video render i2c
+SupplementaryGroups=dialout video render i2c audio
 WorkingDirectory=/home/beast/beast/RobotOverview/robot/beast/ros2_ws
 EnvironmentFile=/etc/beast/ugv.env
 Environment=PYTHONUNBUFFERED=1
+# Same session Pulse/speechd sockets as interactive user `beast`. Linger
+# must be on so /run/user/1000 exists at boot without a login.
+Environment=XDG_RUNTIME_DIR=/run/user/1000
 ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/setup.bash && exec ros2 launch ugv_bringup bringup_lidar.launch.py use_lidar:=true use_rviz:=false allow_motion:=true'
 KillSignal=SIGINT
 TimeoutStopSec=15

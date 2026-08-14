@@ -1,0 +1,4 @@
+# BEAST-01 user Pulse defaults. Included from ~/.config/pulse/default.pa.
+# USB HAT (SSS1629A5) is the speaker path. Tegra APE/HDMI is silent headless.
+.include /etc/pulse/default.pa
+set-default-sink alsa_output.usb-Solid_State_System_Co._Ltd._USB_PnP_Audio_Device_000000000000-00.analog-stereo

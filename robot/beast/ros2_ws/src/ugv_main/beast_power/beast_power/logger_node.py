@@ -21,6 +21,7 @@ from beast_power.logging_core import (
     DurableCsvWriter,
     LogAlreadyActive,
     build_row,
+    resume_integrator,
 )
 from beast_power.soc import legacy_fake_percentage
 
@@ -82,7 +83,12 @@ class PowerLogger(Node):
         if not math.isfinite(max_gap_s) or max_gap_s <= 0:
             raise ValueError('max_gap_s must be positive and finite')
 
-        self._integrator = ChargeIntegrator(max_gap_s=max_gap_s)
+        resumed_mah, resumed_wh = resume_integrator(output_path)
+        self._integrator = ChargeIntegrator(
+            max_gap_s=max_gap_s,
+            charge_mah=resumed_mah,
+            energy_wh=resumed_wh,
+        )
         self._writer = DurableCsvWriter(
             output_path,
             max_bytes=max_bytes,
@@ -113,7 +119,8 @@ class PowerLogger(Node):
         self.get_logger().info(
             f'Power logging to {self._writer.path} '
             f'(fsync every {fsync_every_n} row(s), rotate at '
-            f'{max_bytes // (1024 * 1024)} MiB, keep {backup_count})'
+            f'{max_bytes // (1024 * 1024)} MiB, keep {backup_count}; '
+            f'resumed {resumed_mah:.1f} mAh / {resumed_wh:.2f} Wh)'
         )
 
     def _on_charging(self, msg: Bool) -> None:

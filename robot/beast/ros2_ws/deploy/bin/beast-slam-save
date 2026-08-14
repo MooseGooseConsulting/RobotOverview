@@ -1,0 +1,69 @@
+#!/bin/bash
+# beast-slam-save - serialize the live slam_toolbox posegraph + occupancy map.
+# Called from beast-slam.service ExecStop; safe to run by hand any time.
+#
+# Uses slam_toolbox's OWN services (Humble names: serialize_map/save_map -
+# serialize_pose_graph is the newer name and does not exist here):
+#   /slam_toolbox/serialize_map  (slam_toolbox/srv/SerializePoseGraph)
+#       -> <stem>.posegraph + <stem>.data  (reload on boot via map_file_name)
+#   /slam_toolbox/save_map       (slam_toolbox/srv/SaveMap)
+#       -> <stem>.pgm + <stem>.yaml        (occupancy export)
+#
+# Refuses to overwrite the stem when the live /map is larger than MAX_MAP_CELLS.
+# 2026-08-14: a restart of a frozen posegraph exploded the raster to
+# 4185×6765 / 9629×7612 and the previous in-place save destroyed the only
+# 180×122 copy. Timestamped bak/ is the other half of that lesson.
+#
+# NOTE: no `set -u` before sourcing - ROS setup scripts expand unbound
+# variables (COLCON_TRACE et al.) and a strict shell dies silently here.
+export ROS_HOME=${ROS_HOME:-/home/beast/.ros}
+source /opt/ros/humble/setup.bash 2>/dev/null
+set -o pipefail
+
+MAP_STEM=/data/beast/maps/beast-map
+MAP_DIR=/data/beast/maps
+# 250k cells @ 5 cm ≈ 25 m × 25 m. Desk/room maps are ~20k. The exploded
+# grids were 28M–73M cells and starve rosbridge.
+MAX_MAP_CELLS=250000
+mkdir -p "$MAP_DIR"
+
+if ! ros2 node list 2>/dev/null | grep -q '^/slam_toolbox$'; then
+  echo "beast-slam-save: slam_toolbox not running, nothing to save"
+  exit 0
+fi
+
+info=$(timeout 8 ros2 topic echo /map --once --field info 2>/dev/null || true)
+w=$(printf '%s\n' "$info" | awk '/^width:/ {print $2; exit}')
+h=$(printf '%s\n' "$info" | awk '/^height:/ {print $2; exit}')
+if [ -z "$w" ] || [ -z "$h" ]; then
+  echo "beast-slam-save: could not read /map info — refusing to overwrite stem"
+  exit 0
+fi
+cells=$((w * h))
+echo "beast-slam-save: live /map ${w}x${h} (${cells} cells)"
+if [ "$cells" -gt "$MAX_MAP_CELLS" ]; then
+  echo "beast-slam-save: REFUSING save — grid exceeds ${MAX_MAP_CELLS} cells"
+  echo "beast-slam-save: leaving ${MAP_STEM}.* untouched"
+  exit 0
+fi
+
+if [ -f "${MAP_STEM}.posegraph" ] || [ -f "${MAP_STEM}.yaml" ]; then
+  bak="${MAP_DIR}/bak-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$bak"
+  cp -a "${MAP_STEM}".* "$bak/" 2>/dev/null || true
+  echo "beast-slam-save: copied previous stem to ${bak}"
+fi
+
+echo "beast-slam-save: serializing posegraph to ${MAP_STEM}"
+timeout 15 ros2 service call /slam_toolbox/serialize_map \
+  slam_toolbox/srv/SerializePoseGraph "{filename: '${MAP_STEM}'}" \
+  && echo "beast-slam-save: posegraph saved" \
+  || echo "beast-slam-save: serialize call FAILED (rc=$?)"
+
+echo "beast-slam-save: exporting occupancy grid"
+timeout 15 ros2 service call /slam_toolbox/save_map \
+  slam_toolbox/srv/SaveMap "{name: {data: '${MAP_STEM}'}}" \
+  && echo "beast-slam-save: occupancy saved" \
+  || echo "beast-slam-save: save_map FAILED (rc=$?)"
+
+exit 0

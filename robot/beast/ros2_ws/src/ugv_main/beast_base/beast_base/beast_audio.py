@@ -2,16 +2,19 @@
 
 The ESP32 JSON "v" field (centivolts, ~1.2% low vs the INA219) drives only this
 voice warning — ``/ugv/voltage`` is beast_power's since the 2026-08-07 cutover,
-so this module never publishes BatteryState. The OLED "V:" line (T:3, lineNum 2)
-is written on the serial link after the voice command succeeds.
+so this module never publishes BatteryState.
 
 Fire rules:
   * only when 0.1 < voltage < 9 V — a real low-cell read, not a glitch or a
     full-pack float
   * at most once per ``_warn_interval`` (5 s) — the double-fire guard against
     the ESP32 streaming the same low value at 20 Hz
-  * the voice command runs in a daemon thread so a hung ``spd-say`` can never
-    stall the feedback loop
+  * the OLED "V:" line (T:3, lineNum 2) is written FIRST and unconditionally —
+    it is the reliable channel on a headless robot
+  * ``spd-say`` runs afterwards with a short timeout; the first failure latches
+    voice off for the process lifetime (broken headless speech-dispatcher hung
+    10 s per attempt and spammed errors every 5 s until 2026-08-10), while the
+    OLED line keeps firing on the normal guard interval
 """
 
 import json
@@ -28,6 +31,8 @@ class LowBatteryVoice:
         self._get_logger = get_logger
         self._warn_interval = 5.0
         self._last_warn = 0.0
+        self._voice_broken = False
+        self._voice_timeout = 3.0
 
     def check(self, voltage_data):
         """Feed one ESP32 feedback frame (T:1001) — fires the warning if low."""
@@ -47,13 +52,20 @@ class LowBatteryVoice:
         ).start()
 
     def _low_battery_warn_worker(self, voltage_value: float):
+        data = json.dumps({'T': '3', 'lineNum': 2, 'Text': f"V:{voltage_value}"}) + "\n"
+        self._send_command(data.encode())
+        if self._voice_broken:
+            return
         try:
             subprocess.run(
                 ['spd-say', 'low battery'],
                 check=False,
-                timeout=10,
+                timeout=self._voice_timeout,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
-            data = json.dumps({'T': '3', 'lineNum': 2, 'Text': f"V:{voltage_value}"}) + "\n"
-            self._send_command(data.encode())
         except Exception as e:
-            self._get_logger().error(f"Failed low battery warning: {e}")
+            self._voice_broken = True
+            self._get_logger().error(
+                f"Low-battery voice disabled for this session after spd-say failure: {e}"
+            )

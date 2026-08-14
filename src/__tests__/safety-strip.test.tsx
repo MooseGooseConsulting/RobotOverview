@@ -8,18 +8,22 @@ const mocks = vi.hoisted(() => ({
   isEthernetConnected: false,
   receivedAt: 1_000,
   setMotionAllowed: vi.fn(),
+  voltage: null as number | null,
+  powerSupplyStatus: null as number | null,
+  voltageStale: false,
+  voltageHasReceived: false,
 }));
 
 vi.mock('@/lib/ros/client', () => ({
   rosClient: { setMotionAllowed: mocks.setMotionAllowed },
   useConnectionState: () => 'connected',
   useCockpitVoltage: () => ({
-    voltage: null,
+    voltage: mocks.voltage,
     current: null,
-    powerSupplyStatus: null,
+    powerSupplyStatus: mocks.powerSupplyStatus,
     present: null,
-    stale: false,
-    hasReceived: false,
+    stale: mocks.voltageStale,
+    hasReceived: mocks.voltageHasReceived,
   }),
   useCockpitStatus: () => ({
     muxSource: null,
@@ -50,6 +54,10 @@ describe('SafetyStrip motion authority', () => {
     mocks.isCharging = false;
     mocks.isEthernetConnected = false;
     mocks.receivedAt = 1_000;
+    mocks.voltage = null;
+    mocks.powerSupplyStatus = null;
+    mocks.voltageStale = false;
+    mocks.voltageHasReceived = false;
     mocks.setMotionAllowed.mockReset();
     mocks.setMotionAllowed.mockResolvedValue({ ok: true });
   });
@@ -163,5 +171,64 @@ describe('SafetyStrip motion authority', () => {
       fireEvent.click(button);
     });
     expect(mocks.setMotionAllowed).toHaveBeenCalledWith(false);
+  });
+});
+
+describe('SafetyStrip voltage-only pack banner', () => {
+  beforeEach(() => {
+    mocks.allowMotion = true;
+    mocks.voltage = null;
+    mocks.powerSupplyStatus = null;
+    mocks.voltageStale = false;
+    mocks.voltageHasReceived = true;
+  });
+
+  it('shows no banner when voltage is absent', () => {
+    mocks.voltageHasReceived = false;
+    render(<SafetyStrip />);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows no banner at 11.0 V', () => {
+    mocks.voltage = 11.0;
+    render(<SafetyStrip />);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('warns at ≤ 10.8 V from voltage only', () => {
+    mocks.voltage = 10.8;
+    render(<SafetyStrip />);
+    const banner = screen.getByRole('alert');
+    expect(banner).toHaveTextContent('LOW PACK — 10.80 V — plan a charge stop');
+    expect(banner).not.toHaveTextContent('%');
+  });
+
+  it('goes critical at ≤ 10.2 V from voltage only', () => {
+    mocks.voltage = 10.2;
+    render(<SafetyStrip />);
+    const banner = screen.getByRole('alert');
+    expect(banner).toHaveTextContent('CRITICAL PACK — 10.20 V — charge now, BMS cutoff near');
+    expect(banner).not.toHaveTextContent('%');
+  });
+
+  it('suppresses a warn banner while charging', () => {
+    mocks.voltage = 10.5;
+    mocks.powerSupplyStatus = 1; // CHARGING
+    render(<SafetyStrip />);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('suppresses a critical banner while full', () => {
+    mocks.voltage = 10.0;
+    mocks.powerSupplyStatus = 4; // FULL
+    render(<SafetyStrip />);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('suppresses the banner when the voltage slice is stale', () => {
+    mocks.voltage = 10.0;
+    mocks.voltageStale = true;
+    render(<SafetyStrip />);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

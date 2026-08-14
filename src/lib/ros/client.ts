@@ -32,6 +32,10 @@ export const ROS_SUBSCRIPTIONS = [
   { topic: '/ugv/allow_motion', type: 'std_msgs/msg/Bool' },
   { topic: '/oak/rgb/image_raw/compressed', type: 'sensor_msgs/msg/CompressedImage' },
   { topic: '/cockpit/depth/compressed', type: 'sensor_msgs/msg/CompressedImage' },
+  // Phase E (2026-08-13): slam_toolbox occupancy grid + the map→odom TF the
+  // client composes with the /odom pose to place the robot on the map.
+  { topic: '/map', type: 'nav_msgs/msg/OccupancyGrid' },
+  { topic: '/tf', type: 'tf2_msgs/msg/TFMessage' },
 ] as const;
 
 export const ROS_PUBLICATIONS = [
@@ -46,24 +50,43 @@ export const IMAGE_TOPICS = [
   '/cockpit/depth/compressed',
 ] as const;
 
+/** Per-topic subscribe throttles; anything absent gets the 50 ms default. */
+const TOPIC_THROTTLE_MS: Record<string, number> = {
+  '/tf': 250,
+  '/map': 1000,
+};
+
+/**
+ * Topics that must not be subscribed at connect. Empty as of 2026-08-14:
+ * `/map` is back on the wire after a fresh 69×74 desk grid replaced the
+ * exploded 4185×6765 / 9629×7612 rasters. Humble rosbridge 2.0.7 still
+ * fragments anything over `max_message_size` (10 MB) and this client does
+ * not reassemble `op: fragment` — MAP_MAX_CELLS plus the fragment handler
+ * are the backstop if slam blows up again.
+ */
+export const DEFERRED_WIRE_TOPICS = [] as const;
+
+/** Refuse occupancy ingest above this. 250k cells @ 5 cm ≈ 25 m × 25 m. */
+export const MAP_MAX_CELLS = 250_000;
+
 // ── LiDAR BLIND-SECTOR CROP ─────────────────────────────────────────────────
-// The single source of truth for the cropped sector. The scan parser deletes
-// this range and SpatialView draws its wedge from the SAME constant through the
-// SAME ROS→canvas mapping the points use, so the picture cannot drift from the
-// deletion again (before this, the crop removed ROS 45°–134.5° while the wedge
-// was drawn across the canvas rear — a 90° lie).
-//
-// !! ORIENTATION IS UNVERIFIED AGAINST THE PHYSICAL ROBOT !!
-// These bounds came from a bin-index calculation, not from a live scan. In ROS
-// REP-103 body frame (+x forward, +y left) 45°–134.5° is the robot's LEFT side,
-// which is NOT obviously where the LD19's occluded arc should be — the mast and
-// the OAK-D sit elsewhere. Before trusting this display:
-//   ros2 topic echo /scan --once     # which index range is `inf`?
-// and reconcile that index range with angle_min/angle_increment. TODO tracked
-// with the beast-paces shakedown (`.claude/skills/beast-paces/SKILL.md`); it
-// needs the robot powered and stationary, so it is deliberately NOT changed
-// here. This PR only makes the drawing agree with the code.
-export const LIDAR_CROP_SECTOR_DEG = { startDeg: 45, endDeg: 134.5 } as const;
+// The single source of truth for scan orientation and the blind sector. The
+// scan parser rotates every point by LIDAR_SCAN_TO_BODY_YAW_DEG and drops the
+// LIDAR_CROP_SECTOR_DEG range; SpatialView draws its wedge from the SAME
+// constants through the SAME ROS→canvas mapping the points use, so the picture
+// cannot drift from the deletion.
+// Scan→body yaw: the LD19 publishes in base_lidar_link, whose URDF joint is
+// rpy 0 0 +90° (ugv_description/urdf/bases/ugv_beast.xacro), so scan bearing θ
+// lands at BODY bearing θ + 90° (REP-103: 0° forward, +90° left). Verified
+// live 2026-08-10: robot square-on to a wall measured at 39 in / 0.99 m from
+// the LiDAR read 1.00–1.02 m across scan 255–285° — scan 270° = body forward.
+// The parser rotates every point by this constant before use.
+export const LIDAR_SCAN_TO_BODY_YAW_DEG = 90 as const;
+
+// Blind sector in BODY frame. The driver crops scan 38°–142°
+// (/etc/beast/ugv.env crop 218–322; the published masked band is mirrored:
+// [360−max, 360−min]) — rear mast occlusion plus margin. +90° ⇒ body 128–232.
+export const LIDAR_CROP_SECTOR_DEG = { startDeg: 128, endDeg: 232 } as const;
 
 /**
  * Map a ROS scan bearing (rad, +x forward / +y left) to the top-down canvas the
@@ -117,6 +140,22 @@ export interface InboundMsg {
   angle_increment?: number;
   range_min?: number;
   range_max?: number;
+  // OccupancyGrid (/map)
+  info?: {
+    width?: number;
+    height?: number;
+    resolution?: number;
+    origin?: { position?: { x?: number; y?: number } };
+  };
+  // TFMessage (/tf)
+  transforms?: Array<{
+    header?: { frame_id?: string };
+    child_frame_id?: string;
+    transform?: {
+      translation?: { x?: number; y?: number };
+      rotation?: { z?: number; w?: number };
+    };
+  }>;
 }
 
 // ── STALENESS ───────────────────────────────────────────────────────────────
@@ -145,6 +184,9 @@ const FRESHNESS_MS = {
   status: 2000,
   diagnostics: 2000,
   scan: 2000,
+  // slam_toolbox republishes /map on its 5 s update timer; give it room.
+  map: 15000,
+  mapOdom: 2000,
 } as const;
 
 type SliceKey = keyof typeof FRESHNESS_MS;
@@ -158,8 +200,9 @@ export interface CockpitVoltage extends SliceMeta {
    * Signed pack amps (positive = charging), or null. Carried only when the
    * publisher fills power_supply_status — bringup's legacy dummy current
    * arrives as 0.0 with status UNKNOWN and is nulled at ingest so it can never
-   * render as a real 0.0 A draw. (SOC stays deliberately un-carried: no honest
-   * percentage exists yet — see beast_power/soc.py.)
+   * render as a real 0.0 A draw. (SOC stays deliberately un-carried: usable
+   * OCV endpoints are pinned in beast_power/soc.py, but the cockpit banner
+   * stays voltage-only until mid-curve rest samples earn a %.)
    */
   current: number | null;
   /** sensor_msgs/BatteryState power_supply_status (1=CHARGING … 4=FULL), null if unreported/UNKNOWN-0. */
@@ -226,6 +269,26 @@ export interface CockpitScan extends SliceMeta {
   rangeMax: number;
   /** Mean interval between the last few scans, ms — null until measurable. */
   intervalMs: number | null;
+}
+
+/** slam_toolbox occupancy grid (/map), downcast to plain numbers at ingest. */
+export interface CockpitMap extends SliceMeta {
+  width: number;
+  height: number;
+  /** Meters per cell. */
+  resolution: number;
+  /** Map-frame coordinates of cell (0,0)'s corner. */
+  originX: number;
+  originY: number;
+  /** Row-major cells: -1 unknown, 0 free, 1-100 occupied-ish. */
+  data: number[];
+}
+
+/** The map→odom transform from /tf, composed with /odom at render time. */
+export interface CockpitMapOdom extends SliceMeta {
+  x: number;
+  y: number;
+  yaw: number;
 }
 
 export interface DiagnosticsItem {
@@ -310,6 +373,8 @@ const meta: Record<SliceKey, SliceMeta> = {
   status: blankMeta(),
   diagnostics: blankMeta(),
   scan: blankMeta(),
+  map: blankMeta(),
+  mapOdom: blankMeta(),
 };
 
 type VoltageData = Omit<CockpitVoltage, keyof SliceMeta>;
@@ -318,6 +383,8 @@ type ImuData = Omit<CockpitImu, keyof SliceMeta>;
 type ClearanceData = { meters: number | null };
 type StatusData = Omit<CockpitStatus, keyof SliceMeta>;
 type ScanData = Omit<CockpitScan, keyof SliceMeta>;
+type MapData = Omit<CockpitMap, keyof SliceMeta>;
+type MapOdomData = Omit<CockpitMapOdom, keyof SliceMeta>;
 type DiagnosticsData = { items: DiagnosticsItem[] };
 
 function blankStatus(): StatusData {
@@ -373,6 +440,12 @@ function directStillAuthoritative(at: number | null): boolean {
   return at !== null && Date.now() - at <= DIRECT_TOPIC_AUTHORITY_MS;
 }
 let scanData: ScanData = blankScan();
+let mapData: MapData = { width: 0, height: 0, resolution: 0.05, originX: 0, originY: 0, data: [] };
+// True once we dropped /map on this wire (fragment storm or oversized grid).
+// A fragmented dump arrives as MANY fragment frames; without this latch each
+// one would send another unsubscribe and record another fault.
+let mapDropped = false;
+let mapOdomData: MapOdomData = { x: 0, y: 0, yaw: 0 };
 let diagnosticsData: DiagnosticsData = { items: [] };
 
 let connectionState: ConnectionState = 'disconnected';
@@ -382,6 +455,8 @@ let imuState: CockpitImu = { ...imuData, ...meta.imu };
 let clearanceState: CockpitClearance = { ...clearanceData, ...meta.clearance };
 let statusState: CockpitStatus = { ...statusData, ...meta.status };
 let scanState: CockpitScan = { ...scanData, ...meta.scan };
+let mapState: CockpitMap = { ...mapData, ...meta.map };
+let mapOdomState: CockpitMapOdom = { ...mapOdomData, ...meta.mapOdom };
 let diagnosticsState: CockpitDiagnostics = { ...diagnosticsData, ...meta.diagnostics };
 let bridgeState: CockpitBridge = { faults: [], deadTopics: [] };
 
@@ -395,6 +470,8 @@ const listeners = {
   status: new Set<() => void>(),
   diagnostics: new Set<() => void>(),
   scan: new Set<() => void>(),
+  map: new Set<() => void>(),
+  mapOdom: new Set<() => void>(),
   bridge: new Set<() => void>(),
 };
 
@@ -432,6 +509,14 @@ const rebuild: Record<SliceKey, () => void> = {
   scan: () => {
     scanState = { ...scanData, ...meta.scan };
     notify('scan');
+  },
+  map: () => {
+    mapState = { ...mapData, ...meta.map };
+    notify('map');
+  },
+  mapOdom: () => {
+    mapOdomState = { ...mapOdomData, ...meta.mapOdom };
+    notify('mapOdom');
   },
 };
 
@@ -475,6 +560,8 @@ function resetSlicesForNewConnection() {
   clearanceData = { meters: null };
   statusData = blankStatus();
   scanData = blankScan();
+  mapData = { width: 0, height: 0, resolution: 0.05, originX: 0, originY: 0, data: [] };
+  mapOdomData = { x: 0, y: 0, yaw: 0 };
   diagnosticsData = { items: [] };
   scanArrivals = [];
   allowMotionDirectAt = null;
@@ -680,6 +767,8 @@ const serverState = {
   voltage: { voltage: null, current: null, powerSupplyStatus: null, present: null, ...blankMeta() } as CockpitVoltage,
   odom: { x: null, y: null, yaw: null, linearSpeed: null, angularSpeed: null, ...blankMeta() } as CockpitOdom,
   imu: { ax: null, ay: null, az: null, gx: null, gy: null, gz: null, ...blankMeta() } as CockpitImu,
+  map: { width: 0, height: 0, resolution: 0.05, originX: 0, originY: 0, data: [], ...blankMeta() } as CockpitMap,
+  mapOdom: { x: 0, y: 0, yaw: 0, ...blankMeta() } as CockpitMapOdom,
   clearance: { meters: null, ...blankMeta() } as CockpitClearance,
   status: { ...blankStatus(), ...blankMeta() } as CockpitStatus,
   diagnostics: { items: [], ...blankMeta() } as CockpitDiagnostics,
@@ -808,6 +897,21 @@ export const rosClient = {
             const success = data.values?.success ?? data.result === true;
             pending.resolve({ ok: success, message: data.values?.message ?? null });
           }
+        } else if (data.op === 'fragment') {
+          // Humble 2.0.7 fragments oversized /map dumps. We do not reassemble
+          // 80 MB JSON; drop /map so /scan can use the socket. Fragment frames
+          // carry no topic, so this is a heuristic: /map is the only topic on
+          // this wire big enough to fragment. Latch so a multi-fragment dump
+          // acts (and records a fault) exactly once per wire.
+          if (!mapDropped) {
+            mapDropped = true;
+            this.unsubscribeTopic('/map');
+            recordBridgeFault(
+              'warning',
+              'oversized topic fragmented; unsubscribed /map so /scan can flow',
+              'sub:/map',
+            );
+          }
         } else if (data.op === 'status') {
           const level = data.level === 'error' ? 'error' : data.level === 'warning' ? 'warning' : null;
           if (level) {
@@ -836,14 +940,20 @@ export const rosClient = {
     // means a glob-whitelisted bridge denies our topics in total silence.
     socket.send(JSON.stringify({ op: 'set_level', level: 'warning' }));
 
+    // Fresh wire, fresh /map subscription — re-arm the drop latch.
+    mapDropped = false;
+
     ROS_SUBSCRIPTIONS.forEach(({ topic, type }) => {
+      if ((DEFERRED_WIRE_TOPICS as readonly string[]).includes(topic)) return;
       const isImage = (IMAGE_TOPICS as readonly string[]).includes(topic);
       socket?.send(JSON.stringify({
         op: 'subscribe',
         id: opId('sub', topic),
         topic,
         type,
-        throttle_rate: isImage ? 100 : 50,
+        // /tf is a 50 Hz firehose (250 ms is plenty for map→odom); /map only
+        // republishes on slam_toolbox's 5 s update timer anyway.
+        throttle_rate: TOPIC_THROTTLE_MS[topic] ?? (isImage ? 100 : 50),
         // Never buffer video: one frame deep means a slow link drops frames
         // instead of queueing a growing lag behind the robot.
         ...(isImage ? { queue_length: 1 } : {}),
@@ -858,6 +968,16 @@ export const rosClient = {
         type,
       }));
     });
+  },
+
+  unsubscribeTopic(topic: string): boolean {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify({
+      op: 'unsubscribe',
+      id: opId('unsub', topic),
+      topic,
+    }));
+    return true;
   },
 
   publish(topic: string, msg: unknown): boolean {
@@ -1086,7 +1206,8 @@ export const rosClient = {
             continue;
           }
 
-          const angle = angleMin + i * angleIncrement;
+          // Rotate scan bearing into the body frame — see LIDAR_SCAN_TO_BODY_YAW_DEG.
+          const angle = angleMin + i * angleIncrement + (LIDAR_SCAN_TO_BODY_YAW_DEG * Math.PI) / 180;
           let normDeg = ((angle * 180.0) / Math.PI) % 360;
           if (normDeg < 0) normDeg += 360;
 
@@ -1107,6 +1228,60 @@ export const rosClient = {
 
         scanData = { points, angleMin, angleMax, angleIncrement, rangeMin, rangeMax, intervalMs };
         commit('scan');
+        break;
+      }
+      case '/map': {
+        // OccupancyGrid. rosbridge ships int8[] as a plain JSON number array
+        // (only uint8[] gets base64), and slam_toolbox only republishes on its
+        // map_update_interval, so this stays cheap.
+        const w = finite(msg.info?.width);
+        const h = finite(msg.info?.height);
+        const res = finite(msg.info?.resolution);
+        const cells = msg.data;
+        // A grid whose payload doesn't match its own dimensions is corrupt —
+        // reject at ingest so it can never half-render downstream.
+        if (!w || !h || !res || !Array.isArray(cells) || cells.length !== w * h) break;
+        if (w * h > MAP_MAX_CELLS) {
+          if (!mapDropped) {
+            mapDropped = true;
+            this.unsubscribeTopic('/map');
+            recordBridgeFault(
+              'warning',
+              `occupancy grid ${w}×${h} exceeds ${MAP_MAX_CELLS} cells; unsubscribed /map`,
+              'sub:/map',
+            );
+          }
+          break;
+        }
+        mapData = {
+          width: w,
+          height: h,
+          resolution: res,
+          originX: finite(msg.info?.origin?.position?.x) ?? 0,
+          originY: finite(msg.info?.origin?.position?.y) ?? 0,
+          data: cells as number[],
+        };
+        commit('map');
+        break;
+      }
+      case '/tf': {
+        // We need exactly one link from the TF firehose: map→odom. The client
+        // composes it with the /odom pose at render time to place the robot
+        // on the occupancy grid.
+        const transforms = msg.transforms;
+        if (!Array.isArray(transforms)) break;
+        for (const t of transforms) {
+          if (t?.header?.frame_id !== 'map' || t?.child_frame_id !== 'odom') continue;
+          const qz = finite(t.transform?.rotation?.z) ?? 0;
+          const qw = finite(t.transform?.rotation?.w) ?? 1;
+          mapOdomData = {
+            x: finite(t.transform?.translation?.x) ?? 0,
+            y: finite(t.transform?.translation?.y) ?? 0,
+            yaw: 2.0 * Math.atan2(qz, qw),
+          };
+          commit('mapOdom');
+          break;
+        }
         break;
       }
     }
@@ -1141,6 +1316,8 @@ const subscribeStatus = makeSubscriber('status');
 const subscribeDiagnostics = makeSubscriber('diagnostics');
 const subscribeBridge = makeSubscriber('bridge');
 const subscribeScan = makeSubscriber('scan');
+const subscribeMap = makeSubscriber('map');
+const subscribeMapOdom = makeSubscriber('mapOdom');
 
 const getConnection = () => connectionState;
 const getVoltage = () => voltageState;
@@ -1151,6 +1328,8 @@ const getStatus = () => statusState;
 const getDiagnostics = () => diagnosticsState;
 const getBridge = () => bridgeState;
 const getScan = () => scanState;
+const getMap = () => mapState;
+const getMapOdom = () => mapOdomState;
 
 // Server snapshots are constants, so these are stable by construction.
 const getServerConnection = () => serverState.connection;
@@ -1162,6 +1341,8 @@ const getServerStatus = () => serverState.status;
 const getServerDiagnostics = () => serverState.diagnostics;
 const getServerBridge = () => serverState.bridge;
 const getServerScan = () => serverState.scan;
+const getServerMap = () => serverState.map;
+const getServerMapOdom = () => serverState.mapOdom;
 
 export function useConnectionState(): ConnectionState {
   return useSyncExternalStore(subscribeConnection, getConnection, getServerConnection);
@@ -1197,4 +1378,12 @@ export function useCockpitBridge(): CockpitBridge {
 
 export function useCockpitScan(): CockpitScan {
   return useSyncExternalStore(subscribeScan, getScan, getServerScan);
+}
+
+export function useCockpitMap(): CockpitMap {
+  return useSyncExternalStore(subscribeMap, getMap, getServerMap);
+}
+
+export function useCockpitMapOdom(): CockpitMapOdom {
+  return useSyncExternalStore(subscribeMapOdom, getMapOdom, getServerMapOdom);
 }

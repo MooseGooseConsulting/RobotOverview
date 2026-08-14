@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useCockpitScan,
   useCockpitOdom,
+  useCockpitMap,
+  useCockpitMapOdom,
   LIDAR_CROP_SECTOR_DEG,
   rosBearingToCanvasOffset,
 } from '@/lib/ros/client';
@@ -15,9 +17,37 @@ const num = (v: number | null, digits: number) => (v === null ? '—' : v.toFixe
 export function SpatialView() {
   const scan = useCockpitScan();
   const odom = useCockpitOdom();
+  const map = useCockpitMap();
+  const mapOdom = useCockpitMapOdom();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [scale, setScale] = useState(40); // Pixels per meter
+
+  // Occupancy grid → offscreen image, rebuilt only when slam_toolbox ships a
+  // new map (5 s cadence). Occupied = dim cyan, free = faint, unknown = clear.
+  const mapImage = useMemo((): HTMLCanvasElement | null => {
+    if (!map.hasReceived || map.width === 0 || map.data.length !== map.width * map.height) {
+      return null;
+    }
+    const off = document.createElement('canvas');
+    off.width = map.width;
+    off.height = map.height;
+    const octx = off.getContext('2d');
+    if (!octx) return null;
+    const img = octx.createImageData(map.width, map.height);
+    for (let i = 0; i < map.data.length; i++) {
+      const v = map.data[i];
+      if (v < 0) continue; // unknown stays transparent
+      const o = i * 4;
+      if (v >= 50) {
+        img.data[o] = 54; img.data[o + 1] = 224; img.data[o + 2] = 224; img.data[o + 3] = 110;
+      } else {
+        img.data[o] = 127; img.data[o + 1] = 142; img.data[o + 2] = 167; img.data[o + 3] = 26;
+      }
+    }
+    octx.putImageData(img, 0, 0);
+    return off;
+  }, [map.hasReceived, map.width, map.height, map.data]);
 
   // Live-ness is a property of the feed, not of the point count: a scan of
   // legitimately zero returns is not "offline", and a frozen last-good scan is
@@ -63,6 +93,34 @@ export function SpatialView() {
     ctx.lineTo(Cx, H);
     ctx.stroke();
 
+    // ── DRAW THE SLAM MAP (under everything else) ─
+    // Robot pose in the map frame = map→odom (from /tf) ∘ /odom pose:
+    //   r = t_mo + R(mo.yaw)·p_odom,   ryaw = mo.yaw + odom.yaw
+    // Then canvas = T(center) · M_bc · R(−ryaw) · T(−r) · T(origin) · S(res)
+    // with M_bc the body→canvas map ((x fwd, y left) → (up, left)):
+    //   px = −y·scale, py = −x·scale  →  matrix (0, −scale, −scale, 0).
+    // Sanity: robot at its own pose maps to canvas centre; a cell one meter
+    // ahead in the map (with zero yaws) lands scale px above centre.
+    if (mapImage && mapOdom.hasReceived && odom.x !== null && odom.y !== null && odom.yaw !== null) {
+      const cos = Math.cos(mapOdom.yaw);
+      const sin = Math.sin(mapOdom.yaw);
+      const rx = mapOdom.x + cos * odom.x - sin * odom.y;
+      const ry = mapOdom.y + sin * odom.x + cos * odom.y;
+      const ryaw = mapOdom.yaw + odom.yaw;
+
+      ctx.save();
+      ctx.globalAlpha = map.stale ? 0.35 : 1.0;
+      ctx.translate(Cx, Cy);
+      ctx.transform(0, -scale, -scale, 0, 0, 0);
+      ctx.rotate(-ryaw);
+      ctx.translate(-rx, -ry);
+      ctx.translate(map.originX, map.originY);
+      ctx.scale(map.resolution, map.resolution);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(mapImage, 0, 0);
+      ctx.restore();
+    }
+
     // ── DRAW THE CROPPED BLIND SECTOR ─────────────
     // Built by sampling the SAME bearings the parser deletes and passing them
     // through the SAME ROS→canvas mapping the scan points use, so the wedge
@@ -95,7 +153,7 @@ export function SpatialView() {
     );
     ctx.fillStyle = 'rgba(239,68,68,0.35)';
     ctx.fillText(
-      'ORIENTATION UNVERIFIED',
+      'REAR MAST · VERIFIED 2026-08-10',
       Cx + mid.dx * wedgeR * 0.72,
       Cy + mid.dy * wedgeR * 0.72 + 11,
     );
@@ -144,7 +202,7 @@ export function SpatialView() {
         }
       });
     }
-  }, [scan, scale, scanLive]);
+  }, [scan, scale, scanLive, mapImage, map.stale, mapOdom, odom]);
 
   const zoomIn = () => setScale((s) => Math.min(100, s + 5));
   const zoomOut = () => setScale((s) => Math.max(15, s - 5));
@@ -157,7 +215,7 @@ export function SpatialView() {
       <div className="flex items-center justify-between gap-1.5 mb-3">
         <h2 className="font-display text-[11px] font-bold tracking-[0.16em] text-cyan uppercase flex items-center gap-1.5 leading-none">
           <Target className="h-3.5 w-3.5" /> Spatial{' '}
-          <span className="text-ink-dim/70 font-normal font-mono text-[9.5px]">/scan · odom</span>
+          <span className="text-ink-dim/70 font-normal font-mono text-[9.5px]">/scan · odom · /map</span>
         </h2>
         <div className="flex items-center gap-1">
           <button
@@ -185,7 +243,7 @@ export function SpatialView() {
           height="450"
           className="w-full h-auto aspect-[10/9]"
           role="img"
-          aria-label="LiDAR scan ring with robot glyph"
+          aria-label="LiDAR scan ring with occupancy map and robot glyph"
         />
 
         {/* The overlay tracks STALENESS, not emptiness: a scan that stopped
@@ -219,7 +277,25 @@ export function SpatialView() {
             ? `EKF ${num(odom.x, 2)},${num(odom.y, 2)}m · ${num(odom.linearSpeed, 2)} m/s`
             : 'EKF — no /odom publisher'}
         </span>
-        <span className="chip border-rim rounded-full py-0.5 px-2.5">map — Phase E</span>
+        <span
+          className={clsx(
+            'chip border-rim rounded-full py-0.5 px-2.5',
+            map.hasReceived && !map.stale ? 'text-cyan/90' : 'text-ink-dim',
+          )}
+          title="slam_toolbox occupancy grid (/map) + map→odom from /tf"
+        >
+          {map.hasReceived
+            ? `map ${(map.width * map.resolution).toFixed(1)}×${(map.height * map.resolution).toFixed(1)} m${
+                map.stale
+                  ? ' · STALE'
+                  : !mapOdom.hasReceived
+                    ? ' · no map→odom'
+                    : mapOdom.stale
+                      ? ' · STALE tf'
+                      : ''
+              }`
+            : 'MAP — no /map publisher'}
+        </span>
       </div>
     </section>
   );
