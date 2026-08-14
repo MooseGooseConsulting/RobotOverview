@@ -7,6 +7,21 @@ re-verify against the live robot before relying on anything stale.
 
 ## Quick connect
 
+**beast-slam crash loop found + stopped 2026-08-14 ~16:10Z (live):** the unit
+had restarted **397 times**: `async_slam_toolbox_node` segfaults (exit −11)
+seconds after deserializing the 6.4 MB `beast-map.posegraph` (the
+`map_start_at_dock` resume path is broken with this file — distinct from the
+earlier karto clock crash), and even a clean main exit fails the unit because
+`deploy/bin/beast-slam-save` was committed non-executable, so `ExecStop`'s
+`exec` dies 126 — the `|| true` after `exec` is unreachable and protects
+nothing. Stopped via break-glass sudo (`beast-slam` has **no** verbs in the
+sudoers allowlist). Still **enabled**: it resumes crash-looping on next boot
+until the fix lands (exec bit fixed in-tree on #223; `ExecStop=-`,
+`time-sync.target` ordering, fresh-start policy in the SLAM follow-up PR).
+Baseline same check: HEAD `d714082` clean, base+cockpit active,
+`refs/deploy/beast-01` not yet published, installed sudoers still the
+Aug 13 21:22 copy (predates `beast-pull` and `beast-slam` verbs).
+
 **Wi-Fi telemetry + dark-period autopsy (2026-08-10 ~23:00 UTC):** The 22:38Z
 full-dark event (Tailscale + Ethernet + Wi-Fi all dead) was **3S pack
 exhaustion**, not Wi-Fi — power log fell through 9.23 V at 22:30Z

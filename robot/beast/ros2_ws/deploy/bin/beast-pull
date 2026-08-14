@@ -249,16 +249,18 @@ fi
 checkout_build_restart() {
   local sha="$1" pkgs="$2"
 
-  # The marker's lifetime IS the inconsistency window: created before the
-  # checkout moves, removed only after the build finishes. While it exists,
-  # beast-deploy-guard refuses to boot the stack. It must NOT span the restart
-  # below, or the guard would reject this agent's own deploy.
-  : > "$IN_PROGRESS"
-
   # Stop the stack before moving a --symlink-install workspace under it. The
   # motion gate proved the robot is parked, so a stopped base is a safe state,
   # and a stopped process cannot lazily import half-rebuilt code.
   sudo -n /usr/bin/systemctl stop beast-ros-base || return 1
+
+  # The marker's lifetime IS the inconsistency window: created just before the
+  # checkout moves, removed only after the build finishes. While it exists,
+  # beast-deploy-guard refuses to boot the stack. Not earlier (a failed stop
+  # would leave a marker guarding a perfectly consistent workspace) and it
+  # must NOT span the restart below, or the guard would reject this agent's
+  # own deploy.
+  : > "$IN_PROGRESS"
 
   # Detached on purpose. deploy-to-beast.sh names the robot's branch after the
   # DEPLOYING WORKSTATION's branch, which is how the robot ended up sitting on a
