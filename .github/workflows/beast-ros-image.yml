@@ -46,7 +46,7 @@ env:
 jobs:
   image:
     name: Build and publish beast-ros (arm64)
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event.pull_request.head.repo.fork || vars.CI_FORCE_HOSTED == 'true') && 'ubuntu-latest' || (vars.N5_LARGE_RUNNER_ENABLED == 'true' && 'moosegoose-n5-large' || 'moosegoose-general') }}
     permissions:
       contents: read
       packages: write

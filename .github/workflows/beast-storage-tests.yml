@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   storage:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event.pull_request.head.repo.fork || vars.CI_FORCE_HOSTED == 'true') && 'ubuntu-latest' || 'moosegoose-general' }}
     defaults:
       run:
         working-directory: robot/beast/ros2_ws

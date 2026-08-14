@@ -25,7 +25,7 @@ jobs:
   # integration module also self-skips when rclpy is absent, but the marker
   # keeps the host lane honest about what it actually exercised.
   power:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event.pull_request.head.repo.fork || vars.CI_FORCE_HOSTED == 'true') && 'ubuntu-latest' || 'moosegoose-general' }}
     defaults:
       run:
         working-directory: robot/beast/ros2_ws
@@ -45,7 +45,7 @@ jobs:
   # container. Plain pytest + PYTHONPATH: colcon build would install nothing
   # extra and only slow the lane down.
   integration:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event.pull_request.head.repo.fork || vars.CI_FORCE_HOSTED == 'true') && 'ubuntu-latest' || 'moosegoose-general' }}
     container: ros:humble-ros-base
     env:
       # Nodes discover each other on loopback only — faster, and immune to
