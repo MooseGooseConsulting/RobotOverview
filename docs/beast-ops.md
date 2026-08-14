@@ -7,6 +7,21 @@ re-verify against the live robot before relying on anything stale.
 
 ## Quick connect
 
+**beast-slam crash loop found + stopped 2026-08-14 ~16:10Z (live):** the unit
+had restarted **397 times**: `async_slam_toolbox_node` segfaults (exit −11)
+seconds after deserializing the 6.4 MB `beast-map.posegraph` (the
+`map_start_at_dock` resume path is broken with this file — distinct from the
+earlier karto clock crash), and even a clean main exit fails the unit because
+`deploy/bin/beast-slam-save` was committed non-executable, so `ExecStop`'s
+`exec` dies 126 — the `|| true` after `exec` is unreachable and protects
+nothing. Stopped via break-glass sudo (`beast-slam` has **no** verbs in the
+sudoers allowlist). Still **enabled**: it resumes crash-looping on next boot
+until the fix lands (exec bit fixed in-tree on #223; `ExecStop=-`,
+`time-sync.target` ordering, fresh-start policy in the SLAM follow-up PR).
+Baseline same check: HEAD `d714082` clean, base+cockpit active,
+`refs/deploy/beast-01` not yet published, installed sudoers still the
+Aug 13 21:22 copy (predates `beast-pull` and `beast-slam` verbs).
+
 **Wi-Fi telemetry + dark-period autopsy (2026-08-10 ~23:00 UTC):** The 22:38Z
 full-dark event (Tailscale + Ethernet + Wi-Fi all dead) was **3S pack
 exhaustion**, not Wi-Fi — power log fell through 9.23 V at 22:30Z
@@ -58,19 +73,75 @@ stop early units seeing 1969) quarantined to `power-log-garbage-epoch0.csv`,
 backup `power-log.csv.bak-2026-08-14-pre-gc`, log now 27k clean rows.
 Barrel-jack multimeter still owed (Schottky vs 12 V brick).
 
-**Deploy 2026-08-14 05:58Z (live, all 15 verify PASS):** Robot checkout is
-`feat/cockpit-map-render` @ **`edae18d`** (usable-range SOC on clean-log
-Vmax, coulomb persist, `/map` over rosbridge, cockpit-serve retry,
-deploy pushes via `refs/deploy/incoming` staging ref — re-deploying the
-checked-out branch used to hit `receive.denyCurrentBranch`). Coulomb
-resume verified live: logger logged `resumed −93.0 mAh / −1.14 Wh` after
-the GC restart instead of zeroing. New SOC publishing (12.268 V → 96.5 %).
-`beast-cockpit-serve` failed at boot again (tailscaled pre-NTP,
-"unexpected state: NoState") — retry-loop unit installed + restarted,
-now active; WSS verified end-to-end from workstation
-(`Verify-Beast-Cockpit.ps1` all PASS). Deploy WARN: sudoers can't
-passwordless-install `/usr/local/sbin/beast-link-watch` +
-`beast-slam-save` (existing copies left). `/ugv/voltage` 12.27 V at verify.
+**Services + deployed source 2026-08-14 08:45 CDT (UTC−5; live, `ssh beast-01-ts`).**
+All times in this block are CDT so the ordering can be read directly.
+Checkout `/home/beast/beast/RobotOverview` is at **`d714082`** (main, #221),
+rebuilt and restarted, and the timestamps now read in the right order —
+checkout 08:43:54, `install/setup.bash` 08:44:03, `beast-ros-base` active
+08:44:57. All 15 `--verify-only` checks PASS; pack 12.11 V.
+
+**What that ordering does and does not prove.** It proves a colcon build ran
+*after* the checkout moved and the services restarted *after* the build — which
+is the failure this replaced. It does **not** prove the whole workspace matches
+the checkout: `install/setup.bash`'s mtime records only that *some* build
+finished, and `deploy-to-beast.sh` defaults to `--packages-select beast_power
+beast_base ugv_bringup ugv_cockpit`. A commit touching a package outside that
+set leaves stale compiled artefacts beside newly symlinked sources. For the four
+selected packages at this commit, running code == built code == checkout; treat
+anything wider as unverified until the build set is recorded per deploy.
+
+Check the ordering before trusting any claim about deployed code. Earlier the
+same day it read the other way: the checkout moved to `main` @ `98a11a1` at
+03:30 while the overlay was still `feat/cockpit-map-render` @ `edae18d` built at
+00:57:30, so `git rev-parse HEAD` named code the robot was not running.
+`install/` is a `--symlink-install` tree (70 symlinked `.py` vs 2 real, launch
+files included), so a *restart alone* would have swapped the Python and launch
+layers to the new checkout against the old build artefacts. `git rev-parse HEAD`
+is not the running version — compare the three timestamps.
+
+**`deploy-to-beast.sh` cannot finish passwordlessly right now.** The robot's
+`/etc/sudoers.d/beast-ops` (stamped Aug 13 21:22) predates the tree's, which
+carries 18 `beast-wifi-telemetry` NOPASSWD entries the installed copy lacks.
+Step 3 therefore fails on `systemctl enable --now beast-wifi-telemetry.timer`
+and aborts *before* the script reaches its `exit 2` break-glass sentinel, so
+the break-glass path never engages and no restart happens — a half-deploy:
+new code built on disk, old processes still running.
+
+That bare `sudo -n systemctl enable --now` under `set -e` is a script bug, not a
+fact of life: every non-allowlisted `systemctl` line added to step 3 re-arms the
+same trap, because only rc 2 reaches the break-glass branch. Make those lines
+sentinel-tolerant when the sudoers file is reinstalled.
+
+Until then, finish the deploy by hand — interactive sudo is not confined by the
+stale allowlist, so include the enable the script never reached, and **verify**,
+because a bare restart is exactly the operation that wedged Fast DDS on
+2026-08-07 with every node check still passing:
+
+```bash
+sudo systemctl enable --now beast-wifi-telemetry.timer
+sudo systemctl restart beast-ros-base && sudo systemctl try-restart beast-cockpit
+robot/beast/ros2_ws/deploy/deploy-to-beast.sh --verify-only   # 15/15 or it is not deployed
+```
+
+Units: `beast-ros-base` **active/enabled** (host colcon overlay —
+`ros2 launch ugv_bringup bringup_lidar.launch.py … allow_motion:=true`),
+`beast-cockpit` **active/enabled**, `beast-cockpit-serve`
+**active (exited)/enabled**, timers `beast-link-watch` /
+`beast-storage-maintenance` / `beast-wifi-telemetry` **active-waiting**,
+`beast-wifi-watch` **active**. Dead by design: `beast-slam`,
+`beast-blackbox-record`, `beast-mission-record@*`.
+
+**There is no container path and no pull agent on the robot.**
+`beast-ros-container.service` does not exist and `docker ps` is empty (Engine
+29.6.1 still installed and active). `beast-pull.service` / `beast-pull.timer`,
+`/usr/local/bin/beast-pull` and `/etc/beast/current-image` are **all absent** —
+`/etc/beast/` holds only `recording`, `storage.env`, `ugv.env`,
+`ugv.env.bak-20260724`. Live at check: `allow_motion` **True**, `twist_mux`
+`active_source NONE`, `/ugv/voltage` **12.12 V @ −0.03 A (SOC 91 %)**,
+`tailscale serve` proxying
+`https://beast-01.tyrannosaurus-magellanic.ts.net` → `127.0.0.1:9090`.
+Still open from the 05:58Z deploy: sudoers cannot passwordless-install
+`/usr/local/sbin/beast-link-watch` + `beast-slam-save` (existing copies left).
 
 **Clock hardening (2026-08-10):** The Orin Nano dev kit has no RTC battery —
 cold boot starts at epoch 0. `tailscaled` started before NTP synced, rejected
@@ -100,34 +171,29 @@ deliberate operator decision as enabling `beast-cockpit`).
 
 `beast-ros-base` must be active (`allow_motion` true). ESP32 **latches** last velocity — **center the sticks** (or publish an explicit zero) before ending teleop; do not treat Ctrl+C or unplugging the pad as a stop. `beast-gamepad` sends a zero on exit as a backstop. Detail: [`robot/beast/ros2_ws/docs/teleoperation.md`](../robot/beast/ros2_ws/docs/teleoperation.md).
 
-- **Docker on robot (verified 2026-08-10):** Docker Engine **29.6.1**
-  (`docker.service` active). Pull-agent runtime prerequisite is already met.
+- **Docker on robot (re-verified 2026-08-14):** Docker Engine **29.6.1**,
+  `docker.service` active, **no containers running**. The pull-agent runtime
+  prerequisite is met; the pull agent itself is not installed (above).
 - **Deploy / pull ownership:** Canonical deploy manifests, `install-beast.sh`,
   `beast-pull`, and `verify-beast` live in
-  `coldaine-homelab/deployments/beast-01/`. This repo still owns the ROS
-  source + `ghcr.io/moosegooseconsulting/beast-ros` image build
-  (`.github/workflows/beast-ros-image.yml`). `deploy-to-beast.sh` remains the
-  manual override / Phase 0 host sync (`BEAST_HOST` defaults to `beast-01`;
-  override to `beast-01-ts` or a raw IP as needed).
+  `coldaine-homelab/deployments/beast-01/` — **none of them are on the robot
+  yet** (checked 2026-08-14). This repo owns the ROS source +
+  `ghcr.io/moosegooseconsulting/beast-ros` image build
+  (`.github/workflows/beast-ros-image.yml`). `deploy-to-beast.sh` is the
+  **only** live deploy path, not a manual override (`BEAST_HOST` defaults to
+  `beast-01`; override to `beast-01-ts` or a raw IP as needed).
 - **Pack voltage (verified 2026-08-10 ~11:15 CDT, LAN `beast-01`):** Live
   `/data/beast/power/power-log.csv` rows at **12.232 V** then **12.228 V**
   (UTC 16:15:06–07Z). Concurrent `/ugv/voltage` samples during deploy verify
   were **12.220–12.232 V**. INA219 bus register (i2c-7 `0x41` reg `0x02`,
   byte-swapped, 4 mV/LSB after `>>3`) decoded **12.212 V** earlier in the
   same session — agrees with the logger within ~20 mV.
-- **Phase 0 deploy (verified 2026-08-10):** `deploy-to-beast.sh` with
-  `BEAST_HOST=beast-01`. Pre-sync robot HEAD was
-  `4644ac1` on deleted branch `beast/power-logger-node` (diverged; clean tree).
-  Checked out `main` @ **`7481575`** (`Merge pull request #199 …`), colcon
-  built `beast_power beast_base ugv_bringup ugv_cockpit`, systemd/storage
-  install + `beast-ros-base` restart. Post-deploy `--verify-only`: **all PASS**
-  (beast_power + logger in graph, sole `/ugv/voltage` publisher, log growing,
-  drive path live). Soft **WARN**: ESP32 pack-voltage serial tap empty on one
-  verify pass (cross-check skipped); earlier pass had INA219 vs ESP32 delta
-  **0.13–0.14 V**. Docker Engine still **29.6.1**; `beast-ros-base` **active**.
-  Later that day RobotOverview PR **#200** merged (image pipeline + these
-  Quick connect notes); robot checkout may still sit at `7481575` until the
-  next `deploy-to-beast.sh` / pull.
+- **Deploy shape (`deploy-to-beast.sh`, unchanged since 2026-08-10):** checks
+  out the target ref, colcon builds `beast_power beast_base ugv_bringup
+  ugv_cockpit`, installs systemd/storage units, restarts `beast-ros-base`, then
+  `--verify-only`. Known soft **WARN**: the ESP32 pack-voltage serial tap comes
+  back empty on some verify passes and the cross-check is skipped; when it does
+  read, INA219 vs ESP32 delta is **0.13–0.14 V**.
 
 **Historical — deliberate run-to-cutoff 2026-08-07 18:19 CDT** (robot has
 since been recharged and is online again as of 2026-08-10):

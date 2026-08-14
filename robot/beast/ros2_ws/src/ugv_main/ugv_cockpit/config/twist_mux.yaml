@@ -27,12 +27,22 @@
 # twist_mux simply stops emitting anything at all until (a) that source
 # publishes again, or (b) it expires past `timeout` and a lower-priority
 # source's next message takes over. Silence is NOT the same as "stop" —
-# nothing here sends a zero Twist on timeout. That job belongs entirely to
-# ugv_bringup's own 0.5 s `cmd_vel_timeout` watchdog on the robot side
-# (ugv_bringup.py::_cmd_vel_watchdog_tick). This twist_mux layer only decides
-# WHOSE command gets through; the Jetson-side watchdog is what guarantees the
-# robot actually stops when nobody is driving. Keep both — they cover
-# different failure modes (arbitration vs. dead link).
+# nothing here sends a zero Twist on timeout.
+#
+# AND NOTHING ELSE DOES EITHER. There is no cmd_vel silence watchdog anywhere
+# in this chain: it was removed 2026-08-07 per owner decision D8 (see
+# ugv_bringup/launch/bringup_lidar.launch.py). `cmd_vel_timeout` and
+# `ugv_bringup.py::_cmd_vel_watchdog_tick` no longer exist — earlier revisions
+# of this comment named them, and a 2026-08-14 review bot read that and
+# concluded a 0.5 s backstop was still deployed. It is not.
+#
+# So: this twist_mux layer only decides WHOSE command gets through. When the
+# winning source falls silent the ESP32 keeps executing its last command
+# indefinitely. Stopping is the PUBLISHER's job, by command — which is why
+# every drive source in this repo ends with an explicit zero tail
+# (ugv_tools/keyboard_ctrl.py, ugv_tools/joy_ctrl.py, and the cockpit's
+# STOP_TAIL_COUNT zeros). A source that merely stops publishing has not
+# stopped the robot.
 #
 # ---------------------------------------------------------------------------
 # Priority ladder (255 = absolute max; higher always wins over lower,
@@ -69,9 +79,11 @@
 #                                rung is deliberate so no autonomy source can
 #                                outrank another autonomy source by accident.
 #
-# Every source uses the same 0.5 s timeout as ugv_bringup's own watchdog, so
-# a stale command gets excluded from arbitration on the same cadence the
-# robot itself uses to decide "nobody is talking to me."
+# Every source uses the same 0.5 s timeout, so a stale command gets excluded
+# from arbitration on one consistent cadence and the floor drops to the next
+# rung down. Note what this does NOT do: expiry removes a source from
+# arbitration, it does not send a zero. If the expiring source was the only
+# one publishing, the ESP32 simply keeps its last command.
 #
 # These names, topics, timeouts and priorities are asserted verbatim by
 # ugv_cockpit/test/test_twist_mux_spine.py. Changing any of them is a

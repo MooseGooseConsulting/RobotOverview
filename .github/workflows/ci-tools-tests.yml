@@ -9,6 +9,11 @@ on:
   pull_request:
     paths:
       - 'tools/ci/**'
+      # tools/ci/test_beast_pull_build_set.py exercises deploy/bin/beast-pull.
+      # Without this path, a commit that changes ONLY the deploy agent would
+      # skip its own test suite — and deploy-pin treats "no run" as "nothing
+      # required", so the untested agent would ship straight to the robot.
+      - 'robot/beast/ros2_ws/deploy/**'
       - '.github/workflows/ci-tools-tests.yml'
       - '.github/workflows/deploy-pin.yml'
       - '.github/workflows/cold-review.yml'
@@ -18,6 +23,11 @@ on:
     branches: [main]
     paths:
       - 'tools/ci/**'
+      # tools/ci/test_beast_pull_build_set.py exercises deploy/bin/beast-pull.
+      # Without this path, a commit that changes ONLY the deploy agent would
+      # skip its own test suite — and deploy-pin treats "no run" as "nothing
+      # required", so the untested agent would ship straight to the robot.
+      - 'robot/beast/ros2_ws/deploy/**'
       - '.github/workflows/ci-tools-tests.yml'
       - '.github/workflows/deploy-pin.yml'
       - '.github/workflows/cold-review.yml'

@@ -184,8 +184,11 @@ boolean the caller must honour), and the two pieces of prior art below.
   `requestAnimationFrame(gamepadCtrl)` loop, an `invert_angular` option, nipplejs virtual
   stick, and an acceleration ramp at ~336–353 that doubles the ramp rate when the target
   is zero (i.e. decelerate faster than you accelerate — worth copying as a *concept*).
-  **Vizanti is parked (`COLCON_IGNORE`) and slated for deletion in strip-down Phase 2.**
-  Read it now; do not import from it, do not link to it from shipped code.
+  **Vizanti is parked (`COLCON_IGNORE`) and stays parked** — `AGENTS.md` requires parking
+  over deletion for vendor packages we do not run, and
+  `docs/plans/2026-08-14-beast-vendor-parked-surface-and-doc-drift.md` §2.1 confirms the
+  verdict. Read it now; do not import from it, do not link to it from shipped code, and do
+  not treat "parked" as "about to be deleted".
 - The Waveshare RPi web app's `templates/control.js` lines **1093–1147**: the same event
   pair, a 0.02 deadzone, and `readGamepad()` publishing **only when the value changed**.
   That change-detection is **wrong for this spine** — twist_mux expires a source after
@@ -214,11 +217,20 @@ Create `src/lib/teleop/gamepad.ts` (pure, no React) and `src/lib/teleop/useGamep
    (`SHANWAN_Android_Gamepad` / `Xbox_360_Controller`, lines 37–79): the browser already
    normalizes. Guessing indices on an unknown pad is how you get full reverse from a
    trigger.
-3. **Radial deadzone, not per-axis.** Per-axis deadzone leaves a square dead region and
-   makes diagonals jump. Given raw `(x, y)`: `m = Math.hypot(x, y)`;
-   `if (m < DEADZONE) → (0, 0)`; else `s = (m - DEADZONE) / (1 - DEADZONE)` and output
-   `(x / m * s, y / m * s)`. `DEADZONE = 0.12`. (Vizanti's 0.02 is too tight for a worn
-   stick; `joy_ctrl`'s per-axis 0.2 is coarse and square.)
+3. **Radial deadzone, not per-axis — and clamp the rescale.** Per-axis deadzone leaves a
+   square dead region and makes diagonals jump. Given raw `(x, y)`: `m = Math.hypot(x, y)`;
+   `if (m < DEADZONE) → (0, 0)`; else
+   `s = Math.min(1, (m - DEADZONE) / (1 - DEADZONE))` and output `(x / m * s, y / m * s)`.
+   `DEADZONE = 0.12`. **The `Math.min(1, …)` is load-bearing, not defensive.** The two axes
+   are independently `[-1, 1]`, so a stick pinned to a full diagonal reports
+   `m = √2 ≈ 1.414`, and the unclamped rescale returns `s ≈ 1.47`. Expo preserves the
+   overshoot (`expo(1.04) ≈ 1.09`, since expo's fixed point is at ±1 and it is monotonic
+   past it), so that reaches the wire as ≈1.4 m/s against a `LINEAR_MAX` of 1.3 — the
+   gamepad would quietly out-run the cap it is supposed to share with WASD. Clamping `s`
+   saturates the square corners at full deflection, which is what an operator means by
+   pinning the stick, and keeps `|output| ≤ 1` so item 6's cap is actually the cap.
+   (Vizanti's 0.02 is too tight for a worn stick; `joy_ctrl`'s per-axis 0.2 is coarse and
+   square.)
 4. **Expo after the deadzone rescale, before the cap.**
    `expo(v) = Math.sign(v) * (EXPO * Math.abs(v) ** 3 + (1 - EXPO) * Math.abs(v))`,
    `EXPO = 0.6`. Monotonic, fixed points at 0 and ±1, so the cap still means the cap.
@@ -236,17 +248,49 @@ Create `src/lib/teleop/gamepad.ts` (pure, no React) and `src/lib/teleop/useGamep
    watchdog and no firmware timeout — the ESP32 latches (strip-down §2 fact 1). Expose it
    as a UI toggle `beast.teleop.deadman`; turning it off must show a persistent warning
    chip in the teleop panel, not a silent preference.
-8. **Trigger-as-throttle: feature-detected, off by default, latched.**
+8. **Trigger-as-throttle: feature-detected, off by default, rest-calibrated, latched.**
    Browsers disagree about triggers — some expose them as `buttons[6] / buttons[7]` with
    an analog `.value`, some as axes, and **some pads report a resting trigger as −1
-   rather than 0**. So: use the throttle only when `typeof gp.buttons?.[6]?.value ===
-   'number' && typeof gp.buttons?.[7]?.value === 'number'`; never index a fixed axis.
-   Compute `throttle = clamp(buttons[7].value - buttons[6].value, -1, 1)` (RT forward,
-   LT reverse) and apply it as a *multiplier* on the stick's forward component when the
-   stick is neutral, so it cannot fight the stick. **Latch requirement:** ignore the
-   trigger entirely until it has read within `±0.05` of zero at least once since connect.
-   Without that latch, a pad reporting −1 at rest commands full reverse the instant it is
-   plugged in. This is the concrete bug the latch exists to prevent — keep the comment.
+   rather than 0**. Off by default behind `beast.teleop.triggerThrottle`. The rules below
+   are one mechanism; do not implement any of them alone.
+
+   - **Feature-detect; never index a fixed axis.** Use the throttle only when
+     `typeof gp.buttons?.[6]?.value === 'number' && typeof gp.buttons?.[7]?.value ===
+     'number'`. Guessing an axis index on an unknown pad is item 2's hazard again.
+   - **Calibrate each trigger's rest value; never trust the raw one.** Per connected
+     index hold `rest[6]` / `rest[7]`, initialised to that trigger's first raw sample and
+     thereafter to its running minimum (`rest = Math.min(rest, raw)`). The trigger's
+     throttle is `t = clamp((raw - rest) / (1 - rest), 0, 1)`. A 0-at-rest pad gives
+     `t = raw`; a −1-at-rest pad gives `t = (raw + 1) / 2`. Both map rest → exactly 0 and
+     full press → exactly 1, and **`t` can never go negative**. This is what replaces
+     "trust the raw value once it has passed within ±0.05 of zero": a latch on a raw
+     bipolar value arms mid-press, on the way up through 0, and then reads the pad's own
+     resting −1 as a live command — so *releasing* the trigger orders full reverse, every
+     time. Calibrating the baseline removes that failure instead of timing around it.
+   - **Latch: a trigger contributes nothing until its baseline has settled.** Arm a
+     trigger only on a frame where `t ≤ 0.05` **and** `rest` did not decrease on that
+     frame. A trigger nobody is touching arms on its first frame. A pad plugged in with a
+     trigger already held reads `t = 0` at first — its `rest` is wrong — but `rest` falls
+     as the operator lets go, which re-blocks the arm until the value settles, so the
+     stale baseline can never produce a command. Latch state is per trigger and per
+     connection: `gamepaddisconnected`, or an index vanishing from the snapshot (item 9),
+     clears both `rest` and both arms.
+   - **The throttle REPLACES the axial component; it is not a multiplier.**
+     `throttle = t(RT) − t(LT)` (RT forward, LT reverse), which is already in `[−1, 1]` by
+     construction. Apply it only while the stick's forward/back component is exactly `0` —
+     item 3's radial deadzone yields an exact zero inside the dead region, so no second
+     epsilon is needed — and then use it *as* that component:
+     `axial = stickAxial !== 0 ? stickAxial : expo(throttle)`. The stick still wins
+     whenever it is off centre, so the two cannot fight. Multiplying was the earlier
+     draft and was dead code: its own activation condition is "stick neutral", where the
+     stick's forward component is exactly `0`, so any multiplier yields `0` and the
+     opt-in throttle could never move the robot.
+   - **Yaw is never trigger-derived.** `angularZ` comes from `axes[0]` per item 5,
+     whichever source is supplying the axial component.
+   - **The cap is untouched.** `|throttle| ≤ 1` and `|expo(v)| ≤ 1` for `|v| ≤ 1`, so this
+     path hands `LINEAR_MAX` the same bounded value the stick does — an alternate way to
+     reach the ceiling, never a way past it.
+   - Item 7's deadman gates the trigger exactly as it gates the stick.
 9. **Connect / disconnect.** Bind `gamepadconnected` and `gamepaddisconnected`, **and**
    re-scan `navigator.getGamepads()` every frame — Chrome does not expose pads (or fire
    the event) until the page has seen a user gesture, so events alone silently produce
@@ -268,11 +312,15 @@ Create `src/lib/teleop/gamepad.ts` (pure, no React) and `src/lib/teleop/useGamep
   connected/absent, the pad's `gp.id`, mapping standard/unmapped, deadman held/released.
   Silence is not a status.
 - Tests: `src/__tests__/teleop-gamepad.test.ts` — deadzone is radial (a diagonal at
-  `m = DEADZONE - ε` is zero; at `m = DEADZONE + ε` is near-zero and continuous), expo is
-  monotonic with `expo(1) === 1`, the trigger latch suppresses a `-1`-at-rest pad, a
-  vanished index yields exactly one neutral sample, and a non-standard mapping yields no
-  intent. `src/__tests__/teleop-arbitrate.test.ts` — never sums; newest non-neutral wins;
-  a neutral sample is delivered once then stops competing.
+  `m = DEADZONE - ε` is zero; at `m = DEADZONE + ε` is near-zero and continuous) **and
+  clamped** (`(1, 1)` yields magnitude exactly 1, and the resulting `linearX` never
+  exceeds `LINEAR_MAX`); expo is monotonic with `expo(1) === 1`; a `−1`-at-rest pad reads
+  zero throttle at rest and **never negative throttle on release**; a pad connected with a
+  trigger already held stays suppressed until the trigger settles; the trigger moves the
+  robot when the stick is neutral and is ignored when it is not; a vanished index yields
+  exactly one neutral sample; a non-standard mapping yields no intent.
+  `src/__tests__/teleop-arbitrate.test.ts` — never sums; newest non-neutral wins; a
+  neutral sample is delivered once then stops competing.
 
 **Done when:** a standard pad drives the robot on rung 50 with the deadman held; releasing
 the deadman, unplugging the pad, hiding the tab, or blurring the window each produce
@@ -645,7 +693,8 @@ hand on the power switch — this plan's agent must not run it):
 8. Update `docs/beast-ops.md` Quick connect, dated, with what was learned.
 
 **Out of scope here:** the WASD control law (sibling plan), rung 10 / nav2 bring-up,
-deleting vizanti (strip-down Phase 2), the `twist_mux.yaml` stale-watchdog comments
+the parked vendor surface (`2026-08-14-beast-vendor-parked-surface-and-doc-drift.md`),
+the `twist_mux.yaml` stale-watchdog comments
 (strip-down Phase 1), and the untracked `beast-wifi-telemetry` files on the robot (flag
 them; they belong to whoever wrote them).
 

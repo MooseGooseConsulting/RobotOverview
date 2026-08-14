@@ -372,9 +372,14 @@ describe("CommandRail control lifecycle", () => {
     // Derived from the constants: this readout is the operator's only view of
     // the one number that caps the whole unclamped chain, so it must track the
     // constant rather than assert a literal that silently goes stale.
+    // The Hz portion is matched loosely: DRIVE_PUBLISH_HZ is a component-local
+    // constant, so asserting a literal here would go stale the same silent way
+    // the ceiling literal did.
     expect(
       screen.getByText(
-        `Ceiling ${LINEAR_MAX.toFixed(2)} m/s · ${ANGULAR_MAX.toFixed(2)} rad/s · 10 Hz held`,
+        new RegExp(
+          `Ceiling ${LINEAR_MAX.toFixed(2)} m/s · ${ANGULAR_MAX.toFixed(2)} rad/s · \\d+ Hz held`,
+        ),
       ),
     ).toBeInTheDocument();
   });

@@ -35,6 +35,10 @@ EnvironmentFile=/etc/beast/ugv.env
 Environment=PYTHONUNBUFFERED=1
 # Cockpit telemetry + camera + a reviewed remote command ingress through the
 # existing mux/gate/watchdog path. No direct /cmd_vel or serial bypass.
+# Same boot guard as beast-ros-base: the cockpit runs from the same
+# --symlink-install workspace, so booting it mid-rebuild is the same
+# half-built hazard. Wrapped in /bin/sh -c for systemd-analyze on CI runners.
+ExecStartPre=/bin/sh -c 'exec /home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-deploy-guard'
 ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/setup.bash && exec ros2 launch ugv_cockpit cockpit.launch.py use_camera:=true use_bridge:=true'
 KillSignal=SIGINT
 TimeoutStopSec=15

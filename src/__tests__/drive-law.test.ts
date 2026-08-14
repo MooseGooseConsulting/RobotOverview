@@ -65,25 +65,47 @@ describe('drive-law constants — Waveshare parity', () => {
   it('keeps every commandable speed inside the documented uncalibrated ceiling', () => {
     // Waveshare's `max_speed = 1.3` is a T:1 track-speed scalar that the Pi
     // clamped server-side. We send T:13 — a Twist, in m/s — into a chain with
-    // no clamp, no cmd_vel watchdog, and an ESP32 that latches. The flash
-    // runbook caps the uncharacterized magnitude at 0.2 until it is measured,
-    // so carrying 1.3 across that wire-format change would be a unit error,
-    // not a port. Raising this is a measurement; see LINEAR_MAX's comment.
-    const DOCUMENTED_UNCALIBRATED_CEILING = 0.2; // beast-jetson-flash-runbook.md
-    expect(LINEAR_MAX).toBeLessThanOrEqual(DOCUMENTED_UNCALIBRATED_CEILING);
+    // no clamp, no cmd_vel watchdog, and an ESP32 that latches, so carrying
+    // 1.3 across that wire-format change would be a unit error, not a port.
+    // The runbook's own ≤0.2 is ALSO a T:1 number; 0.15 m/s is the largest
+    // value with evidence on the T:13 path (docs/beast-ops.md crawl records).
+    // Raising this is a measurement; see LINEAR_MAX's comment.
+    const LARGEST_EVIDENCED_T13_SPEED = 0.15; // docs/beast-ops.md
+    expect(LINEAR_MAX).toBeLessThanOrEqual(LARGEST_EVIDENCED_T13_SPEED);
 
-    // The ladder is a set of dimensionless ratios scaling that ceiling, so the
-    // feel is preserved in shape whatever the ceiling becomes.
+    // The ladder is a set of dimensionless ratios scaling that ceiling.
     RATE_PRESETS.forEach((rate, index) => {
       expect(straightSpeedAt(index)).toBeCloseTo(LINEAR_MAX * rate, 6);
     });
 
-    // Nothing the operator can press — including SHIFT boost at the top preset
-    // — may exceed the ceiling.
-    expect(straightSpeedAt(RATE_PRESETS.length - 1)).toBeCloseTo(LINEAR_MAX * RATE_BOOST, 6);
-    expect(Math.max(...RATE_PRESETS.map((_, i) => straightSpeedAt(i)))).toBeLessThanOrEqual(
-      DOCUMENTED_UNCALIBRATED_CEILING,
+    // Nothing the operator can press may exceed the ceiling — and that has to
+    // include the SHIFT boost path itself, not a preset that merely happens to
+    // equal RATE_BOOST today. Exercise boost: true at EVERY preset, so this
+    // still holds if RATE_BOOST and the top preset ever diverge.
+    const boosted = RATE_PRESETS.map(
+      (_, rateIndex) => composeTwist(input([true, false, false, false], rateIndex, true)).linearX,
     );
+    boosted.forEach((speed) => expect(speed).toBeCloseTo(LINEAR_MAX * RATE_BOOST, 6));
+
+    const everyCommandableSpeed = [...RATE_PRESETS.map((_, i) => straightSpeedAt(i)), ...boosted];
+    expect(Math.max(...everyCommandableSpeed)).toBeLessThanOrEqual(LARGEST_EVIDENCED_T13_SPEED);
+  });
+
+  it('tightens the arc radius in proportion to the linear ceiling', () => {
+    // Turn radius is linear/angular, so lowering only LINEAR_MAX tightens every
+    // arc. This is an accepted consequence of the ceiling correction, recorded
+    // here because an earlier comment claimed the control law's shape was
+    // unaffected — it is not. Pin the relationship so the next ceiling change
+    // has to look at it rather than rediscover it in the field.
+    const arc = composeTwist(input([true, false, true, false], 2));
+    const radius = arc.linearX / Math.abs(arc.angularZ);
+    expect(radius).toBeCloseTo(
+      (LINEAR_MAX * ARC_LINEAR_SCALE) / (ANGULAR_MAX * ARC_ANGULAR_SCALE),
+      6,
+    );
+    // Throttle scales both components, so the radius is rate-invariant.
+    const slowArc = composeTwist(input([true, false, true, false], 0));
+    expect(slowArc.linearX / Math.abs(slowArc.angularZ)).toBeCloseTo(radius, 6);
   });
 });
 

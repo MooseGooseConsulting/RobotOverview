@@ -44,19 +44,31 @@ export type DriveIntent = { linearX: number; angularZ: number };
 // magnitude is "not yet characterized — start small (≤0.2) and increase once
 // measured" (docs/beast-jetson-flash-runbook.md, ESP32 command table).
 //
-// 0.2 m/s is that documented ceiling. For scale, the fastest commanded drive
-// on record for this chassis is 0.15 m/s and the runbook's own motion test
-// starts at 0.02 m/s (docs/beast-ops.md). At 1.3 the default SLOW preset alone
-// commanded 0.39 m/s — 2.6x anything BEAST-01 has ever been asked to do — into
-// a chain with no clamp, no cmd_vel watchdog (removed 2026-08-07), and an ESP32
-// that latches its last command.
+// Note the runbook's 0.2 is itself a T:1 number, so adopting it as an m/s
+// ceiling would repeat the same unit transfer in miniature. 0.15 m/s is used
+// instead because it is the largest value with evidence on THIS wire format:
+// docs/beast-ops.md records commanded T:13 crawls at 0.15 m/s, and the
+// runbook's motion test starts at 0.02 m/s. At 1.3 the default SLOW preset
+// alone commanded 0.39 m/s — 2.6x anything BEAST-01 has ever been asked to do
+// — into a chain with no clamp, no cmd_vel watchdog (removed 2026-08-07), and
+// an ESP32 that latches its last command.
 //
-// RAISING THIS IS A MEASUREMENT, NOT A PREFERENCE: drive a known distance at a
-// known commanded value, compare against odometry, and record the scale factor
-// as a Hangar insight before changing the number. The control law, the rate
-// ladder, and the arc geometry are all dimensionless ratios and are unaffected
-// — feel is preserved in shape, only the ceiling it scales against changes.
-export const LINEAR_MAX = 0.2; // m/s
+// CONSEQUENCE FOR ARCS, stated plainly because an earlier version of this
+// comment got it wrong: turn radius is linear/angular, so lowering only the
+// linear ceiling tightens every arc by the same factor. A W+A diagonal was
+// (1.3*ARC_LINEAR_SCALE)/(1.0*ARC_ANGULAR_SCALE) ~= 1.77 m and is now
+// ~= 0.20 m. That is accepted, not overlooked: at 0.15 m/s a tight arc is a
+// handling change, not a hazard, whereas scaling ANGULAR_MAX down to match
+// would put turn-in-place near 0.03 rad/s and make the robot unusable.
+//
+// ANGULAR_MAX is equally uncalibrated (see below) and is the next thing to
+// measure. Expect to tune the pair together on the first supervised drive.
+//
+// RAISING EITHER IS A MEASUREMENT, NOT A PREFERENCE: drive a known distance at
+// a known commanded value, compare against odometry, and record the scale
+// factor as a Hangar insight before changing the number. The rate ladder and
+// the arc ratios are dimensionless and unaffected.
+export const LINEAR_MAX = 0.15; // m/s
 
 // The one number with no Waveshare equivalent: its browser was differential
 // L/R and never named a yaw rate. 1.0 rad/s is what the nav2 params in this

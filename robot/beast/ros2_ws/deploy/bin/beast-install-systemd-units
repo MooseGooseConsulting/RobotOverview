@@ -20,3 +20,19 @@ fi
 install -m 0644 "${units[@]}" /etc/systemd/system/
 systemctl daemon-reload
 echo "installed ${#units[@]} unit(s) from $SRC"
+
+# Copy-only, deliberately: this installer never deletes. A beast-* unit that
+# exists in /etc/systemd/system but not in the tree is either mid-rename
+# residue or something installed by hand — removal is rare and judgement-laden
+# enough that it stays a human action. But silence would let a renamed unit
+# keep RUNNING its old definition forever, so at least say it loudly.
+for installed in /etc/systemd/system/beast-*.service /etc/systemd/system/beast-*.timer; do
+  [ -e "$installed" ] || continue
+  base="$(basename "$installed")"
+  # Template instances (beast-mission-record@foo.service) resolve to their
+  # template file in the tree.
+  tree_name="$(printf '%s\n' "$base" | sed 's/@[^.]*\./@./')"
+  if [ ! -e "$SRC/$tree_name" ]; then
+    echo "WARNING: $base is installed but has no counterpart in $SRC — deleted or renamed in the tree? It keeps running its OLD definition until removed by hand." >&2
+  fi
+done

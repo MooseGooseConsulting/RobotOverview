@@ -131,7 +131,7 @@ mapping."* It is right. Phase 1 does that — just not for the reason the brief 
 | F9 | Cockpit publish whitelist is 4 topics; **no `/goal_pose`**. Glob violations fail **silently** | `ugv_cockpit/launch/rosbridge.launch.py:100–103`, docstring `:37–61`; `client.ts:41–46` |
 | F10 | 250k-cell ceiling exists in **two** places: the client refuses ingest and unsubscribes `/map`; the save script **refuses to save** | `client.ts:70`, `:1244–1251`, `:901–912`; `deploy/bin/beast-slam-save:23–48` |
 | F11 | ESP32 **latches its last velocity**; no firmware timeout, no cmd_vel silence watchdog. Killing a publisher is never a stop | strip-down plan §2 fact 1 (live-proven 2026-08-07) |
-| F12 | `beast_base` is **absent from the build allowlists** (`build_common.sh` `PACKAGES`, `build_first.sh` second colcon block) despite being what the launch and the service run | `build_common.sh`, `build_first.sh:210–218` |
+| F12 | `beast_base` is **absent from the build allowlists** (`build_common.sh` `PACKAGES`, `build_first.sh`'s workspace-tier colcon block) despite being what the launch and the service run — `beast_power` is there, `beast_base` is not | `build_common.sh:25–49`, `build_first.sh:214–219` |
 | F13 | rosbridge 2.0.7 serialises floats with `json.dumps` and no `allow_nan=False`, emitting bare `NaN` tokens — **invalid JSON**. One live `/scan` frame measured **149** of them. Direct consequence of F1: the driver's crop writes NaN into 104° of every scan | verified live 2026-08-14 by a sibling agent; owning plan [2026-08-14-cockpit-ros-client-roslib-convergence.md](2026-08-14-cockpit-ros-client-roslib-convergence.md) |
 
 ## 4. Blocking dependency, and which stop to trust
@@ -222,11 +222,19 @@ dies at every boot produces artifacts nobody can reason about — which is exact
    between them in the unit with `Environment=BEAST_SLAM_PARAMS=…` (default: resume).
    Document the Humble quirk already noted at `slam_toolbox_beast.yaml:25–29`: `map_file_name`
    *alone* does not load, it errors and starts fresh.
-3. Owner archives the current stem: `cp -a /data/beast/maps/beast-map.* /data/beast/maps/bak-2026-08-14-preflight/`.
+3. Owner archives the current stem. Make the destination first — the glob expands to four
+   files, and `cp` with several sources fails outright if the target directory does not exist:
+
+   ```bash
+   mkdir -p /data/beast/maps/bak-2026-08-14-preflight
+   cp -a /data/beast/maps/beast-map.* /data/beast/maps/bak-2026-08-14-preflight/
+   ```
+
    File copy, not a service action.
-4. F12 while you are here: add `beast_base` to `build_common.sh`'s `PACKAGES` array and to
-   `build_first.sh`'s second `--packages-select` block. A clean `build_first.sh` on a reflashed
-   Jetson currently does not build the node the base service launches.
+4. F12 while you are here: add `beast_base` to `build_common.sh`'s `PACKAGES` array (`:25–49`)
+   and to `build_first.sh`'s workspace-tier `--packages-select` block (`:214–219`, beside
+   `beast_power`). A clean `build_first.sh` on a reflashed Jetson currently does not build the
+   node the base service launches.
 
 **Emit:** `journalctl -u beast-slam.service -b` from the next cold boot showing a real
 wall-clock start and no `karto::Exception`; `systemctl show beast-slam.service -p After`;
@@ -272,6 +280,11 @@ Reading the results:
 
 - **`bias_z`** — if `|bias_z| > 0.01 rad/s` the EKF yaw drifts ~0.6 °/s with the robot
   stationary, and that alone smears a map. This is the single most important number here.
+  Nothing downstream removes it: `ekf.yaml:147–152` fuses `imu/data` **vyaw only** and
+  `robot_localization` carries no gyro-bias state, so a measured bias has to be subtracted
+  upstream of the publisher or it reaches `slam_toolbox` intact. It is reported in rad/s, so if
+  Run C moves the LSB constant, **rescale the measured bias by `s_gyro`** (or re-run A) before
+  landing it — the two corrections multiply.
 - **`s_gyro`** — outside `1.00 ± 0.02` means the assumed 16.4 LSB/dps is wrong. Fix it in
   `beast_base`'s IMU scaling, at the source. Do not compensate in the EKF.
 - **`k_lin`** — inside `1.00 ± 0.03` confirms the cm→m assumption at `base_node.py:353`.
@@ -290,26 +303,45 @@ Reading the results:
   wrong and unnoticed.
 - Only if Run B says so: the `/100` at `beast_base/base_node.py:353`, with the `ASSUMED`
   comment rewritten as a measured one citing the bag.
-- Only if Run C says so: the gyro LSB scale in `beast_base`.
+- Only if Run C says so: the gyro LSB scale at `beast_base/base_node.py:313–316`.
+- **The bias correction itself.** Declare `gyro_bias_x` / `gyro_bias_y` / `gyro_bias_z`
+  (rad/s, default `0.0`) beside `allow_motion` at `base_node.py:121`, and subtract them in
+  `publish_imu_data_raw` at `:314–316` — e.g.
+  `msg.angular_velocity.z = 3.1415926 * float(imu_raw_data["gz"]) / (16.4 * 180) - self.gyro_bias_z`.
+  Set the measured `bias_z` in `bringup_lidar.launch.py`'s `bringup_node` parameters block
+  (`:158–170`), where `allow_motion` already is, so re-measuring on a new surface or after a
+  firmware change is a launch edit, not a code edit. Subtract at the source, once, before
+  `imu/data` is published: correcting it in `ekf.yaml` is not available (no bias state) and
+  correcting it in a consumer leaves `/imu/data` lying to every other consumer.
 - `ekf.yaml` decision on `vy` (§2, last bullet). Two defensible options: **(a)** leave
   `odom0_config[7] = true` and keep the non-holonomic constraint; **(b)** set it `false` and
   let `rf2o` carry lateral motion. Choose **(b)** only if Runs C/D show the EKF fighting
   `rf2o` mid-turn — visible as `/odom` yaw lagging the gyro integral inside a turn and
   snapping after it. Whichever you choose, write the reason into the yaml.
 
-**Emit:** a table of `bias_z` ± σ, `k_lin` ×3, `s_gyro` ×6, `b_eff` ×6, and Run D closure
-before/after; the surface it was measured on; the bag paths. Land
+**Revalidate the bias, do not assume it.** After the parameter lands, repeat Run A (120 s
+stationary, ≥2 min after power-on so the part is warm) and require
+`|mean(/imu/data.angular_velocity.z)| ≤ 0.001 rad/s` — an order below the gate — and the EKF's
+`/odom` yaw moving less than 0.5° across the whole 120 s (no SLAM is running, so nothing
+corrects it). If the run-to-run spread across three power cycles is the same size as the mean,
+the bias is not a constant and a fixed offset cannot fix it: fall back to
+`imu0_config[11] = false` (drop gyro vyaw, let `rf2o` carry yaw rate), write the reason into
+`ekf.yaml`, and re-run D.
+
+**Emit:** a table of `bias_z` ± σ before **and after** the correction, `k_lin` ×3, `s_gyro` ×6,
+`b_eff` ×6, and Run D closure before/after; the surface it was measured on; the bag paths. Land
 `append_insight` (`id: ins-beast-odom-calibration-2026-08-xx`, confidence high, `bay:
 robotics`, `units: ["beast"]`) — this is durable hardware truth and belongs in Postgres, not
 only in a diff.
 
-**Done when:** `wheel_base` is a parameter with a measured default; Run C repeated after the
-change puts `Δψ_wheel` within 3 % of `Δψ_gyro` over ±3 turns in **both** directions; Run D
-closure improves or is documented as unchanged with the reason; the insight is landed.
+**Done when:** `wheel_base` is a parameter with a measured default; the gyro bias is a
+parameter carrying the measured value and the re-run of A clears `0.001 rad/s`; Run C repeated
+after the change puts `Δψ_wheel` within 3 % of `Δψ_gyro` over ±3 turns in **both** directions;
+Run D closure improves or is documented as unchanged with the reason; the insight is landed.
 
-**Gate:** Phase 2 does not start until Runs A and C pass. **A gyro whose bias or scale is
-wrong produces a map that looks fine** — `slam_toolbox` will contentedly scan-match a slowly
-rotating world.
+**Gate:** Phase 2 does not start until Runs A and C pass — A on the *corrected* `/imu/data`,
+not on the first measurement. **A gyro whose bias or scale is wrong produces a map that looks
+fine** — `slam_toolbox` will contentedly scan-match a slowly rotating world.
 
 ### Phase 2 — the first real map of a real space (owner-supervised, motion)
 
@@ -546,6 +578,21 @@ argument in the comment beside the change: `/goal_pose` is not a velocity — it
 finally the mux's **lowest** rung, so a browser goal is outranked by every human input and
 still gated by `allow_motion`.
 
+**Who consumes `/goal_pose`, since grep will not tell you.** `bt_navigator` subscribes to it
+itself and self-forwards each message as a `NavigateToPose` action goal — that is how RViz's
+2D Goal Pose button drives Nav2. The subscription is in `nav2_bt_navigator`'s
+`src/navigators/navigate_to_pose.cpp`, which is **not vendored**: Nav2 arrives from apt
+(`ros-humble-nav2-*`, `build_first.sh:53`), so a workspace-wide search finds only the publisher
+in `ugv_tools/behavior_ctrl.py:36` — a node nothing we run launches — and concludes wrongly
+that there is no consumer. Verified on the robot 2026-08-14: `ros-humble-nav2-bt-navigator`
+1.1.20 is installed and `strings /opt/ros/humble/lib/libbt_navigator_core.so` carries
+`goal_pose` beside `src/navigators/navigate_to_pose.cpp`. Confirm at runtime before the first
+click — `ros2 topic info /goal_pose -v` must show `bt_navigator` as a subscriber with Nav2 up.
+A topic goal carries no goal id, so it yields no feedback and no cancel handle; that changes
+nothing here, because §4 already rules an agent-issued cancel out as an abort path and DISARM
+is the stop. Any later surface that needs progress or cancel must use the `NavigateToPose`
+action instead of this topic.
+
 Add one subscription too, so the UI is honest about what happened: `/plan`
 (`nav_msgs/msg/Path`) into `TOPICS_SUB_GLOB` and into `ROS_SUBSCRIPTIONS`. That file says to
 keep the two lists in lockstep (`:113–115`) — obey it.
@@ -558,14 +605,39 @@ keep the two lists in lockstep (`:113–115`) — obey it.
   (`:963`); `publish()` (`:983`) is the send path.
 - The message **must** carry `header.frame_id: 'map'` and a stamp. A goal in the wrong frame is
   not an error; it is a goal somewhere else.
-- **The inverse transform.** SpatialView's forward chain is `SpatialView.tsx:104–121`:
-  `canvas = T(Cx,Cy) · M_bc · R(−ryaw) · T(−r) · T(origin) · S(res)`, with
-  `M_bc = (0, −scale, −scale, 0)` and the robot's map pose composed from `map→odom` ∘ `/odom`.
-  Click-to-map is that chain inverted. **Build the chain once as a `DOMMatrix`, use it for
-  `ctx.setTransform`, and call `.inverse().transformPoint()` on the click** — so the picture and
-  the goal cannot drift apart. That is the same discipline the blind-sector wedge already uses
-  (`:124–130`: drawn from the same constants the parser deletes from, after it drifted by 90°
-  once already).
+- **The inverse transform — invert the metric chain, not the raster chain.** The forward chain
+  at `SpatialView.tsx:104–121` is two chains concatenated, and only the first one is the click
+  math. The **metric** part takes a **map-frame point in metres** to canvas pixels:
+
+  ```
+  M_view = T(Cx,Cy) · M_bc · R(−ryaw) · T(−r)
+  ```
+
+  with `M_bc = (0, −scale, −scale, 0)` (`:114` — `px = −y·scale`, `py = −x·scale`; `scale` is
+  px per metre) and `r = (rx, ry, ryaw)` the robot's **map-frame** pose, composed from
+  `map→odom` ∘ `/odom` at `:105–109`. The **raster** part, `T(origin) · S(res)` (`:117–118`),
+  is appended only to draw `mapImage`, whose pixel coordinates are **occupancy-grid cell
+  indices**. Inverting the full chain — which is what `ctx`'s transform state holds at
+  `drawImage` — returns **cell indices**, not metres. A `/goal_pose` built from those is a goal
+  tens of metres from the click. `map.originX` / `originY` / `resolution` must not appear in
+  the click math at all; they place the raster, nothing else.
+
+  Build `M_view` once as a `DOMMatrix`, use it for `ctx.setTransform` before applying the
+  raster's own `translate(origin)` / `scale(res)`, and call
+  `M_view.inverse().transformPoint({x, y})` on the click. Written out, for a click at canvas
+  `(px, py)` with `u = px − Cx`, `v = py − Cy`:
+
+  ```
+  x_body = −v / scale                                 # metres, robot body frame (x forward)
+  y_body = −u / scale                                 # metres, robot body frame (y left)
+  x_map  = rx + cos(ryaw)·x_body − sin(ryaw)·y_body   # metres, map frame
+  y_map  = ry + sin(ryaw)·x_body + cos(ryaw)·y_body   # metres, map frame
+  ```
+
+  `(x_map, y_map)` in metres is what goes in `pose.position` under `frame_id: 'map'`. Deriving
+  the click from the same matrix the canvas draws with is what keeps the picture and the goal
+  from drifting apart — the discipline the blind-sector wedge already uses (`:124–130`, after
+  it drifted by 90° once already).
 - **Affordance: the goal must be deliberate.** Shift-click, or a `SET GOAL` toggle that arms a
   single click, then a confirm chip showing the map-frame x/y before publishing. Heading:
   default to the bearing from the robot to the click; drag-to-set is nice-to-have, not a
@@ -573,13 +645,16 @@ keep the two lists in lockstep (`:113–115`) — obey it.
   goal into a stale map is a goal into a lie, and the cockpit's whole honesty contract
   (`client.ts:161–177`) says render UNKNOWN rather than a confident wrong thing.
 - Tests: `src/__tests__/ros-client.test.ts` pins every publication type — add `/goal_pose`.
-  Add a transform round-trip test: a click at the canvas centre must map to the robot's own
-  map-frame pose within one cell.
+  Add two transform round-trip assertions, both in metres: a click at the canvas centre maps to
+  the robot's own map-frame pose (`u = v = 0` → exactly `(rx, ry)`), and a click `scale` px
+  above centre maps to a point **1.00 m** ahead of the robot in the map frame. The second one
+  is the assertion that fails if anyone reintroduces cell indices.
 
 **Emit:** the glob diff; a tape-measured goal accuracy for one known floor point; screenshots
 of the armed, confirming, and disabled states.
 
-**Done when:** `/goal_pose` publishes from the cockpit with `frame_id: 'map'`; a click at a
+**Done when:** `/goal_pose` publishes from the cockpit with `frame_id: 'map'` and
+`ros2 topic info /goal_pose -v` shows `bt_navigator` subscribed; a click at a
 known floor point produces a goal within one cell of it (owner present, tape-measured); the
 control is disabled when disarmed or when `/map` is stale; the pub glob and `ROS_PUBLICATIONS`
 agree; `/plan` renders; tests green.
@@ -594,22 +669,39 @@ silently-refused cancel does the most damage.
 package it cannot discover):**
 
 1. Delete `robot/beast/ros2_ws/src/ugv_else/explore_lite/COLCON_IGNORE`.
-2. Add `explore_lite` to `build_common.sh`'s `PACKAGES` array **and** to `build_first.sh`'s
-   **first** `--packages-select` block (`ugv_else` / dependency-tier packages — cartographer,
-   ldlidar, …). It is **not** a `ugv_main` package; putting it in the second block is
-   wrong. Remove its entry from the parked list in the `build_common.sh` header comment.
+2. Add the name back to both allowlists. `build_common.sh` has **one** flat `PACKAGES` array
+   (`:25–49`) — there is no tier in that file; append `explore_lite` (position only changes the
+   interactive menu numbering) and delete its entry from the parked list in the header comment
+   (`:13–14`). `build_first.sh` has two `colcon build` blocks: the third-party/dependency tier
+   (`:201–212`, `cartographer` … `ugv_msgs`) and the workspace tier (`:214–219`). Put
+   `explore_lite` in the **first** block, with the other `ugv_else` packages. Ordering is not
+   load-bearing here — every dependency in its `package.xml` (`nav2_costmap_2d`, `nav2_msgs`,
+   `map_msgs`, `tf2*`) is apt-provided and nothing in the workspace builds against it — but
+   keep the two scripts naming the same set, which is the invariant a reviewer checks.
 3. Update the parked list in `AGENTS.md` ("Currently parked: `vizanti` (5 packages),
    `ugv_web_app`, `explore_lite`, `emcl2`") and any `robot/beast/ros2_ws/docs/` mention.
 4. Build: `colcon build --packages-select explore_lite`. It is `ament_cmake` with
    `add_executable(explore)` (CMakeLists:80) and `nav2_costmap_2d` / `nav2_msgs` deps.
 
-**Config decision before the first run.** `explore.launch.py` loads `config/params.yaml` — the
-`/**` wildcard file, with `costmap_topic: map`, `robot_base_frame: base_link`,
-`min_frontier_size: 0.75`, `return_to_init: true`. The sibling `config/params_costmap.yaml`
-targets `/global_costmap/costmap` instead. **Choose the global costmap** — exploring an
-inflated costmap is safer than exploring the raw `/map` — and say so in the commit. Note that
-`return_to_init: true` sends the robot home when frontiers run out, through the same blind rear
-sector Phase 3 constrained.
+**Config decision before the first run.** `explore.launch.py` **hardcodes** `config/params.yaml`
+(`:12–15`) — there is no `params_file` launch argument, so selecting the other file means
+either adding one (a `LaunchConfiguration` defaulting to the current path) or running the
+executable directly with `--ros-args --params-file`. `params.yaml` is the `/**` wildcard file:
+`costmap_topic: map`, `robot_base_frame: base_link`, `min_frontier_size: 0.75`,
+`return_to_init: true`. The sibling `config/params_costmap.yaml` keys on `explore_node:`
+(which does match the launch's `name="explore_node"`) and targets `/global_costmap/costmap`.
+
+**Choose the global costmap** — exploring an inflated costmap is safer than exploring the raw
+`/map` — and say so in the commit. Switching files is not a one-key change; reconcile these two
+before the run, or the config silently differs from the one described above:
+
+- **`return_to_init` is absent from `params_costmap.yaml`**, and `explore.cpp:71` declares it
+  **`false`**. Add `return_to_init: true` to that file, or the return-home behaviour this phase
+  claims does not exist and the robot simply stops at the last frontier. When it is on, the
+  drive home runs through the same blind rear sector Phase 3 constrained — supervise it like
+  any other leg.
+- **`min_frontier_size` differs**: `0.5` there against `0.75` in `params.yaml`. Pick one on
+  purpose rather than inheriting whichever file you loaded.
 
 **Why this phase is cheap once Phase 3 is real:** `explore` is a `NavigateToPose` **action
 client**. It never touches `/goal_pose` and never touches `/cmd_vel` — it hands goals to
@@ -621,7 +713,9 @@ hand on cockpit DISARM, `progress_timeout: 30.0` so a stuck frontier gives up. D
 loose in the house.
 
 **Done when:** `explore_lite` builds from a clean `build_first.sh`; the allowlists, the
-`COLCON_IGNORE` set and the AGENTS.md parked list all agree with the tree; one supervised
+`COLCON_IGNORE` set and the AGENTS.md parked list all agree with the tree; the params file
+actually loaded names `return_to_init` and `min_frontier_size` explicitly, and
+`ros2 param get /explore_node return_to_init` confirms it at runtime; one supervised
 single-room exploration completes and either beats the hand-driven map on coverage or the
 reason it does not is written down.
 
