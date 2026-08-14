@@ -20,16 +20,20 @@ name: Pin deployed image
 #                                                     GitRepository 1m +
 #                                                     Kustomization 10m
 #                                                     => live within ~11 min
-#   beast     deployments/beast-01/manifest.yaml      `beast-pull.timer`
+#   beast     refs/deploy/beast-01 (THIS repo)        `beast-pull.timer`
 #                                                     boot + hourly
 #
-# NOTE ON `beast`: as of 2026-08-14 the pull agent is NOT installed on the
-# robot (`/usr/local/bin/beast-pull` absent, `beast-pull.timer` inactive,
-# `beast-ros-base` running the host colcon build). Writing this pin is correct
-# and harmless today — nothing reads it — and it goes live the moment the agent
-# is installed. Installing it is Phase 2 of
-# docs/plans/2026-08-14-continuous-deploy-both-surfaces.md, and it must be done
-# supervised: the first tick swaps the robot from source mode to container mode.
+# NOTE ON `beast`: the robot deploys from SOURCE, not from a container image,
+# and therefore does NOT read the homelab manifest. coldaine-homelab is private
+# and the beast-ros GHCR package is not public, so consuming that manifest would
+# mean provisioning two long-lived credentials onto the robot. RobotOverview is
+# public, so the `deploy-ref` job below publishes the gated commit as a ref in
+# this repository instead and the robot fast-forwards to it anonymously.
+#
+# The homelab manifest is still written, as provenance and as the record of what
+# the container path WOULD deploy; nothing consumes it today. The robot must
+# never track `main` directly — the whole point of pinning is that a commit
+# whose tests failed cannot reach a machine that moves.
 #
 # Credentials: the org already has a GitHub App (`cold-claude-code`) installed
 # org-wide with Contents: write. This workflow mints an installation token
@@ -84,6 +88,11 @@ jobs:
       github.event_name == 'workflow_dispatch'
       || (github.event.workflow_run.conclusion == 'success'
           && github.event.workflow_run.event != 'pull_request')
+    outputs:
+      skip: ${{ steps.target.outputs.skip }}
+      surface: ${{ steps.target.outputs.surface }}
+      sha: ${{ steps.target.outputs.sha }}
+      short_sha: ${{ steps.target.outputs.short_sha }}
     steps:
       # The writer runs in a job that holds a write-capable homelab token, so it
       # is ALWAYS taken from main. The commit being deployed is data, never code
@@ -371,11 +380,86 @@ jobs:
                 echo "Verify: <https://hangar.moosegoose.xyz/api/hangar/preflight>"
                 ;;
               beast)
-                echo "**Not live yet.** The \`beast-pull\` agent is not installed on BEAST-01,"
-                echo "so nothing reads this pin. See Phase 2 of"
-                echo "\`docs/plans/2026-08-14-continuous-deploy-both-surfaces.md\`."
+                echo "Provenance only — BEAST-01 deploys from source and does not read"
+                echo "this manifest. The robot follows \`refs/deploy/beast-01\`, advanced"
+                echo "by the \`deploy-ref\` job in this workflow."
                 ;;
             esac
             echo
             echo "Roll back by reverting the pin commit in \`$HOMELAB_REPO\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # The robot half of the pin, and the reason BEAST-01 can auto-deploy without
+  # holding any credential.
+  #
+  # coldaine-homelab is PRIVATE and the beast-ros GHCR package is not public, so
+  # a robot that consumed the homelab manifest would need two long-lived secrets
+  # provisioned onto it. RobotOverview is PUBLIC, so instead we publish the
+  # already-gated commit as a ref in THIS repo and let the robot's beast-pull
+  # agent fast-forward to it anonymously.
+  #
+  # The gate is the whole point: `pin` above only reaches this job after every
+  # required test workflow passed for this exact commit. The robot must never
+  # track `main` directly — that would deploy red commits to a machine that
+  # moves. Rolling the fleet back is one force-push of this ref.
+  #
+  # Deliberately a SEPARATE job: it needs contents: write on RobotOverview, and
+  # it must not run in the same job that holds a write-capable homelab token.
+  # ---------------------------------------------------------------------------
+  deploy-ref:
+    name: Advance the BEAST-01 deploy ref
+    needs: pin
+    if: needs.pin.outputs.skip != 'true' && needs.pin.outputs.surface == 'beast'
+    runs-on: ${{ vars.CI_FORCE_HOSTED == 'true' && 'ubuntu-latest' || 'moosegoose-general' }}
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out main
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Advance refs/deploy/beast-01
+        env:
+          SHA: ${{ needs.pin.outputs.sha }}
+          SHORT_SHA: ${{ needs.pin.outputs.short_sha }}
+        run: |
+          set -euo pipefail
+
+          # Refuse anything not already on main. workflow_dispatch accepts an
+          # arbitrary sha, and without this check a dispatch could point the
+          # robot at an unmerged branch that never faced review. Rolling
+          # BACKWARDS along main is still allowed — that is the rollback path.
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::$SHA is not an ancestor of main; refusing to point the robot at it"
+            exit 1
+          fi
+
+          before="$(git rev-parse --verify refs/deploy/beast-01 2>/dev/null || echo none)"
+          if [ "$before" = "$SHA" ]; then
+            echo "refs/deploy/beast-01 already at $SHORT_SHA; nothing to do"
+            exit 0
+          fi
+
+          git push --force origin "$SHA:refs/deploy/beast-01"
+          echo "refs/deploy/beast-01: ${before:0:12} -> ${SHA:0:12}"
+
+          {
+            echo "### BEAST-01 deploy ref"
+            echo
+            echo "- Ref: \`refs/deploy/beast-01\`"
+            echo "- Was: \`${before:0:12}\`"
+            echo "- Now: \`${SHA:0:12}\`"
+            echo
+            echo "BEAST-01's \`beast-pull.timer\` fast-forwards to this ref hourly,"
+            echo "skipping while the robot is moving, and rolls itself back if the"
+            echo "15-check verify fails."
+            echo
+            echo "Roll the robot back with:"
+            echo '```bash'
+            echo "git push --force origin <good-sha>:refs/deploy/beast-01"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

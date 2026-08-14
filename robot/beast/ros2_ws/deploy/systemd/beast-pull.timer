@@ -1,0 +1,17 @@
+[Unit]
+Description=Check for a new BEAST-01 deploy ref hourly
+
+[Timer]
+# Not at boot-minus-nothing: let the stack come up and settle before the agent
+# is allowed to consider restarting it.
+OnBootSec=5min
+OnUnitActiveSec=1h
+# Jitter so a fleet (or a reboot loop) does not hit GitHub in lockstep.
+RandomizedDelaySec=5min
+# Catch up after downtime — a robot that was off for a day should deploy on the
+# next boot rather than wait a full hour.
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

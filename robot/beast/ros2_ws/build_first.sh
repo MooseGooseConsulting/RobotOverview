@@ -211,10 +211,14 @@ colcon build \
   --symlink-install \
   --executor sequential
 
+# beast_base is the ESP32 bridge — the drive path, and the node that sends the
+# unconditional startup stop. bringup_lidar.launch.py launches it by name, so a
+# clean workspace built without it cannot boot the stack or fire the boot stop.
+# It was missing from this list until 2026-08-14.
 colcon build \
   --packages-select \
     ugv_bringup ugv_cockpit ugv_chat_ai ugv_description ugv_gazebo \
-    beast_power ugv_nav ugv_slam ugv_tools ugv_vision ugv_voice \
+    beast_power beast_base ugv_nav ugv_slam ugv_tools ugv_vision ugv_voice \
   --symlink-install \
   --executor sequential
 

@@ -1,0 +1,32 @@
+#!/bin/bash
+# Refuse to start the ROS stack while beast-pull is mid-deploy.
+#
+# install/ is a --symlink-install tree, so between "checkout moved" and "colcon
+# build finished" the workspace is inconsistent: new Python and launch files,
+# old compiled artefacts. Starting into that window yields a running robot on a
+# half-built stack — the worst outcome, because it looks fine.
+#
+# beast-pull creates the marker before touching the checkout and clears it on
+# every exit path. This guard turns a mid-deploy boot into a STOPPED robot
+# instead, which is recoverable and loud.
+#
+# The staleness bound matters as much as the check: if the agent were killed
+# hard enough to skip its own EXIT trap, an unbounded guard would brick every
+# subsequent boot. After the bound expires we start anyway and let verify judge.
+set -u
+
+MARKER="${BEAST_DEPLOY_MARKER:-/data/beast/deploy/in-progress}"
+STALE_AFTER_SECONDS="${BEAST_DEPLOY_MARKER_TTL:-1800}"
+
+[ -e "$MARKER" ] || exit 0
+
+marker_mtime="$(stat -c %Y "$MARKER" 2>/dev/null)" || exit 0
+age=$(( $(date +%s) - marker_mtime ))
+
+if [ "$age" -gt "$STALE_AFTER_SECONDS" ]; then
+  echo "beast-deploy-guard: ignoring stale deploy marker (${age}s old, bound ${STALE_AFTER_SECONDS}s)" >&2
+  exit 0
+fi
+
+echo "beast-deploy-guard: beast-pull is mid-deploy (marker ${age}s old); refusing to start a half-built workspace" >&2
+exit 1

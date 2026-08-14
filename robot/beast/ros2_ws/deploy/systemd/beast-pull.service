@@ -1,0 +1,27 @@
+[Unit]
+Description=BEAST-01 unattended source-mode deploy (fetch gated ref, rebuild, verify)
+Wants=network-online.target
+After=network-online.target beast-ros-base.service
+# The agent rebuilds the workspace it is checked out in; without it there is
+# nothing to deploy into.
+ConditionPathExists=/home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-pull
+
+[Service]
+Type=oneshot
+# Runs as `beast`, NOT root: it owns the checkout and the colcon workspace, and
+# every systemctl verb the agent uses is already allowlisted for this user in
+# /etc/sudoers.d/beast-ops. Running as root would need no sudoers but would
+# leave root-owned build artefacts in a user workspace.
+User=beast
+Group=beast
+SupplementaryGroups=dialout video render i2c audio
+WorkingDirectory=/home/beast/beast/RobotOverview/robot/beast/ros2_ws
+EnvironmentFile=/etc/beast/ugv.env
+Environment=PYTHONUNBUFFERED=1
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+ExecStart=/home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-pull
+# A colcon build plus a 20 s settle plus the verify sweep. Generous, but the
+# agent must never be killed between "checkout moved" and "verify finished" —
+# that is precisely the half-deploy state it exists to prevent.
+TimeoutStartSec=1800
+UMask=0027

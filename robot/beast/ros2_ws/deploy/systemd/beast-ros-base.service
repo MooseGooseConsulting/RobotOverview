@@ -16,6 +16,10 @@ Environment=PYTHONUNBUFFERED=1
 # Same session Pulse/speechd sockets as interactive user `beast`. Linger
 # must be on so /run/user/1000 exists at boot without a login.
 Environment=XDG_RUNTIME_DIR=/run/user/1000
+# Refuse to start into a workspace beast-pull is mid-way through rebuilding.
+# Bounded by a staleness TTL inside the guard so a killed agent cannot brick
+# boot permanently. Runs the tree copy, same pattern as beast-slam's ExecStop.
+ExecStartPre=/home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-deploy-guard
 ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/setup.bash && exec ros2 launch ugv_bringup bringup_lidar.launch.py use_lidar:=true use_rviz:=false allow_motion:=true'
 KillSignal=SIGINT
 TimeoutStopSec=15

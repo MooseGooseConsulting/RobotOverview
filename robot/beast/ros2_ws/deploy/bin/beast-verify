@@ -1,0 +1,279 @@
+#!/bin/bash
+# BEAST-01 live-stack verification — the landed contract for "is it deployed".
+#
+# Runs ON the robot. Two callers share this one file so they cannot drift:
+#   * deploy-to-beast.sh --verify-only  pipes it over ssh (bash -s < this file),
+#     so a workstation verifies with the copy it is deploying FROM.
+#   * beast-pull runs it directly after an unattended deploy.
+#
+# Extracted verbatim from deploy-to-beast.sh's run_verify heredoc on
+# 2026-08-14. It was unreachable on the robot itself, which is why the pull
+# agent could not reuse it. Behaviour is unchanged: PASS/FAIL/WARN lines on
+# stdout, exit 0 only if no check FAILed.
+#
+# Motion-free by construction: the drive-path probe disarms the gate before
+# bursting /cmd_vel_ui, so every command is rejected, and restores the gate
+# fail-closed afterwards.
+
+# ROS setup scripts reference unbound vars; enable -u only after sourcing.
+source /opt/ros/humble/setup.bash
+source /home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/setup.bash 2>/dev/null || true
+set -u
+
+# UDP-only profile for every CLI call below (see script header).
+cat > /tmp/beast_verify_fastdds_udp.xml <<'XML'
+<?xml version="1.0" encoding="UTF-8" ?>
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <transport_descriptors>
+    <transport_descriptor>
+      <transport_id>udp_only</transport_id>
+      <type>UDPv4</type>
+    </transport_descriptor>
+  </transport_descriptors>
+  <participant profile_name="udp_only_participant" is_default_profile="true">
+    <rtps>
+      <userTransports>
+        <transport_id>udp_only</transport_id>
+      </userTransports>
+      <useBuiltinTransports>false</useBuiltinTransports>
+    </rtps>
+  </participant>
+</profiles>
+XML
+export FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/beast_verify_fastdds_udp.xml
+# Drop any daemon started under the default (SHM) profile; the next CLI call
+# respawns one under the UDP profile so its cached graph is trustworthy.
+ros2 daemon stop >/dev/null 2>&1 || true
+
+fail=0
+ok()   { printf 'PASS  %s\n' "$*"; }
+bad()  { printf 'FAIL  %s\n' "$*"; fail=1; }
+warn() { printf 'WARN  %s\n' "$*"; }
+
+for svc in beast-ros-base beast-cockpit; do
+  svc_state="$(systemctl is-active "$svc" 2>/dev/null || true)"
+  if [ "$svc" = beast-cockpit ] \
+      && [ "$svc_state" = inactive ] \
+      && [ "$(systemctl is-enabled "$svc" 2>/dev/null || true)" = disabled ]; then
+    warn "$svc inactive (operator-disabled)"
+  elif [ "$svc_state" = active ]; then
+    ok "$svc active"
+    if [ "$svc" = beast-cockpit ]; then
+      # Bridge path: rosbridge loopback + Tailscale Serve (Hangar WSS on :443).
+      if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qx '127.0.0.1:9090'; then
+        ok "rosbridge listening on 127.0.0.1:9090"
+      else
+        bad "beast-cockpit active but nothing on 127.0.0.1:9090"
+      fi
+      serve_status="$(tailscale serve status 2>/dev/null || true)"
+      if printf '%s\n' "$serve_status" | grep -q '127.0.0.1:9090'; then
+        ok "tailscale serve fronts 127.0.0.1:9090"
+      else
+        bad "tailscale serve does not front 127.0.0.1:9090 (run beast-01-serve.sh)"
+      fi
+    fi
+  else
+    bad "$svc ${svc_state:-not active}"
+  fi
+done
+
+# Graph discovery is racy right after daemon stop (UDP participant join).
+# Retry briefly before FAIL so functional checks are not false-negatives.
+nodes=""
+for _try in 1 2 3 4 5 6 7 8 9 10; do
+  nodes="$(ros2 node list 2>/dev/null || true)"
+  echo "$nodes" | grep -qx '/beast_power' \
+    && echo "$nodes" | grep -qx '/beast_power_logger' \
+    && break
+  sleep 1
+done
+echo "$nodes" | grep -qx '/beast_power' \
+  && ok "beast_power running" || bad "beast_power not in node graph"
+echo "$nodes" | grep -qx '/ugv_safety_monitor' \
+  && bad "ugv_safety_monitor still running (strip not deployed)" \
+  || ok "ugv_safety_monitor absent"
+echo "$nodes" | grep -qx '/beast_power_logger' \
+  && ok "beast_power_logger running" \
+  || bad "beast_power_logger not in node graph (power CSV not being recorded)"
+
+vpubs=""
+for _try in 1 2 3 4 5 6 7 8 9 10; do
+  vpubs="$(ros2 topic info /ugv/voltage 2>/dev/null | awk '/Publisher count/ {print $3}')"
+  [ "$vpubs" = "1" ] && break
+  sleep 1
+done
+[ "$vpubs" = "1" ] && ok "/ugv/voltage has exactly 1 publisher" \
+  || bad "/ugv/voltage publisher count = ${vpubs:-unknown}"
+vowner="$(ros2 topic info /ugv/voltage -v 2>/dev/null | awk '/Node name/ {print $3; exit}')"
+[ "$vowner" = "beast_power" ] && ok "/ugv/voltage published by beast_power" \
+  || bad "/ugv/voltage published by ${vowner:-unknown}"
+
+cpubs="$(ros2 topic info /ugv/charging_active 2>/dev/null | awk '/Publisher count/ {print $3}')"
+[ "${cpubs:-0}" -ge 1 ] 2>/dev/null && ok "/ugv/charging_active has a publisher" \
+  || bad "/ugv/charging_active has no publisher"
+
+cfg="$(i2cget -y 7 0x41 0x00 w 2>/dev/null || true)"
+if [ -z "$cfg" ]; then
+  warn "INA219 unreadable on i2c-7 (sensor or wiring issue)"
+elif [ "$cfg" = "0x9f39" ]; then
+  warn "INA219 config still factory 0x399F — beast_power has not configured the chip"
+else
+  ok "INA219 configured ($cfg)"
+fi
+
+sample="$(timeout 6 ros2 topic echo --once /ugv/voltage 2>/dev/null || true)"
+sample_present="$(printf '%s\n' "$sample" | awk -F': ' '/^[[:space:]]*present:/ {print $2; exit}')"
+sample_voltage="$(printf '%s\n' "$sample" | awk -F': ' '/^[[:space:]]*voltage:/ {print $2; exit}')"
+case "$sample_present" in
+  true)
+    [ -n "$sample_voltage" ] \
+      && ok "/ugv/voltage live: ${sample_voltage} V" \
+      || bad "/ugv/voltage present=true but voltage is missing"
+    ;;
+  false)
+    bad "/ugv/voltage reports INA219 absent"
+    ;;
+  *)
+    warn "no usable /ugv/voltage sample within 6 s"
+    ;;
+esac
+
+# --- power log: durable CSV must exist and keep growing ---
+# The logger fsyncs every row, so an absent sensor still grows the file
+# (honest empty-cell rows). Flat line count = stalled logger = missing data.
+power_csv="/data/beast/power/power-log.csv"
+if [ -f "$power_csv" ]; then
+  lines1="$(wc -l < "$power_csv" 2>/dev/null || echo 0)"
+  sleep 6
+  lines2="$(wc -l < "$power_csv" 2>/dev/null || echo 0)"
+  if [ "$lines2" -gt "$lines1" ] 2>/dev/null; then
+    ok "power log growing: $lines1 -> $lines2 lines over 6 s"
+  else
+    bad "power log NOT growing ($lines1 -> $lines2 over 6 s) — logger stalled"
+  fi
+else
+  bad "power log missing at $power_csv"
+fi
+
+# --- two-instrument cross-check: driver-board INA219 vs ESP32 pack ADC ---
+# /ugv/voltage is beast_power's (INA219 on i2c-7) since the 2026-08-07
+# cutover; the ESP32's own pack reading ("v", centivolts) rides its T:1001
+# serial frame, not a topic. This taps that stream READ-ONLY (os.open + read,
+# no termios writes, no DTR/RTS toggling) just long enough for ONE frame.
+#
+# ACCEPTED RISK (single stolen frame): the tap reads the tty beast_base is
+# continuously draining, so it can consume frames the base parser would have
+# taken. Reads are capped small (64 B) and stop at the first 'v' frame, so in
+# the normal case exactly one frame is stolen — the base parser validates and
+# discards a missing/garbled frame (its read-fail recovery is designed for
+# transient serial noise), verify runs on a stationary robot, and the whole
+# tap lasts < 1 s. Unreadable/parse-failure stays WARN-level; only a real
+# disagreement between the two instruments FAILs.
+#
+# The CSV-growth wait has already run by here, so nothing delays this pair:
+# the ESP32 frame is captured first (the variable-wait read), then the INA219
+# sample is echoed immediately after — both readings land within ~1 s of each
+# other instead of straddling the 6 s wait.
+esp32_port="${UGV_SERIAL_PORT:-}"
+if [ -z "$esp32_port" ]; then
+  esp32_port="$(systemctl show -p Environment beast-ros-base 2>/dev/null \
+    | tr ' ' '\n' | sed -n 's/^UGV_SERIAL_PORT=//p' | head -1)"
+fi
+[ -z "$esp32_port" ] && [ -e /dev/serial/by-id/usb-1a86_USB_Single_Serial_5B5E130201-if00 ] \
+  && esp32_port="/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B5E130201-if00"
+[ -z "$esp32_port" ] && [ -e /dev/ttyTHS1 ] && esp32_port="/dev/ttyTHS1"
+
+if [ -n "$esp32_port" ] && [ -e "$esp32_port" ]; then
+  esp32_voltage="$(timeout 8 python3 - "$esp32_port" <<'PY' || true
+import json, os, sys, time
+
+port = sys.argv[1]
+try:
+    fd = os.open(port, os.O_RDONLY | os.O_NOCTTY | os.O_NONBLOCK)
+except OSError:
+    sys.exit(2)
+buf = b''
+deadline = time.monotonic() + 5
+try:
+    while time.monotonic() < deadline:
+        try:
+            # Small reads (64 B ≈ one frame): stop at the first 'v' frame
+            # instead of draining a 4096-byte buffer that would swallow
+            # several of beast_base's frames in one go.
+            chunk = os.read(fd, 64)
+        except BlockingIOError:
+            chunk = b''
+        if not chunk:
+            time.sleep(0.02)
+            continue
+        buf += chunk
+        while b'\n' in buf:
+            line, buf = buf.split(b'\n', 1)
+            if not line.strip():
+                continue
+            try:
+                frame = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(frame, dict) and 'v' in frame:
+                print(frame['v'] / 100.0)
+                sys.exit(0)
+    sys.exit(3)
+finally:
+    os.close(fd)
+PY
+)"
+  # INA219 sample taken IMMEDIATELY after the ESP32 frame: same time window.
+  cross_voltage="$(timeout 6 ros2 topic echo --once /ugv/voltage 2>/dev/null \
+    | awk -F': ' '/^[[:space:]]*voltage:/ {print $2; exit}')"
+  if [ -n "$cross_voltage" ] && [ -n "$esp32_voltage" ]; then
+    delta="$(awk -v a="$cross_voltage" -v b="$esp32_voltage" \
+      'BEGIN { d = (a > b) ? a - b : b - a; printf "%.3f", d }')"
+    if awk -v d="$delta" 'BEGIN { exit !(d <= 0.2) }'; then
+      ok "INA219 vs ESP32 volts agree: /ugv/voltage ${cross_voltage} V, ESP32 ${esp32_voltage} V (delta ${delta} V)"
+    else
+      bad "INA219 vs ESP32 volts DISAGREE: /ugv/voltage ${cross_voltage} V, ESP32 ${esp32_voltage} V (delta ${delta} V > 0.2 V)"
+    fi
+  elif [ -n "$esp32_voltage" ]; then
+    warn "no /ugv/voltage sample within 6 s — cross-check skipped"
+  else
+    warn "could not read ESP32 pack voltage (serial tap returned nothing) — cross-check skipped"
+  fi
+else
+  warn "ESP32 serial port not found (${esp32_port:-unknown}) — cross-check skipped"
+fi
+
+# --- drive-path probe: /cmd_vel_ui -> twist_mux -> /cmd_vel -> beast_base ---
+# Motion-free by construction: the gate is disarmed for the burst, so the
+# callback rejects every command and sends stops. PASS requires the reject
+# warning in the journal — proof the mux output reached the base node, which
+# is exactly the link the 2026-08-07 SHM wedge broke silently.
+gate_before="$(timeout 8 ros2 topic echo --once /ugv/allow_motion 2>/dev/null | awk '/^data:/ {print $2; exit}')"
+probe_stamp="$(date '+%Y-%m-%d %H:%M:%S')"
+timeout 15 ros2 service call /ugv/set_allow_motion std_srvs/srv/SetBool '{data: false}' >/dev/null 2>&1 || true
+timeout 8 ros2 topic pub -r 10 /cmd_vel_ui geometry_msgs/msg/Twist \
+  '{linear: {x: 0.3, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}' >/dev/null 2>&1 || true
+sleep 1
+rejections="$(journalctl -u beast-ros-base --since "$probe_stamp" --no-pager 2>/dev/null \
+  | grep -c 'Rejected non-zero cmd_vel' || true)"
+# Restore the gate, FAIL CLOSED. Only re-arm when the pre-probe read said
+# literally "true". This used to re-arm on anything that was not "false",
+# which included the empty string returned when the 8 s read above times out —
+# so a verify run against a deliberately disarmed robot could silently arm it.
+# Harmless while a human is watching; not harmless once beast-pull runs verify
+# on an hourly timer. Leaving it disarmed is always the recoverable direction.
+if [ "$gate_before" = "true" ]; then
+  timeout 15 ros2 service call /ugv/set_allow_motion std_srvs/srv/SetBool '{data: true}' >/dev/null 2>&1 || true
+else
+  timeout 15 ros2 service call /ugv/set_allow_motion std_srvs/srv/SetBool '{data: false}' >/dev/null 2>&1 || true
+  if [ "$gate_before" != "false" ]; then
+    warn "could not read allow_motion before the probe; left the gate DISARMED (re-arm from the cockpit)"
+  fi
+fi
+if [ "${rejections:-0}" -ge 1 ] 2>/dev/null; then
+  ok "drive path live: /cmd_vel_ui -> twist_mux -> beast_base (reject logged while disarmed)"
+else
+  bad "drive path wedged: mux output not reaching beast_base — restart beast-ros-base once, re-verify"
+fi
+
+exit "$fail"
