@@ -1,0 +1,280 @@
+name: Pin deployed image
+
+# Continuous deploy for both surfaces.
+#
+# Publishing an image is not deploying it. Nothing in Kubernetes and nothing on
+# BEAST-01 watches GHCR, so a merged change shipped nothing until somebody
+# hand-edited a digest in coldaine-homelab. That is the gap this workflow
+# closes — and it is why reverting to `:latest` would not fix it: the pod that
+# served the PR #134 build while `:latest` had already moved on is the proof.
+# A tag change is not a spec change, and only a spec change deploys.
+#
+# Both consumers already poll a git-tracked pin. Nothing was writing them:
+#
+#   surface   pin file                                consumer
+#   hangar    infra/k8s/apps/hangar/deployment.yaml   Flux `target-apps`
+#                                                     GitRepository 1m +
+#                                                     Kustomization 10m
+#                                                     => live within ~11 min
+#   beast     deployments/beast-01/manifest.yaml      `beast-pull.timer`
+#                                                     boot + hourly
+#
+# NOTE ON `beast`: as of 2026-08-14 the pull agent is NOT installed on the
+# robot (`/usr/local/bin/beast-pull` absent, `beast-pull.timer` inactive,
+# `beast-ros-base` running the host colcon build). Writing this pin is correct
+# and harmless today — nothing reads it — and it goes live the moment the agent
+# is installed. Installing it is Phase 2 of
+# docs/plans/2026-08-14-continuous-deploy-both-surfaces.md, and it must be done
+# supervised: the first tick swaps the robot from source mode to container mode.
+#
+# Rollback is unchanged and still one commit: revert the pin commit in
+# coldaine-homelab. That is the property `:latest` gives away.
+
+on:
+  workflow_run:
+    workflows:
+      - Build RobotOverview image
+      - Build BEAST ROS image
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      surface:
+        description: Which pin to refresh
+        required: true
+        type: choice
+        options: [hangar, beast]
+      sha:
+        description: "RobotOverview commit to pin (default: this ref's HEAD)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+  checks: read
+
+# Repo-wide, not per-surface: the two image workflows can finish seconds apart
+# and both push to the same branch of coldaine-homelab. Serializing here is
+# cheaper than relying on the rebase retry below.
+concurrency:
+  group: deploy-pin
+  cancel-in-progress: false
+
+env:
+  HOMELAB_REPO: MooseGooseConsulting/coldaine-homelab
+
+jobs:
+  pin:
+    name: Pin ${{ github.event.workflow_run.name || inputs.surface }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # A failed or cancelled build must never move a pin. PR builds are excluded
+    # by the branch filter above; the explicit event check documents the intent.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event != 'pull_request')
+    steps:
+      - name: Require the homelab deploy token
+        env:
+          TOKEN: ${{ secrets.HOMELAB_DEPLOY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::HOMELAB_DEPLOY_TOKEN is not set. coldaine-homelab is private, so" \
+                 "the default GITHUB_TOKEN cannot reach it. Create a fine-grained PAT scoped" \
+                 "to MooseGooseConsulting/coldaine-homelab with Contents: read+write and add" \
+                 "it as this repository's HOMELAB_DEPLOY_TOKEN secret. See docs/deploy.md."
+            exit 1
+          fi
+
+      - name: Resolve surface, source commit, and image
+        id: target
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          UPSTREAM_WORKFLOW: ${{ github.event.workflow_run.name }}
+          UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}
+          UPSTREAM_URL: ${{ github.event.workflow_run.html_url }}
+          INPUT_SURFACE: ${{ inputs.surface }}
+          INPUT_SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            surface="$INPUT_SURFACE"
+            sha="${INPUT_SHA:-$GITHUB_SHA}"
+            build_url="manual dispatch $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          else
+            case "$UPSTREAM_WORKFLOW" in
+              "Build RobotOverview image") surface=hangar ;;
+              "Build BEAST ROS image")     surface=beast ;;
+              *) echo "::error::unrecognised upstream workflow '$UPSTREAM_WORKFLOW'"; exit 1 ;;
+            esac
+            sha="$UPSTREAM_SHA"
+            build_url="$UPSTREAM_URL"
+          fi
+
+          case "$surface" in
+            hangar) image=moosegooseconsulting/robot-overview ;;
+            beast)  image=moosegooseconsulting/beast-ros ;;
+            *) echo "::error::unknown surface '$surface'"; exit 1 ;;
+          esac
+
+          {
+            echo "surface=$surface"
+            echo "sha=$sha"
+            echo "short_sha=${sha:0:7}"
+            echo "image=$image"
+            echo "build_url=$build_url"
+          } >> "$GITHUB_OUTPUT"
+          echo "pinning $surface from RobotOverview ${sha:0:7} (ghcr.io/$image)"
+
+      # A green image build is not a green commit: image.yml publishes on main
+      # independently of the test workflows, so a post-merge semantic break can
+      # produce a perfectly good image of broken code. Gate on this repo's own
+      # test workflows by name. A workflow that did not run (path filter) has no
+      # check run and correctly does not block; third-party advisory checks are
+      # deliberately not in this list.
+      - name: Refuse to pin a commit whose tests failed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.target.outputs.sha }}
+          REQUIRED: 'Hangar web tests|Beast power tests|Beast ROS command spine|Beast storage tests'
+        run: |
+          set -euo pipefail
+          failed="$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?per_page=100" \
+            --jq '.check_runs[] | select(.conclusion == "failure" or .conclusion == "timed_out") | .name' \
+            | grep -Ex "$REQUIRED" || true)"
+          if [ -n "$failed" ]; then
+            echo "::error::refusing to pin $SHA — failing checks: $(echo "$failed" | paste -sd', ')"
+            exit 1
+          fi
+          echo "no failing required checks on $SHA"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Resolve the digest from the registry rather than plumbing the build
+      # step's output across the workflow_run boundary: this also proves the
+      # tag really exists and really is pullable before anything is committed.
+      - name: Resolve the published manifest digest
+        id: digest
+        env:
+          REF: ghcr.io/${{ steps.target.outputs.image }}:sha-${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          digest="$(docker buildx imagetools inspect "$REF" --format '{{json .Manifest}}' | jq -r '.digest')"
+          if ! printf '%s' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "::error::could not resolve a manifest digest for $REF (got '$digest')"
+            exit 1
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "$REF -> $digest"
+
+      - name: Check out RobotOverview (pin writer)
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          path: self
+          persist-credentials: false
+
+      - name: Check out coldaine-homelab
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: ${{ env.HOMELAB_REPO }}
+          ref: main
+          token: ${{ secrets.HOMELAB_DEPLOY_TOKEN }}
+          path: homelab
+
+      - name: Write the pin
+        env:
+          SURFACE: ${{ steps.target.outputs.surface }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+          SHA: ${{ steps.target.outputs.sha }}
+          BUILD_URL: ${{ steps.target.outputs.build_url }}
+        run: |
+          set -euo pipefail
+          python3 self/tools/ci/pin_deploy_image.py \
+            --surface "$SURFACE" \
+            --repo-root homelab \
+            --digest "$DIGEST" \
+            --source-sha "$SHA" \
+            --run-url "$BUILD_URL"
+
+      - name: Commit and push to coldaine-homelab
+        id: push
+        working-directory: homelab
+        env:
+          SURFACE: ${{ steps.target.outputs.surface }}
+          SHORT_SHA: ${{ steps.target.outputs.short_sha }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+          BUILD_URL: ${{ steps.target.outputs.build_url }}
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "already pinned to $DIGEST — nothing to commit"
+            exit 0
+          fi
+
+          git config user.name 'robotoverview-deploy'
+          git config user.email 'robotoverview-deploy@users.noreply.github.com'
+          git add -A
+          git commit -m "chore($SURFACE): pin image to RobotOverview $SHORT_SHA" \
+                     -m "Digest: $DIGEST" \
+                     -m "Build: $BUILD_URL" \
+                     -m "Written by RobotOverview .github/workflows/deploy-pin.yml. Revert this commit to roll back."
+
+          # The concurrency group above serializes this workflow, but a human
+          # editing coldaine-homelab at the same moment is not serialized.
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              echo "pushed=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "push rejected (attempt $attempt) — rebasing onto origin/main"
+            git pull --rebase origin main
+          done
+          echo "::error::could not push the pin to $HOMELAB_REPO after 3 attempts"
+          exit 1
+
+      - name: Summary
+        if: always()
+        env:
+          SURFACE: ${{ steps.target.outputs.surface }}
+          SHORT_SHA: ${{ steps.target.outputs.short_sha }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+          PUSHED: ${{ steps.push.outputs.pushed }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Pin: \`$SURFACE\` -> RobotOverview \`$SHORT_SHA\`"
+            echo
+            echo "- Digest: \`$DIGEST\`"
+            if [ "${PUSHED:-}" = true ]; then
+              echo "- Pushed to \`$HOMELAB_REPO\` \`main\`"
+              if [ "$SURFACE" = hangar ]; then
+                echo "- Flux \`target-apps\` reconciles on a 10 min interval;" \
+                     "expect <https://hangar.moosegoose.xyz/> to roll within ~11 min."
+                echo "- Verify: \`GET https://hangar.moosegoose.xyz/api/hangar/preflight\`"
+              else
+                echo "- **Not yet live on the robot.** The \`beast-pull\` agent is not"
+                echo "  installed on BEAST-01 (Phase 2 of"
+                echo "  \`docs/plans/2026-08-14-continuous-deploy-both-surfaces.md\`)."
+                echo "  Deploy the robot with \`robot/beast/ros2_ws/deploy/deploy-to-beast.sh\`"
+                echo "  until that lands."
+              fi
+              echo "- Roll back: revert that commit in \`$HOMELAB_REPO\`."
+            elif [ "${PUSHED:-}" = false ]; then
+              echo "- No change: already pinned."
+            else
+              echo "- **Did not pin.** See the failing step above."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
