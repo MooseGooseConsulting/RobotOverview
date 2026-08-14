@@ -112,13 +112,15 @@ TOPICS_PUB_GLOB = (
 #
 # CROSS-REPO: keep this exhaustive list in lockstep with ROS_SUBSCRIPTIONS
 # in src/lib/ros/client.ts. Denying a safety subscription would force the UI
-# onto the slower aggregator and surface a bridge fault. /map + /tf are
-# telemetry only (occupancy under the scan); they cannot move the robot.
+# onto the slower aggregator and surface a bridge fault. /tf is telemetry
+# only. /map is intentionally ABSENT: the live OccupancyGrid is 4185×6765
+# (~85 MB JSON). Humble 2.0.7 fragments that into 8–9 × 10 MB parts and
+# starves /scan. Re-add /map only when the grid is room-scale.
 TOPICS_SUB_GLOB = (
     '[/ugv/voltage, /scan, /odom, /imu/raw, /cockpit/overhead_clearance, '
     '/cockpit/status, /diagnostics, /ugv/allow_motion, '
     '/oak/rgb/image_raw/compressed, /cockpit/depth/compressed, '
-    '/map, /tf]'
+    '/tf]'
 )
 
 # Exactly one service: the motion authority in ugv_bringup. The cockpit's
