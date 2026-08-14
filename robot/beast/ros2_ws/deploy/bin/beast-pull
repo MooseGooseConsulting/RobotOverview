@@ -168,11 +168,17 @@ fi
 mkdir -p "$STATE_DIR" || die "cannot create $STATE_DIR"
 
 # ------------------------------------------------------------ ros setup ----
-# ROS setup scripts reference unbound vars; keep -u off while sourcing.
+# ROS setup scripts reference unbound vars (AMENT_TRACE_SETUP_FILES et al.),
+# so -u must actually be OFF while sourcing — under set -u the first source
+# aborts the whole agent before it reads a single topic. Every other script
+# in deploy/bin already sources before enabling -u; this one enables it at
+# the top, so drop and restore it around the sources.
+set +u
 # shellcheck disable=SC1091
 source /opt/ros/humble/setup.bash
 # shellcheck disable=SC1091
 source "$WS_DIR/install/setup.bash" 2>/dev/null || true
+set -u
 
 # ------------------------------------------------------- the parked gate ----
 # The plan's original spec said "skip while /ugv/allow_motion is true". That gate
