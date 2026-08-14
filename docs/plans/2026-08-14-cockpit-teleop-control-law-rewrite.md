@@ -1,9 +1,15 @@
 # Cockpit teleop control law — browser-side rewrite (work order)
 
-Status: **Open, not started.** Written 2026-08-14 after reading the current
-`CommandRail.tsx`, the vendored ROS teleop, and Waveshare's original Pi cockpit
-(`waveshareteam/ugv_rpi`, `templates/control.js` + `config.yaml`) side by side. Scope is
-**browser-side only** — no ROS package, launch file, or firmware change is in this plan.
+Status: **Implemented on main via #215** (merged 2026-08-14). The control-law port
+landed; do not re-port it. Leftover for an implementer: the owner feel gate (§9.3) plus
+the three untested exit paths already named in
+[`2026-08-14-verification-surfaces.md`](2026-08-14-verification-surfaces.md) — A8
+(pending-stop re-fire on reconnect), A10 (`isContentEditable` focus guard), A11
+(`releaseAll` on `visibilitychange` / `pointercancel` / gate-close). Written 2026-08-14
+after reading the then-current `CommandRail.tsx`, the vendored ROS teleop, and
+Waveshare's original Pi cockpit (`waveshareteam/ugv_rpi`, `templates/control.js` +
+`config.yaml`) side by side. Scope is **browser-side only** — no ROS package, launch
+file, or firmware change is in this plan.
 
 This is a **work order**, not a record of reasoning: it names inputs, the exact changes,
 what to emit, and how to tell when it is done. **Code is truth** — if this document and

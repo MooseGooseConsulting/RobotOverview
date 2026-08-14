@@ -54,7 +54,7 @@ safety-relevant claims the 2026-08-07 plan did not name.
 |---|---|
 | The 12 demo `cmd_vel_nav` retargets (all 12 still unreverted — verified) | 2026-08-07 plan §5 Phase 2 / D7 |
 | Phase 3 drift audit vs `037dfca`, RSHUNT multimeter, INA219 recal | 2026-08-07 plan §5 Phase 3 |
-| The `"roslib": "^2.1.0"` verdict in `package.json` (declared, never imported in `src/`) | the cockpit ROS-client convergence plan — **note the coupling only**: harvesting any vizanti template would reintroduce a hard roslibjs dependency, which is an argument *against* harvest, not a reason to keep the dep |
+| The `"roslib": "^2.1.0"` verdict in `package.json` (`src/server/beast/ros-singleton.ts` dynamic-imports it — a missing `from 'roslib'` grep is not "never imported") | the cockpit ROS-client convergence plan — **note the coupling only**: harvesting any vizanti template would reintroduce a hard *browser* roslibjs dependency, which is an argument *against* harvest, not a reason to drop the server dep |
 | Cockpit map rendering / SLAM output | separate cockpit work |
 
 ## 1. Inputs and how to re-derive
@@ -135,8 +135,8 @@ Every template opens with runtime-coupled dynamic imports against vizanti's own 
 `vizanti_msgs/srv/SaveMap` service. It is vanilla ES-module JS bound to vizanti's view
 transform, its persistence layer, its message package, and a global `ROSLIB`. Dropping any of
 it into a React/Next.js surface that reads through `@/lib/ros/client` means a rewrite, not a
-port — and it would drag in the roslibjs dependency that is currently dead weight in
-`package.json`.
+port — and it would drag a *browser* roslibjs dependency into a surface that already
+loads `roslib` only on the server (`src/server/beast/ros-singleton.ts`).
 
 `AGENTS.md` is explicit that the UI is the product. vizanti is a robot-hosted Django/JS app
 that would be a *second, unstyled, unauthenticated* product surface. The two capabilities it

@@ -161,7 +161,7 @@ carries its own NaN repair; only the server-side `roslib` bridge is.
 | Phase | Gated by F13? | Why |
 |---|---|---|
 | 0 — map store repairs | **No** | No motion at all. |
-| 1 — calibration | **No** | Motion is owner-on-joystick only. No Nav2 action, no agent-issued goal, no agent stop in the loop. |
+| 1 — calibration | **No** | Motion is owner-on-cockpit only (WASD + DISARM). No Nav2 action, no agent-issued goal, no agent stop in the loop. |
 | 2 — first mapping run | **No** | Same: owner drives, `slam_toolbox` observes. No Nav2 action server is even running. |
 | 3 — Nav2 bringup and first goals | **BLOCKED** | Every goal is a `NavigateToPose` action; cancelling one is exactly the path that can silently refuse. |
 | 4 — `/goal_pose` + click-to-nav | **BLOCKED** | Puts a destination on the wire from a UI surface; the cancel path must be real before the request path exists. |
@@ -178,9 +178,13 @@ calls it, and it is the only service on the rosbridge whitelist
 
 **Therefore, for Phases 3–5, the supervised abort order is:**
 
-1. **Joystick** — rung 150 pre-empts autonomy within one message (F5). Fastest, and it keeps
-   the robot under command rather than merely stopping it.
-2. **Cockpit DISARM** — `/ugv/set_allow_motion` false. Independent of the bridge fault.
+1. **Cockpit DISARM + WASD** — `/ugv/set_allow_motion` false, then hold the floor on
+   `/cmd_vel_ui` (rung 50). This is the abort that exists today. Independent of the
+   bridge fault. There is **no paired joystick** and rung 150 has no publisher.
+2. **Input-plan B (rung 150) if it exists** — only after
+   [`2026-08-14-beast-input-paths-and-mux-rungs.md`](2026-08-14-beast-input-paths-and-mux-rungs.md)
+   work item B has landed a real joystick publisher. Do not treat a missing pad as an
+   abort path.
 3. **Nav2 goal cancel from an agent** — *do not rely on it*, and do not write a phase step that
    depends on it, until F13's owning plan has landed.
 
@@ -240,9 +244,11 @@ both build allowlists name `beast_base`.
 yields them — but they get *fixed* in order of what they actually reach.
 
 **Preconditions:** Phase 0 done. Owner physically present and within arm's reach of the
-robot. `allow_motion` true. Joystick paired (rung 150 is the override). Cockpit DISARM
-reachable. A clear ~4 m × 4 m of **the floor the robot will later map** — yaw scrub is a
-property of the surface, so calibrating on tile and mapping on carpet measures nothing.
+robot. `allow_motion` true. **Abort is cockpit DISARM + WASD** (the path that exists
+today). Input-plan B (rung 150 joystick) is optional — if it has not landed, do not
+block this phase on a pad that is not paired. A clear ~4 m × 4 m of **the floor the
+robot will later map** — yaw scrub is a property of the surface, so calibrating on tile
+and mapping on carpet measures nothing.
 
 **Rig (read-only; no new publisher touches `cmd_vel`):**
 
@@ -251,8 +257,9 @@ ros2 bag record -o /data/beast/calib/$(date -u +%Y%m%dT%H%M%SZ) \
   /odom/odom_raw /imu/raw /odom_wheel /odom /odom_rf2o /cmd_vel /scan
 ```
 
-Every number below is extracted from that bag offline. **Motion is commanded by the owner on
-the joystick, never by a script.**
+Every number below is extracted from that bag offline. **Motion is commanded by the owner
+from the cockpit (WASD), never by a script.** Use a joystick only if input-plan B has
+already landed a publisher on rung 150.
 
 | Run | Procedure | Yields |
 |---|---|---|
@@ -307,7 +314,8 @@ rotating world.
 ### Phase 2 — the first real map of a real space (owner-supervised, motion)
 
 **Inputs:** Phases 0 and 1 done. `beast-ros-base` running. Fresh-start params selected
-(Phase 0 change 2). Owner walking beside the robot with the joystick.
+(Phase 0 change 2). Owner walking beside the robot with cockpit WASD (or a joystick
+only if input-plan B has landed).
 
 **Bring-up.** Not `ros2 launch ugv_slam slam_toolbox.launch.py` — F6. The only supported path
 is the service, which launches stock `slam_toolbox online_async_launch.py` against the
@@ -323,7 +331,7 @@ ros2 topic echo /map --once --field info
 
 If `map→odom` jumps while the robot is parked, **stop** — that is Phase 1 leaking.
 
-**Drive pattern** (owner on the joystick, rung 150):
+**Drive pattern** (owner on cockpit WASD; rung 150 only if input-plan B has landed):
 
 1. Largest open room. Robot stationary, 10 s of scans before the first move.
 2. Perimeter first, ~0.15 m/s, walls held at 1–3 m. `minimum_travel_distance: 0.2` and
@@ -499,24 +507,26 @@ are dropped by the scan→cloud conversion, so the wedge is **neither marked nor
 
 1. Goal at the **current pose**. Proves the action server, the BT and the goal checker with no
    motion.
-2. **1 m straight ahead**, clear floor, owner's hand on the joystick.
+2. **1 m straight ahead**, clear floor, owner's hand on cockpit DISARM / WASD.
 3. **3 m with one 90° turn.**
 4. **Through a doorway.**
 5. **A goal requiring replanning** — owner steps into the committed path.
 
-Abort path at every step, in §4's order: **joystick first** (rung 150 pre-empts within one
-message), then **cockpit DISARM** (`/ugv/set_allow_motion` false → `beast_base` stops the
-serial write and sends `T:13 0,0`). **An agent-issued Nav2 goal cancel is not an abort path
-here** while F13 stands. F11: the ESP32 latches its last velocity — killing a node is never a
-stop.
+Abort path at every step, in §4's order: **cockpit DISARM first** (`/ugv/set_allow_motion`
+false → `beast_base` stops the serial write and sends `T:13 0,0`), then WASD on
+`/cmd_vel_ui`. A joystick on rung 150 is an abort path **only if input-plan B has
+landed** — do not assume a pad exists. **An agent-issued Nav2 goal cancel is not an abort
+path here** while F13 stands. F11: the ESP32 latches its last velocity — killing a node
+is never a stop.
 
 **Emit:** lifecycle state of every node; `/cmd_vel` publisher count; a `ros2 bag` of goals 2–5
 covering `/cmd_vel_nav`, `/cmd_vel`, `/odom`, `/scan`, `/local_costmap/costmap`; tape-measured
 goal-reach error for goal 2; the recovery-behaviour edit.
 
-**Done when:** goals 1–4 complete with nobody touching the joystick (owner present); goal 5
-replans rather than aborting; `/cmd_vel` never shows two publishers; joystick pre-emption is
-demonstrated mid-goal and the robot yields the floor and then resumes.
+**Done when:** goals 1–4 complete with nobody touching the abort controls (owner present);
+goal 5 replans rather than aborting; `/cmd_vel` never shows two publishers; DISARM (and
+WASD, or joystick if input-plan B exists) pre-emption is demonstrated mid-goal and the
+robot yields the floor and then resumes.
 
 ### Phase 4 — `/goal_pose` publisher and click-to-nav on SpatialView
 
@@ -585,8 +595,9 @@ package it cannot discover):**
 
 1. Delete `robot/beast/ros2_ws/src/ugv_else/explore_lite/COLCON_IGNORE`.
 2. Add `explore_lite` to `build_common.sh`'s `PACKAGES` array **and** to `build_first.sh`'s
-   second `--packages-select` block; remove its entry from the parked list in the
-   `build_common.sh` header comment.
+   **first** `--packages-select` block (`ugv_else` / dependency-tier packages — cartographer,
+   ldlidar, …). It is **not** a `ugv_main` package; putting it in the second block is
+   wrong. Remove its entry from the parked list in the `build_common.sh` header comment.
 3. Update the parked list in `AGENTS.md` ("Currently parked: `vizanti` (5 packages),
    `ugv_web_app`, `explore_lite`, `emcl2`") and any `robot/beast/ros2_ws/docs/` mention.
 4. Build: `colcon build --packages-select explore_lite`. It is `ament_cmake` with
@@ -602,11 +613,11 @@ sector Phase 3 constrained.
 
 **Why this phase is cheap once Phase 3 is real:** `explore` is a `NavigateToPose` **action
 client**. It never touches `/goal_pose` and never touches `/cmd_vel` — it hands goals to
-`bt_navigator`, so the collision monitor, mux rung 10, `allow_motion` and joystick pre-emption
-all still apply unchanged.
+`bt_navigator`, so the collision monitor, mux rung 10, `allow_motion` and cockpit DISARM /
+WASD pre-emption all still apply unchanged.
 
 **First run:** SLAM in mapping mode **and** Nav2 both up, in **one room**, owner present with a
-hand on the joystick, `progress_timeout: 30.0` so a stuck frontier gives up. Do not turn it
+hand on cockpit DISARM, `progress_timeout: 30.0` so a stuck frontier gives up. Do not turn it
 loose in the house.
 
 **Done when:** `explore_lite` builds from a clean `build_first.sh`; the allowlists, the
@@ -647,9 +658,10 @@ Say this out loud rather than letting it be discovered.
 9. **One global map stem.** `/data/beast/maps/beast-map.*` plus timestamped backups. Multiple
    named spaces, and selecting one at Nav2 startup, is not built.
 10. **Even after F13's fix, an agent-issued cancel is one stop among three, not the stop.**
-    §4's order stands permanently: the joystick and the `allow_motion` disarm are the paths
-    that do not traverse a bridge, a parser, or a state machine. Any future design that makes
-    a software cancel the *primary* abort re-introduces exactly the class of failure F13 is.
+    §4's order stands permanently: cockpit DISARM (`allow_motion`) and WASD are the paths
+    that exist today and do not traverse a Nav2 cancel. A joystick is a path only after
+    input-plan B lands. Any future design that makes a software cancel the *primary* abort
+    re-introduces exactly the class of failure F13 is.
 
 ## 7. Rollback
 

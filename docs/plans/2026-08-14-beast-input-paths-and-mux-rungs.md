@@ -127,27 +127,32 @@ intents is a robot that jitters between two commands and an operator who cannot 
 one is winning.
 
 **That plan owns:** the intent→Twist mapping, the publish ticker and its rate, the
-release/stop semantics (the single zero Twist), the caps, and the `driveGateReason` gate.
+release/stop semantics (the multi-zero stop tail), the caps, and the `driveGateReason` gate.
+It **has landed** on main via #215 as `src/lib/ros/drive-law.ts`.
 
 **This plan owns:** a `useGamepad()` hook that produces normalized samples and **nothing
 else**. It must not call `rosClient.publish`, must not own a timer that publishes, and
 must not read `status.allowMotion`.
 
-**The interface between them.** A shared module — `src/lib/teleop/intent.ts` — exporting:
+**The interface between them.** Adopt the shipped types verbatim — do **not** invent a
+second intent module. Gamepad samples feed `DriveInput` / `composeTwist` from
+`src/lib/ros/drive-law.ts`:
 
 ```ts
+import type { DriveInput, DriveIntent } from '@/lib/ros/drive-law';
+import { composeTwist, LINEAR_MAX, ANGULAR_MAX } from '@/lib/ros/drive-law';
+
 export type IntentSource = 'wasd' | 'gamepad';
-export type DriveIntentSample = {
-  linearX: number;      // m/s, already capped
-  angularZ: number;     // rad/s, already capped
+export type DriveIntentSample = DriveIntent & {
   at: number;           // performance.now() of the sample
   source: IntentSource;
   neutral: boolean;     // true when both components are exactly 0
 };
 ```
 
-**If the WASD plan has already landed an equivalent type, adopt theirs verbatim and delete
-this paragraph. Do not create a second intent type.** Check before writing.
+Map stick deflection onto `DriveInput.held` (or call `composeTwist` after filling
+`held` / `rateIndex` / `boost`) so WASD and the pad share one law. **Do not create
+`src/lib/teleop/intent.ts`.**
 
 **Local arbitration (this plan defines it, the WASD plan's ticker consumes it).** The
 browser needs its own tiny arbiter *above* the publisher, because both sources sit on the
@@ -219,14 +224,13 @@ Create `src/lib/teleop/gamepad.ts` (pure, no React) and `src/lib/teleop/useGamep
    `EXPO = 0.6`. Monotonic, fixed points at 0 and ±1, so the cap still means the cap.
 5. **Axes.** Left stick: `axes[1]` → forward/back (**negate** — up is −1 in the standard
    mapping), `axes[0]` → yaw. Yaw sign must match the existing UI: in `CommandRail.tsx`,
-   left is `+ANGULAR_STEP` and right is `−ANGULAR_STEP`, so `angularZ = −expo(axes[0]) *
-   ANGULAR_CAP`. Ship an `invertAngular` toggle (vizanti has one for a reason) persisted
+   left is positive `angularZ` and right is negative, so `angularZ = −expo(axes[0]) *
+   ANGULAR_MAX`. Ship an `invertAngular` toggle (vizanti has one for a reason) persisted
    in `localStorage` under `beast.teleop.invertAngular`, defaulting **false**.
 6. **Caps are shared with WASD, in one constant.** The gamepad must not exceed the WASD
-   cap — an analog stick must never become a stealth speed increase. Import the caps from
-   the WASD plan's module; if it has not landed yet, mirror today's values
-   (`LINEAR_STEP = 0.2` m/s, `ANGULAR_STEP = 0.4` rad/s) and leave a `TODO` naming the
-   sibling plan. **Do not define a second pair of caps.**
+   cap — an analog stick must never become a stealth speed increase. Import `LINEAR_MAX`
+   / `ANGULAR_MAX` (and `composeTwist`) from `src/lib/ros/drive-law.ts`. Those shipped in
+   #215; there is no `LINEAR_STEP = 0.2` fallback. **Do not define a second pair of caps.**
 7. **Deadman, ON by default.** Intent is produced only while `buttons[5]` (RB) is held. A
    pad face-down on a desk with a drifting stick is a runaway, and there is no cmd_vel
    watchdog and no firmware timeout — the ESP32 latches (strip-down §2 fact 1). Expose it
