@@ -15,6 +15,7 @@ import {
 import { LAYERS } from './palette';
 import { ViewModeSwitch, HostSwitch, LayerBar } from './Controls';
 import { TwinCanvas } from './TwinCanvas';
+import { DriftBadge } from './DriftBadge';
 import { NetInspector } from './NetInspector';
 
 function useReducedMotion(): boolean {
@@ -126,6 +127,7 @@ export function ConnectedTwin({ variant = 'full' }: { variant?: 'full' | 'previe
 
       <div className="panel corner-bracket blueprint-grid relative h-[74vh] min-h-[520px] overflow-hidden">
         {canvas}
+        <DriftBadge layout={layout} terminals={terminals} />
         <NetInspector
           net={selectedNet}
           units={units}
