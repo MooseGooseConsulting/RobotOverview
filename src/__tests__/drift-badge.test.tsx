@@ -18,9 +18,11 @@ const orphan: Terminal = {
   name: 'Orphan port',
 };
 
-function renderFor(extra: Terminal[]) {
+function renderFor(extra: Terminal[], compact = false) {
   const all = [...terminals, ...extra];
-  return render(<DriftBadge layout={buildBoardLayout(units, all, nets)} terminals={all} />);
+  return render(
+    <DriftBadge layout={buildBoardLayout(units, all, nets)} terminals={all} compact={compact} />,
+  );
 }
 
 describe('DriftBadge', () => {
@@ -41,7 +43,7 @@ describe('DriftBadge', () => {
     // Each kind is reported under its own reason, by name rather than by id.
     expect(screen.getByText(/no authored edge/i)).toBeInTheDocument();
     expect(screen.getByText(/Ingested Orin port/)).toBeInTheDocument();
-    expect(screen.getByText(/unit has no place on this board/i)).toBeInTheDocument();
+    expect(screen.getByText(/unit has no place in this view/i)).toBeInTheDocument();
     expect(screen.getByText(/Orphan port/)).toBeInTheDocument();
   });
 
@@ -53,6 +55,16 @@ describe('DriftBadge', () => {
     fireEvent.click(screen.getByRole('button'));
     expect(screen.getByText(/no authored edge/i)).toBeInTheDocument();
     // Only the guessed section appears; nothing was dropped from the board.
-    expect(screen.queryByText(/unit has no place on this board/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/unit has no place in this view/i)).not.toBeInTheDocument();
+  });
+
+  it('shows the count but no detail in compact preview mode', () => {
+    // Unit pages render a 64px-tall preview with no room to expand. Silence
+    // there would hide drift on every unit page, so the count still shows.
+    renderFor([stray, orphan], true);
+    const button = screen.getByRole('button', { name: /2 unplaced terminals/i });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(screen.queryByText(/no authored edge/i)).not.toBeInTheDocument();
   });
 });
