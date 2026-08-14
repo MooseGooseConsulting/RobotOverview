@@ -2,7 +2,7 @@
 
 Optional features — **voice**, **Ollama LLM**, and **Web AI**. Not required for the core tutorial path ([Mapping](mapping.md) → [Navigation](navigation.md)).
 
-For the browser control UI (teleop, camera, mapping, navigation), see [Web App](web_app.md).
+For the browser control UI (teleop, camera, mapping, navigation), see [Web App](web_app.md) — **parked**, does not build; the browser surface we actually run is the Hangar cockpit ([Web Cockpit Bridge](cockpit.md)).
 
 Packages: **`ugv_voice`**, **`ugv_chat_ai`**, plus **`ugv_tools`** **`behavior_ctrl`** for Web AI motion.
 
@@ -153,7 +153,7 @@ Requires Ollama with **`qwen3:8b`**. Parsed JSON from the LLM is sent to **`beha
 
 | Chapter | What it adds |
 |---------|----------------|
-| [Web App](web_app.md) | Browser control & visualization (separate chapter) |
+| [Web App](web_app.md) | Browser control & visualization (separate chapter) — ***parked*** |
 | [Mapping](mapping.md) | SLAM stack |
 | [Navigation](navigation.md) | Nav2 (do not run with Web AI motion) |
 | [Keyboard & Gamepad Control](teleoperation.md) | Manual drive (stop before Web AI) |

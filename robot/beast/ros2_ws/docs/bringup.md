@@ -21,7 +21,7 @@ For ROS2 terms (nodes, topics), see [ROS2 Basics](ros2_basics.md).
 | Run **`bringup_lidar.launch.py` alone when…** | **Do not** |
 |-----------------------------------------------|------------|
 | Teleop-only ([Teleoperation](teleoperation.md)) | Run **`bringup_gazebo.launch.py`** or Gazebo on the **physical robot** — sim only: [Gazebo](gazebo.md) |
-| [Web App](web_app.md) teleop-only **T0** | Open a **second** bringup when [Mapping](mapping.md), [Navigation](navigation.md), or LiDAR / vision **`demo.launch.py`** already **includes** bringup |
+| [Web App](web_app.md) teleop-only **T0** *(parked — use the [cockpit](cockpit.md))* | Open a **second** bringup when [Mapping](mapping.md), [Navigation](navigation.md), or LiDAR / vision **`demo.launch.py`** already **includes** bringup |
 | [Experimental](experimental.md) voice tests (no chassis motion) | Run **`bringup_lidar`** and **`bringup_gazebo`** at the same time |
 
 Simulation workflows use **`ugv_gazebo`** — not this chapter. See [Gazebo — Boot simulated robot](gazebo.md#boot-simulated-robot).

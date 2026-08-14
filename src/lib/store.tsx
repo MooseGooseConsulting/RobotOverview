@@ -67,14 +67,18 @@ function readStoredSource(): SourcePreference {
   }
 }
 
-function readStoredLensMissionId(): string | null {
+function readStoredLensMissionId(missions: ReadonlyArray<{ id: string }>): string | null {
   if (typeof window === 'undefined') return null;
 
   try {
     const storedMissionId = window.localStorage.getItem(STORE_KEYS.lensMissionId);
     if (!storedMissionId) return null;
 
-    return hangarData.missions.some((mission) => mission.id === storedMissionId) ? storedMissionId : null;
+    // Validate against the missions the app is actually rendering (the live
+    // spine when Postgres answered) — NOT the stale-by-design hangarData
+    // fixture, which silently dropped saved lenses for missions that only
+    // exist in the database.
+    return missions.some((mission) => mission.id === storedMissionId) ? storedMissionId : null;
   } catch {
     return null;
   }
@@ -177,22 +181,6 @@ function isWishlistItem(item: WishlistItem | undefined): item is WishlistItem {
   return Boolean(item);
 }
 
-function inventoryReadStatusFor(
-  initialItems: InventoryItem[] | undefined,
-  initialInventoryRead: InventoryReadStatus | undefined,
-): InventoryReadStatus {
-  if (!initialInventoryRead) {
-    if (initialItems) return { source: 'postgres' };
-    return { source: 'static', fallbackReason: 'not-configured' };
-  }
-
-  if (initialInventoryRead.source === 'postgres' && !initialItems) {
-    return { source: 'static', fallbackReason: 'not-configured' };
-  }
-
-  return initialInventoryRead;
-}
-
 export function selectedMissionWishes(wishes: WishlistItem[]): WishlistItem[] {
   const selected = new Map<string, WishlistItem>();
 
@@ -272,23 +260,17 @@ export function HangarProvider({
   children,
   initialData,
   initialSpineRead,
-  initialItems,
-  initialInventoryRead,
   initialLibraryBaseUrl,
 }: {
   children: ReactNode;
   /** Postgres-first HangarData spine (falls back to hangar.ts when omitted). */
   initialData?: HangarData;
   initialSpineRead?: InventoryReadStatus;
-  /** @deprecated Prefer initialData.items from the spine snapshot. */
-  initialItems?: InventoryItem[];
-  /** @deprecated Prefer initialSpineRead. */
-  initialInventoryRead?: InventoryReadStatus;
   initialLibraryBaseUrl?: string | null;
 }) {
   const spine = initialData ?? hangarData;
   const [theme, setTheme] = useState<ThemeMode>(() => readStoredTheme());
-  const [lensMissionId, setLensMissionId] = useState<string | null>(() => readStoredLensMissionId());
+  const [lensMissionId, setLensMissionId] = useState<string | null>(() => readStoredLensMissionId(spine.missions));
   const [source, setSource] = useState<SourcePreference>(() => readStoredSource());
   const [spotlightId, setSpotlightId] = useState<string | null>(null);
   const [units, setUnits] = useState<Unit[]>(() => spine.units);
@@ -406,11 +388,9 @@ export function HangarProvider({
   };
 
   const value = useMemo<HangarStore>(() => {
-    const inventoryRead =
-      initialSpineRead ?? inventoryReadStatusFor(initialItems, initialInventoryRead);
+    const inventoryRead = initialSpineRead ?? { source: 'static' as const, fallbackReason: 'not-configured' as const };
     const data = {
       ...spine,
-      items: initialItems ?? spine.items,
       units,
     };
     const byId = <T extends { id: string }>(arr: T[]) => {
@@ -475,7 +455,7 @@ export function HangarProvider({
       openDrawer,
       closeDrawer,
     };
-  }, [theme, lensMissionId, source, spotlightId, units, spine, initialItems, initialInventoryRead, initialSpineRead, initialLibraryBaseUrl, objectiveOverrides, wishStatusOverrides, localInsights, drawerOpen, drawerSlotContext]);
+  }, [theme, lensMissionId, source, spotlightId, units, spine, initialSpineRead, initialLibraryBaseUrl, objectiveOverrides, wishStatusOverrides, localInsights, drawerOpen, drawerSlotContext]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

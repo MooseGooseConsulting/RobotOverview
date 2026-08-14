@@ -37,11 +37,11 @@ export {
   packSearchHaystack,
 };
 
-export type BriefingsRead = HangarReadStatus & {
+type BriefingsRead = HangarReadStatus & {
   briefings: DatacoreBriefingRow[];
 };
 
-export type PacksRead = HangarReadStatus & {
+type PacksRead = HangarReadStatus & {
   packs: DatacorePack[];
 };
 
@@ -114,8 +114,8 @@ function staticPacksFallback(
   };
 }
 
-/** DB-injectable: load all briefings from a Hangar Drizzle client. */
-export async function loadBriefingsFromDb(db: HangarDrizzle): Promise<DatacoreBriefingRow[]> {
+/** Load all briefings from a Hangar Drizzle client. */
+async function loadBriefingsFromDb(db: HangarDrizzle): Promise<DatacoreBriefingRow[]> {
   const rows = await db.select().from(briefings);
   const mapped: DatacoreBriefingRow[] = [];
   for (const row of rows) {
@@ -125,8 +125,8 @@ export async function loadBriefingsFromDb(db: HangarDrizzle): Promise<DatacoreBr
   return mapped;
 }
 
-/** DB-injectable: load all packs from a Hangar Drizzle client. */
-export async function loadPacksFromDb(db: HangarDrizzle): Promise<DatacorePack[]> {
+/** Load all packs from a Hangar Drizzle client. */
+async function loadPacksFromDb(db: HangarDrizzle): Promise<DatacorePack[]> {
   const rows = await db.select().from(briefingPacks);
   const mapped: DatacorePack[] = [];
   for (const row of rows) {
@@ -136,8 +136,8 @@ export async function loadPacksFromDb(db: HangarDrizzle): Promise<DatacorePack[]
   return mapped;
 }
 
-/** DB-injectable: load one briefing by id. */
-export async function loadBriefingFromDb(
+/** Load one briefing by id. */
+async function loadBriefingFromDb(
   db: HangarDrizzle,
   id: string,
 ): Promise<DatacoreBriefingRow | null> {

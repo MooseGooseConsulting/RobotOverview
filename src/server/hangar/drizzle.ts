@@ -21,8 +21,3 @@ export async function getHangarDrizzle(): Promise<HangarDrizzle | null> {
   boundPool = pool;
   return db;
 }
-
-export function resetHangarDrizzleForTests() {
-  db = null;
-  boundPool = null;
-}

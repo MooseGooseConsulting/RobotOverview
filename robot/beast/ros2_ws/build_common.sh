@@ -4,12 +4,28 @@ set -e
 WS=/home/ws/ugv_ws
 cd $WS || exit 1
 
+# Parked 2026-08-14 — these carry a COLCON_IGNORE and must NOT be listed here;
+# colcon errors on a selected package it cannot discover:
+#   vizanti, vizanti_cpp, vizanti_demos, vizanti_msgs, vizanti_server
+#     — the vizanti launch files opened an unauthenticated rosbridge on
+#       0.0.0.0:5001; neutralized 2026-08-07, not run since.
+#   ugv_web_app  — superseded by the Hangar cockpit (ugv_cockpit).
+#   explore_lite — standalone frontier-exploration workflow (docs/navigation.md);
+#                  no service we run launches it.
+#   emcl2        — alternative localizer. ugv_nav instantiates it only under
+#                  use_localization:=emcl (localization_launch.py), a mode we
+#                  do not use; that arg will fail while this is parked.
+# To bring one back: delete its COLCON_IGNORE and re-add the name below.
+#
+# cartographer stays built even though the robot maps with slam_toolbox (from
+# apt, see deploy/systemd/beast-slam.service): ugv_nav's localization_launch.py
+# calls get_package_share_directory('cartographer') unconditionally, so dropping
+# it breaks `ros2 launch ugv_nav nav.launch.py` for EVERY localization mode,
+# amcl included. Park it only together with a guard on that call.
 PACKAGES=(
   cartographer
   costmap_converter_msgs
   costmap_converter
-  emcl2
-  explore_lite
   gz_ros2_control
   openslam_gmapping
   slam_gmapping
@@ -18,11 +34,6 @@ PACKAGES=(
   robot_pose_publisher
   teb_msgs
   teb_local_planner
-  vizanti
-  vizanti_cpp
-  vizanti_demos
-  vizanti_msgs
-  vizanti_server
   ugv_msgs
   beast_power
   ugv_bringup
@@ -35,7 +46,6 @@ PACKAGES=(
   ugv_tools
   ugv_vision
   ugv_voice
-  ugv_web_app
 )
 
 echo "=============================="

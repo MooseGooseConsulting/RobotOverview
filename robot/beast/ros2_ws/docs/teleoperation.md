@@ -39,7 +39,7 @@ Two things to know before relying on it:
 - Teleop outranks every demo and Nav2, so you can take over at any time. But when you **stop driving**, teleop deliberately goes quiet — it sends a short burst of zero commands (5 messages) to stop the robot, then stops publishing so the rung is released. About 0.5 s later the lower-priority source has the floor again, and the robot drives off under the demo's control. **Stopping teleop is not stopping the robot.** Press **`Ctrl+C`** in the demo's terminal if you want it to stay stopped.
 - Two sources on the **same** rung (two UI surfaces, say) still interleave. That case is undefined.
 
-| | **Keyboard / gamepad** (this page) | **LiDAR demos** | **Nav2** | **Vision tracking** | **Web Teleop** | **Web AI** |
+| | **Keyboard / gamepad** (this page) | **LiDAR demos** | **Nav2** | **Vision tracking** | **Web Teleop** *(parked)* | **Web AI** |
 |---|-----|-----|-----|-----|-----|-----|
 | **Launch** | bringup + `keyboard_ctrl` or `teleop_twist_joy` | `ugv_slam` `demo.launch.py` | `ugv_nav` `nav.launch.py` | `ugv_vision` `demo.launch.py` | [Web App](web_app.md) `ugv_web_app` `bringup.launch.py` | [Experimental](experimental.md#web-ai) `behavior_ctrl` |
 | **Purpose** | Manual driving | Laser follow / guard / avoid | Autonomous navigation | Camera follow / gesture | Browser teleop widget | LLM open-loop moves |
@@ -49,7 +49,7 @@ Two things to know before relying on it:
 **Data path (hardware):** keyboard → **`/cmd_vel_joy_operator`** (priority 100) / gamepad → **`/cmd_vel_joy_robot`** (priority 150) → **`twist_mux`** → **`/cmd_vel`** → **`ugv_bringup`** → ESP32 → wheels.  
 Pan-tilt: keyboard or right stick → **`pt_joint_position_controller/commands`** (not arbitrated — the mux only handles velocity).
 
-**Also not direct `/cmd_vel`:** [Navigation — explore_lite](navigation.md#autonomous-exploration-explore_lite) in **T1** sends Nav2 goals while **T0** runs `nav.launch.py use_slam:=true`. Stop keyboard, gamepad, Web Teleop, and other motion nodes before **`explore_lite`** — motion still comes from Nav2 on **T0**.
+**Also not direct `/cmd_vel`:** [Navigation — explore_lite](navigation.md#autonomous-exploration-explore_lite) in **T1** sends Nav2 goals while **T0** runs `nav.launch.py use_slam:=true`. Stop keyboard, gamepad, Web Teleop, and other motion nodes before **`explore_lite`** — motion still comes from Nav2 on **T0**. **`explore_lite`** and **`ugv_web_app`** (Web Teleop) are both **parked** and will not launch — see [Package Reference](packages.md).
 
 ---
 

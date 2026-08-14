@@ -13,29 +13,14 @@ $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "refresh-windows-path.ps1")
 Update-BootstrapPath
+. (Join-Path $PSScriptRoot "ToolProfiles.ps1")
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
-$packageProfiles = @{
-    core = @(
-        @{ Command = "git"; Id = "Git.Git" },
-        @{ Command = "task"; Id = "Task.Task" }
-    )
-    dev = @(
-        @{ Command = "gh"; Id = "GitHub.cli" },
-        @{ Command = "gitleaks"; Id = "Gitleaks.Gitleaks" }
-    )
-    deploy = @(
-        @{ Command = "kubectl"; Id = "Kubernetes.kubectl" }
-    )
-}
-
 function Get-ProfilePackages([string]$SelectedProfile) {
-    if ($SelectedProfile -eq "all") {
-        return @($packageProfiles.core + $packageProfiles.dev + $packageProfiles.deploy)
-    }
-
-    return @($packageProfiles[$SelectedProfile])
+    # Only entries with a winget Id are installable here; commands like
+    # node/npm/pwsh are verify-only (see ToolProfiles.ps1).
+    return @(Get-ToolProfileEntries -SelectedProfile $SelectedProfile | Where-Object { $_.Id })
 }
 
 function Install-WingetPackageIfMissing([string]$Command, [string]$PackageId) {

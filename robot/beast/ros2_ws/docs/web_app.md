@@ -1,5 +1,10 @@
 # Web App
 
+!!! danger "Parked — nothing on this page builds or runs"
+    **`ugv_web_app`** and the five **`vizanti`** packages carry a `COLCON_IGNORE` and are off the allowlists in `build_common.sh` / `build_first.sh`, so every command below fails with *package not found*. `ugv_web_app` is superseded by the Hangar cockpit ([Web Cockpit Bridge](cockpit.md)); Vizanti's launch files also opened an unauthenticated rosbridge on **`0.0.0.0:5001`** — neutralized 2026-08-07, not run since.
+
+    To bring one back: delete that package's `COLCON_IGNORE` and re-add its name to the allowlists in `build_common.sh` / `build_first.sh`. The rest of this page describes the vendor capability as it stands in-tree.
+
 Browser-based control and visualization in **`ugv_web_app`** (Vizanti). Optional — not required for the core tutorial.
 
 Use it from a phone or PC when you want a web alternative to RViz: **teleop**, **camera feeds**, **map / scan / TF**, **Nav2 goals**, and **map save/load** — depending on which robot stack is already running.

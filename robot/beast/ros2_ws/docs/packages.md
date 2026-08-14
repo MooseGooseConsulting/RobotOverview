@@ -38,19 +38,22 @@ ugv_ws
 
 Auxiliary packages for LiDAR drivers, odometry, mapping, localization, planning, and web visualization.
 
+!!! warning "**Parked** rows do not build"
+    A parked package carries a `COLCON_IGNORE` and is off the allowlists in `build_common.sh` / `build_first.sh`, so `ros2 launch` / `ros2 run` on it fails with *package not found*. The source stays in-tree — to bring one back, delete its `COLCON_IGNORE` and re-add its name to both allowlists.
+
 | Package | Description |
 |---------|-------------|
 | `cartographer` | 2D SLAM and pure localization |
 | `costmap_converter` | Convert costmaps to polygons for local planners |
-| `emcl2_ros2` | EMCL Monte Carlo localization |
-| `explore_lite` | Autonomous frontier exploration — use with Nav2 **`use_slam:=true`**; see [Navigation — SLAM while navigating](navigation.md#slam-while-navigating) |
+| `emcl2_ros2` | **Parked** — EMCL Monte Carlo localization; package name is **`emcl2`**, not the directory name. Only reachable via **`use_localization:=emcl`**, a mode we do not use |
+| `explore_lite` | **Parked** — no service we run launches it. Autonomous frontier exploration — use with Nav2 **`use_slam:=true`**; see [Navigation — SLAM while navigating](navigation.md#slam-while-navigating) |
 | `gmapping` | 2D SLAM with GMapping |
 | `gz_ros2_control` | `ros2_control` integration with Gazebo Harmonic |
 | `ldlidar` | LD-series LiDAR driver |
 | `rf2o_laser_odometry` | Laser odometry (RF2O) |
 | `robot_pose_publisher` | Publish robot pose from TF |
 | `teb_local_planner` | Timed Elastic Band local planner |
-| `vizanti` | Web visualization and control UI |
+| `vizanti` | **Parked** — web visualization and control UI. Directory parks five packages (`vizanti`, `vizanti_cpp`, `vizanti_demos`, `vizanti_msgs`, `vizanti_server`); its launch files opened an unauthenticated rosbridge on **`0.0.0.0:5001`** |
 
 ---
 
@@ -58,8 +61,10 @@ Auxiliary packages for LiDAR drivers, odometry, mapping, localization, planning,
 
 | Package | Description |
 |---------|-------------|
+| `beast_power` | INA219 pack telemetry, SOC curve, durable CSV log and coulomb counter |
 | `ugv_bringup` | Motor control, wheel odometry, LiDAR bringup |
 | `ugv_chat_ai` | Flask web app with LLM task control |
+| `ugv_cockpit` | rosbridge bridge for the Hangar cockpit ([Web Cockpit Bridge](cockpit.md)) |
 | `ugv_description` | Xacro URDF and mesh files |
 | `ugv_gazebo` | Gazebo world and simulation launch files |
 | `ugv_msgs` | Custom messages, services, and actions |
@@ -68,7 +73,7 @@ Auxiliary packages for LiDAR drivers, odometry, mapping, localization, planning,
 | `ugv_tools` | Keyboard/gamepad teleop, behavior control |
 | `ugv_vision` | **`demo.launch.py`** (bringup + vision node; USB also starts `camera.launch.py`; OAK opens camera in-node); tracking, WebRTC preview |
 | `ugv_voice` | KWS, ASR, TTS, and voice chat |
-| `ugv_web_app` | Vizanti web app — teleop, visualization, Nav widgets ([Web App](web_app.md)) |
+| `ugv_web_app` | **Parked** — superseded by the Hangar cockpit (`ugv_cockpit`, [Web Cockpit Bridge](cockpit.md)). Vizanti web app — teleop, visualization, Nav widgets ([Web App](web_app.md)) |
 
 ---
 

@@ -50,9 +50,18 @@ This is one monorepo with two independently deployed surfaces:
 - BEAST-01 robot brain: `robot/beast/ros2_ws`, built on the Jetson with ROS 2 Humble.
 
 Robot changes are made, reviewed, and merged here. Do not recreate a `Coldaine/ugv_ws`
-fork or a second local clone. Fetch vendor changes directly from
-`waveshareteam/ugv_ws` and integrate them into the subtree. Never deploy the Hangar web
-app to the Jetson; sharing a repository does not collapse the runtime safety boundary.
+fork or a second local clone. Never deploy the Hangar web app to the Jetson; sharing a
+repository does not collapse the runtime safety boundary.
+
+`robot/beast/ros2_ws` is a vendored fork of `waveshareteam/ugv_ws`. We own it; normal
+delete/refactor rules apply. Before planning a vendor sync, run `find.ts subtree` —
+lineage and last-measured merge distance are recorded there, and both age.
+
+Do not delete a vendor package we don't run — **park** it: add a `COLCON_IGNORE` file to
+its directory **and** remove its name from the allowlists in `build_common.sh` /
+`build_first.sh` (colcon errors on a selected package it cannot discover). Re-enabling is
+then one file deletion. Currently parked: `vizanti` (5 packages), `ugv_web_app`,
+`explore_lite`, `emcl2`.
 
 Start here: [`README.md`](README.md) — what this repo is and where everything lives.
 Intent: [`docs/NORTH_STAR.md`](docs/NORTH_STAR.md) — a statement of intent, nearly frozen.

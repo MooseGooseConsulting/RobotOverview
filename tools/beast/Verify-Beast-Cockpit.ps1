@@ -25,6 +25,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/BeastEndpoints.ps1"
 $script:fail = 0
 
 function Write-Pass([string]$Message) { Write-Host "PASS  $Message" }
@@ -32,11 +33,7 @@ function Write-Fail([string]$Message) { Write-Host "FAIL  $Message"; $script:fai
 function Write-Warn([string]$Message) { Write-Host "WARN  $Message" }
 
 if ([string]::IsNullOrWhiteSpace($WsUrl)) {
-    $WsUrl = if (-not [string]::IsNullOrWhiteSpace($env:BEAST_COCKPIT_WS_URL)) {
-        $env:BEAST_COCKPIT_WS_URL.Trim()
-    } else {
-        'wss://beast-01.tyrannosaurus-magellanic.ts.net/'
-    }
+    $WsUrl = Get-BeastCockpitWsUrl
 }
 
 $uri = [Uri]$WsUrl
@@ -54,7 +51,7 @@ try {
         Write-Fail "TCP ${hostName}:${port} timed out after ${TimeoutSec}s"
         Write-Warn "Differential: if ssh beast-01-ts works → ACL missing tcp:443 or serve down."
         Write-Warn "If SSH also times out → robot/tailscaled offline (not an ACL regression)."
-        Write-Warn "ACL: doppler run --project homelab --config dev -- pwsh -File scripts/Verify-BeastCockpitAcl.ps1"
+        Write-Warn "ACL (from a coldaine-homelab checkout): doppler run --project homelab --config dev -- pwsh -File scripts/Verify-BeastCockpitAcl.ps1"
         Write-Warn "Serve: sudo systemctl start beast-cockpit-serve  (or beast-01-serve.sh)"
         exit 1
     }

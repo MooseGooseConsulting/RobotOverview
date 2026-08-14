@@ -101,7 +101,7 @@ For a **saved map** (2D **`map.yaml`** or RTAB-Map session / database). For **ma
 | Mode | **T0** | Notes |
 |------|--------|-------|
 | 2D (AMCL default) | `ros2 launch ugv_nav nav.launch.py use_rviz:=true use_sim_time:=true` | After 2D SLAM + **`save_map.sh`** — [Navigation](navigation.md) |
-| SLAM + Nav | `ros2 launch ugv_nav nav.launch.py use_rviz:=true use_sim_time:=true use_slam:=true` | **T1** *(optional)*: `ros2 launch explore_lite explore.launch.py use_sim_time:=true` · **T2:** `./save_map.sh` → **`3`** — [Navigation — SLAM while navigating](navigation.md#slam-while-navigating) |
+| SLAM + Nav | `ros2 launch ugv_nav nav.launch.py use_rviz:=true use_sim_time:=true use_slam:=true` | **T1** *(optional)*: `ros2 launch explore_lite explore.launch.py use_sim_time:=true` — **`explore_lite` is [parked](navigation.md#autonomous-exploration-explore_lite) and will not launch**; send **2D Goal Pose** in RViz instead · **T2:** `./save_map.sh` → **`3`** — [Navigation — SLAM while navigating](navigation.md#slam-while-navigating) |
 | RTAB-Map | `ros2 launch ugv_nav nav.launch.py use_rviz:=true use_sim_time:=true use_localization:=rtabmap` | **`view_nav_3d.rviz`** — [Navigation — RTAB-Map](navigation.md#rtab-map) |
 
 Stop teleop and motion demos before Nav2.

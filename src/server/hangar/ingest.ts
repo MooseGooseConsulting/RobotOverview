@@ -319,7 +319,7 @@ const landPackInput = z.object({
   topics: z.array(z.string()),
 });
 
-export const ingestBodySchema = z.discriminatedUnion('op', [
+const ingestBodySchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('append_insight'), input: appendInsightInput }),
   z.object({ op: z.literal('append_activity'), input: appendActivityInput }),
   z.object({ op: z.literal('patch_status'), input: patchStatusInput }),
@@ -334,10 +334,10 @@ export const ingestBodySchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('land_pack'), input: landPackInput }),
 ]);
 
-export type IngestBody = z.infer<typeof ingestBodySchema>;
-export type IngestOp = IngestBody['op'];
+type IngestBody = z.infer<typeof ingestBodySchema>;
+type IngestOp = IngestBody['op'];
 
-export type IngestResult = {
+type IngestResult = {
   ok: true;
   op: IngestOp;
   id: string;
@@ -496,7 +496,7 @@ export async function opAppendInsight(
   return input.id;
 }
 
-export async function opAppendActivity(
+async function opAppendActivity(
   db: IngestDb,
   input: z.infer<typeof appendActivityInput>,
 ): Promise<string> {
@@ -813,7 +813,7 @@ async function syncUnitLoadoutStructure(db: IngestDb, unit: Unit): Promise<void>
   }
 }
 
-export async function opLandUnit(db: IngestDb, unit: Unit): Promise<string> {
+async function opLandUnit(db: IngestDb, unit: Unit): Promise<string> {
   const kind = unit.loadout && unit.loadout.length ? 'system' : 'module';
   await db.transaction(async (tx) => {
     const t = tx as unknown as IngestDb;
@@ -917,7 +917,7 @@ export async function opLandUnit(db: IngestDb, unit: Unit): Promise<string> {
   return unit.id;
 }
 
-export async function opLandItem(db: IngestDb, item: InventoryItem): Promise<string> {
+async function opLandItem(db: IngestDb, item: InventoryItem): Promise<string> {
   const life =
     item.status === 'on-order' ? 'on-order' : item.status === 'owned' ? 'inventory' : null;
   await db.transaction(async (tx) => {
@@ -986,7 +986,7 @@ export async function opLandItem(db: IngestDb, item: InventoryItem): Promise<str
   return item.id;
 }
 
-export async function opLandWishlist(db: IngestDb, wi: WishlistItem): Promise<string> {
+async function opLandWishlist(db: IngestDb, wi: WishlistItem): Promise<string> {
   if (wi.forUnit) {
     const missing = await assertAssetsExist(db, [wi.forUnit]);
     if (missing.length) {
@@ -1146,7 +1146,7 @@ export async function opLandMission(db: IngestDb, mission: Mission): Promise<str
   return mission.id;
 }
 
-export async function opLandDocument(db: IngestDb, doc: DocumentRef): Promise<string> {
+async function opLandDocument(db: IngestDb, doc: DocumentRef): Promise<string> {
   const unitIds = doc.units ?? [];
   const missingUnits = await assertAssetsExist(db, unitIds);
   if (missingUnits.length) {

@@ -202,12 +202,11 @@ colcon build \
   --packages-select \
     cartographer \
     costmap_converter_msgs costmap_converter \
-    emcl2 explore_lite gz_ros2_control \
+    gz_ros2_control \
     openslam_gmapping slam_gmapping \
     ldlidar rf2o_laser_odometry \
     robot_pose_publisher \
     teb_msgs teb_local_planner \
-    vizanti vizanti_cpp vizanti_demos vizanti_msgs vizanti_server \
     ugv_msgs \
   --symlink-install \
   --executor sequential
@@ -215,7 +214,7 @@ colcon build \
 colcon build \
   --packages-select \
     ugv_bringup ugv_cockpit ugv_chat_ai ugv_description ugv_gazebo \
-    beast_power ugv_nav ugv_slam ugv_tools ugv_vision ugv_voice ugv_web_app \
+    beast_power ugv_nav ugv_slam ugv_tools ugv_vision ugv_voice \
   --symlink-install \
   --executor sequential
 
