@@ -133,13 +133,18 @@ psql … -f db/hangar/seed.sql
 
 ## Known gaps
 
-- **The robot's auto-deploy is built but not yet armed.** The source-mode agent
-  (`robot/beast/ros2_ws/deploy/bin/beast-pull` + hourly timer, following
-  `refs/deploy/beast-01`, advanced by `deploy-pin.yml`'s `deploy-ref` job after the
-  test gate) ships in-tree as of 2026-08-14; the timer stays **masked** until the
-  supervised rollout (watched first swap, forced-rollback proof, parked-gate proof)
-  passes and the owner reinstalls `/etc/sudoers.d/beast-ops` from the tree. Until
-  then, deploy the robot with `robot/beast/ros2_ws/deploy/deploy-to-beast.sh`.
+- **The robot's auto-deploy is proven but awaits one owner action to arm.** The
+  source-mode agent (`robot/beast/ros2_ws/deploy/bin/beast-pull` + hourly timer,
+  following `refs/deploy/beast-01`, advanced by `deploy-pin.yml`'s `deploy-ref`
+  job after the test gate) passed its full supervised rollout on 2026-08-14:
+  watched first swap (verify 15/15), forced-rollback proof (broken commit →
+  rollback → verified → failed-target remembered), and parked-gate proof
+  (commanded `/cmd_vel` while disarmed → deploy skipped, journal-verified
+  motion-free). Remaining step **R5, owner-only**: reinstall
+  `/etc/sudoers.d/beast-ops` from the tree (`deploy/bin/install-beast-sudoers.sh`),
+  `systemctl enable --now beast-pull.timer`, and remove
+  `/data/beast/deploy/pull-hold` — details in `docs/beast-ops.md` Quick connect.
+  Until then a merge reaches the robot only via a supervised manual tick.
   The homelab `deployments/beast-01/manifest.yaml` pin is provenance only — the
   robot deploys from source and reads neither the manifest nor the GHCR image.
 - Wiki catalog objects are fresh 2026-08-10 HTML captures (hashes unset in the upload source

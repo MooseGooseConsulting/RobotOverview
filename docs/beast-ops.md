@@ -7,6 +7,32 @@ re-verify against the live robot before relying on anything stale.
 
 ## Quick connect
 
+**Shakedown: first autonomous navigation 2026-08-14 ~20:45Z (live):** Robot ran
+the whole session **untethered** (Ethernet + charger unplugged ~19:48Z) and was
+parked at **10.88 V (~3.6 V/cell) — plug the charger back in.** Supervised tick
+deployed `7578a11` (5 packages incl. `ugv_nav`, 17 units incl. the new
+`beast-nav`, verify 15/15 PASS); the forced-rollback proof R3 landed earlier the
+same day (evidence on PR #229). **Nav2 first light** (PR #230): navigation layer
+launched ALONE via `ugv_nav navigation_launch.py use_composition:=False` against
+live `beast-slam` — never `nav2_bringup.launch.py`, which double-starts
+localization in either mode (unit header has the reasoning). Goal ladder: goal
+at current pose ✓ (no motion), 1.0 m ✓ (**4.2 cm error**, scan-confirmed
+1.034 m actual), and a mid-goal **DISARM halted the robot in <1 s** with the BT
+aborting server-side ~9 s later and re-arm producing zero motion. `beast-nav`
+is installed but **never enabled** (no `[Install]`, `Restart=no`), hand-start
+only; deploys stop it and leave it down. Calibration verdicts (bags in
+`/data/beast/calib/`, insights in Hangar): `wheel_base` is fine (b_eff within
+2 %), rf2o/EKF yaw within 2 % of scan-registration truth, and the **gyro is
+NOT a constant scale** (stick-slip aliasing — do not land a scale fix).
+SLAM lesson: a continuous 3-turn spin **silently wedges slam_toolbox at its
+initial pose** (20°/match budget); restart recovers — turn slowly when mapping.
+Open check: the parking restart did not refresh `/data/beast/maps/beast-map.*`
+timestamps — verify `beast-slam-save` fires on ExecStop next session. Parked
+state: base+cockpit+slam active, nav inactive, deploy hold present, armed,
+detached HEAD `7578a11`. R5 (sudoers reinstall — now also delivers the
+`beast-nav` verbs — plus `enable --now beast-pull.timer` and hold removal)
+remains the one owner action.
+
 **Unattended deploy LIVE + SLAM converged 2026-08-14 ~19:35Z (live):** First
 production `beast-pull` deploy executed supervised: `refs/deploy/beast-01`
 (`ff13bca`) fetched anonymously, 4 boot-path packages rebuilt (14.6 s), 16

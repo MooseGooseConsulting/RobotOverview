@@ -1,9 +1,30 @@
 # BEAST-01 autonomy on-ramp — from teleop to navigating a space (Phases 0–5)
 
-Status: **Not started.** Written 2026-08-14 from a read-only live session on BEAST-01
-(`ssh beast-01-ts`) plus a Hangar DB sweep. Nothing below has been executed. The session
-that wrote this started no service, published to no `cmd_vel` or goal topic, and caused no
-motion; **every phase step that moves the robot is written as owner-supervised** and says so.
+Status: **Partially executed 2026-08-14 (same-day shakedown).** Phase 0 landed earlier
+(#226/#229: time-sync ordering, fresh-by-default + resume flag — NOT resume-by-default as
+this plan assumed), Phase 1 was **measured**, and Phase 3 reached **first light** (PR #230,
+owner-authorized session). Facts below that changed, verified live — the Hangar insights
+`ins-beast-odom-calibration-2026-08-14`, `ins-beast-gyro-stick-slip-aliasing-2026-08-14`,
+`ins-beast-nav2-first-light-2026-08-14`, `ins-beast-slam-spin-wedge-2026-08-14` carry the data:
+
+- **§5 Phase 3's bringup command is superseded.** `nav2_bringup.launch.py` double-starts
+  localization against a live `beast-slam` in *either* `use_slam` mode; the verified
+  nav-layer-only path is `navigation_launch.py use_composition:=False` —
+  `deploy/systemd/beast-nav.service`'s header is the source of truth.
+- **§2's calibration expectations were wrong in two places:** measured `b_eff`
+  (0.141–0.144 m) is within 2 % of the existing `wheel_base` — no change needed; and the
+  gyro error is **not a scale constant** (0.79× on a short jog vs 1.34× on sustained spins
+  — stick-slip aliasing). Do **not** land a gyro LSB "fix"; rf2o-dominant EKF yaw tracked
+  scan-registration truth within 0.4–2.7 %. `bias_z = −0.003 rad/s` (small) remains open.
+- **§5 Phase 2 "turn slowly" is load-bearing:** a continuous 3-turn spin silently wedged
+  `slam_toolbox` at its initial pose (map frozen, `map→odom` identity, node alive).
+- Executed first goals: current-pose ✓, 1.0 m ✓ (4.2 cm error), mid-goal DISARM
+  preemption ✓ (halt <1 s, server-side abort). Remaining: Phase 2 (real mapping run),
+  Phase 3 goals 4–5 (doorway, replanning), Phases 4–5 wholesale — still gated as written.
+
+Originally written 2026-08-14 from a read-only live session on BEAST-01
+(`ssh beast-01-ts`) plus a Hangar DB sweep.
+**Every phase step that moves the robot is owner-supervised** and says so.
 
 This is a **work order**, not a record of reasoning: it names inputs, exact changes, what to
 emit, and how to tell when each phase is done. **Code is truth** — if this document and the
