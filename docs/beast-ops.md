@@ -33,8 +33,19 @@ QoS is not the bug (LD19 RELIABLE, rosbridge BEST_EFFORT). Client now defers
 `/scan` then 119 frames / 12 s. SpatialView: front wall ~0.77 m up, rear-mast
 wedge down (`feat/cockpit-map-render` @ `ff87c3f`, +90° body yaw). **No
 pre-01:09 posegraph backup** under `/data/beast/maps` or siblings — do not
-treat the NVMe files as the 15:19 map. `power-log.csv` still stuck at
-**22:19:15Z**.
+treat the NVMe files as the 15:19 map.
+
+**Deploy 2026-08-14 01:35Z (live):** Robot checkout is
+`feat/cockpit-map-render` @ **`ace52b8`** (OLED-first `beast_audio` + deploy
+script can push an unpushed local ref). `topics_sub_glob` still admits
+`/scan` `/tf` and **denies `/map`**. `beast-wifi-watch` still `iw event -t -f`
+(installed binary == git). `beast-slam` was **not** restarted (stayed
+active). `beast-ros-base` + `beast-cockpit` restarted; 443→9090 up. Running
+`beast_audio` writes OLED T:3 **before** `spd-say`. Live crop env still
+218–322 (not in this tree’s `ugv.env.example`). Untracked leftovers still
+on disk: slam unit/config + `beast-wifi-telemetry` (not in this branch).
+`power-log.csv` resumed after the **ros-base** restart (not slam) — do not
+treat that as a slam fix. `/ugv/voltage` ~10.86 V at verify.
 
 **Clock hardening (2026-08-10):** The Orin Nano dev kit has no RTC battery —
 cold boot starts at epoch 0. `tailscaled` started before NTP synced, rejected

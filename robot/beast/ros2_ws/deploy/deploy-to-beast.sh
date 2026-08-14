@@ -484,10 +484,11 @@ install_bin_if_needed() {
 }
 install_bin_if_needed "\$ws/deploy/bin/beast-wifi-watch" /usr/local/sbin/beast-wifi-watch
 install_bin_if_needed "\$ws/deploy/bin/beast-link-watch" /usr/local/sbin/beast-link-watch
-sudo -n systemctl daemon-reload
-sudo -n systemctl try-restart beast-wifi-watch
-sudo -n systemctl restart beast-ros-base
-sudo -n systemctl try-restart beast-cockpit
+sudo -n /usr/bin/systemctl daemon-reload
+# wifi-watch binary already matched the tree above; do not restart it
+# (older sudoers copies may lack try-restart beast-wifi-watch).
+sudo -n /usr/bin/systemctl restart beast-ros-base
+sudo -n /usr/bin/systemctl try-restart beast-cockpit
 # Deliberately not: beast-slam
 sleep 20
 REMOTE
