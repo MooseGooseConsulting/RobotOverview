@@ -14,8 +14,10 @@ Documentation=file:///home/beast/beast/RobotOverview/robot/beast/ros2_ws/docs/co
 # time-sync.target: on a cold boot this unit used to start at epoch 0
 # (fake-hwclock), then die with karto::Exception when NTP jumped the clock —
 # journalctl showed a launch-log dir dated 1969-12-31. Same fix pattern as
-# deploy/systemd/tailscaled.service.d/time-sync.conf.
-After=beast-ros-base.service network-online.target time-sync.target
+# deploy/systemd/tailscaled.service.d/time-sync.conf, including its explicit
+# systemd-timesyncd.service ordering: time-sync.target alone does not
+# guarantee the sync daemon was even started first.
+After=beast-ros-base.service network-online.target time-sync.target systemd-timesyncd.service
 Wants=beast-ros-base.service time-sync.target
 ConditionPathExists=/opt/ros/humble/share/slam_toolbox/launch/online_async_launch.py
 
@@ -28,6 +30,12 @@ Group=beast
 WorkingDirectory=/home/beast/beast/RobotOverview/robot/beast/ros2_ws
 EnvironmentFile=-/etc/beast/ugv.env
 Environment=PYTHONUNBUFFERED=1
+# Same guard as beast-ros-base/beast-cockpit: the sudoers allowlist lets an
+# operator (or a boot) start this unit while beast-pull is mid-rebuild — and
+# SLAM launched onto a half-built workspace maps garbage. The guard makes it
+# fail loudly instead until the deploy marker clears. (sh has no login-shell
+# baggage; the guard needs no ROS env.)
+ExecStartPre=/bin/sh -c 'exec /home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-deploy-guard'
 # FRESH by default; resume is opt-in via the /data/beast/maps/resume flag.
 # Resume-by-default crash-looped this unit 397 times on 2026-08-14: the node
 # segfaulted seconds after deserializing the 6.4 MB posegraph, and slam_toolbox
