@@ -259,9 +259,9 @@ install_bin_if_needed "\$ws/deploy/bin/beast-wifi-telemetry" /usr/local/sbin/bea
 sudo -n /usr/bin/systemctl daemon-reload
 # wifi-watch binary already matched the tree above; do not restart it
 # (older sudoers copies may lack try-restart beast-wifi-watch).
-sudo -n /usr/bin/systemctl enable --now beast-wifi-telemetry.timer
-sudo -n /usr/bin/systemctl restart beast-ros-base
-sudo -n /usr/bin/systemctl try-restart beast-cockpit
+sudo -n /usr/local/sbin/beast-ctl enable --now beast-wifi-telemetry.timer
+sudo -n /usr/local/sbin/beast-ctl restart beast-ros-base
+sudo -n /usr/local/sbin/beast-ctl try-restart beast-cockpit
 # Deliberately not: beast-slam
 sleep 20
 # exit 2 is a deliberate sentinel: everything allowlisted succeeded, but at
@@ -287,11 +287,11 @@ elif [ "$pw_rc" -eq 2 ] && resolve_break_glass_sudo; then
     && sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-slam-save /usr/local/sbin/beast-slam-save \
     && sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-wifi-telemetry /usr/local/sbin/beast-wifi-telemetry \
     && sudo -n /usr/local/sbin/beast-install-systemd-units \
-    && sudo -n systemctl daemon-reload \
-    && sudo -n systemctl enable --now beast-wifi-telemetry.timer \
-    && sudo -n systemctl try-restart beast-wifi-watch \
-    && sudo -n systemctl restart beast-ros-base \
-    && sudo -n systemctl try-restart beast-cockpit \
+    && sudo -n /usr/bin/systemctl daemon-reload \
+    && sudo -n /usr/local/sbin/beast-ctl enable --now beast-wifi-telemetry.timer \
+    && sudo -n /usr/local/sbin/beast-ctl try-restart beast-wifi-watch \
+    && sudo -n /usr/local/sbin/beast-ctl restart beast-ros-base \
+    && sudo -n /usr/local/sbin/beast-ctl try-restart beast-cockpit \
     && sleep 20"
   printf '%s\n' "$sudo_pw" \
     | ssh "${ssh_opts[@]}" "$HOST" "sudo -S -p '' -v && $remote_break_glass"

@@ -61,7 +61,12 @@ Write-Host "PASS  SSH $sshHost"
 
 # Prefer scoped passwordless sudo (/etc/sudoers.d/beast-ops). Doppler only if -n fails.
 $needPw = $true
-$probe = & ssh -o BatchMode=yes -o ConnectTimeout=10 $sshHost 'sudo -n true 2>/dev/null; sudo -n systemctl is-active beast-cockpit >/dev/null 2>&1; echo $?'
+# Probe with `beast-ctl policy`: it is the one call that proves the whole
+# privilege path (wrapper installed at the root-owned path AND named by
+# sudoers) while touching no systemd and mutating nothing. Probing with
+# `is-active` would conflate "no passwordless sudo" with "unit is stopped"
+# and send us to fetch the break-glass password for no reason.
+$probe = & ssh -o BatchMode=yes -o ConnectTimeout=10 $sshHost 'sudo -n true 2>/dev/null; sudo -n /usr/local/sbin/beast-ctl policy >/dev/null 2>&1; echo $?'
 if ($probe -match '0') {
     $needPw = $false
     Write-Host 'sudo: passwordless beast-ops allowlist'
@@ -94,13 +99,13 @@ if systemctl is-active --quiet beast-cockpit; then
   ok "beast-cockpit active"
 else
   warn "starting beast-cockpit"
-  sudo -n systemctl start beast-cockpit 2>/dev/null || sudo systemctl start beast-cockpit
+  sudo -n /usr/local/sbin/beast-ctl start beast-cockpit 2>/dev/null || sudo systemctl start beast-cockpit
   systemctl is-active --quiet beast-cockpit && ok "beast-cockpit started" || bad "beast-cockpit failed to start"
 fi
 
 # restart (not start): RemainAfterExit oneshot ignores start while already active
 if systemctl cat beast-cockpit-serve.service >/dev/null 2>&1; then
-  sudo -n systemctl restart beast-cockpit-serve.service 2>/dev/null \
+  sudo -n /usr/local/sbin/beast-ctl restart beast-cockpit-serve.service 2>/dev/null \
     || sudo systemctl restart beast-cockpit-serve.service || true
 fi
 

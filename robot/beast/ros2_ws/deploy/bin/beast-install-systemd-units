@@ -21,19 +21,26 @@ install -m 0644 "${units[@]}" /etc/systemd/system/
 systemctl daemon-reload
 echo "installed ${#units[@]} unit(s) from $SRC"
 
-# Re-install THIS script from the tree while we already hold root. The sudoers
-# grant names the /usr/local/sbin copy, which nothing else on the unattended
-# path can update — without this, a deploy that fixes the installer ships the
-# fix into the checkout and keeps executing the stale binary forever (the
-# other deploy/bin helpers are invoked from the checkout and do not have this
-# problem). Compare first so the common case stays a no-op, and note the
-# refresh takes effect on the NEXT invocation, not this one.
-self_src="$WS_DIR/deploy/bin/beast-install-systemd-units"
-self_dst="/usr/local/sbin/beast-install-systemd-units"
-if [ -f "$self_src" ] && ! cmp -s "$self_src" "$self_dst"; then
-  install -m 0755 "$self_src" "$self_dst"
-  echo "refreshed $self_dst from the tree (takes effect next run)"
-fi
+# Re-install the root-invoked helpers from the tree while we already hold root.
+# The sudoers grant names their /usr/local/sbin copies, which nothing else on
+# the unattended path can update — without this, a deploy that fixes one of
+# them ships the fix into the checkout and keeps executing the stale binary
+# forever. Compare first so the common case stays a no-op, and note a refresh
+# takes effect on the NEXT invocation, not this one.
+#
+# beast-ctl belongs here for a second, sharper reason: it MUST NOT be executed
+# from the checkout at all. /home/beast is writable by `beast`, so a sudoers
+# entry pointing into the tree would let that user rewrite its own privilege
+# policy. The /usr/local/sbin copy is the only one that is ever run, which is
+# exactly why it is also the only one that can go stale.
+for helper in beast-install-systemd-units beast-ctl; do
+  h_src="$WS_DIR/deploy/bin/$helper"
+  h_dst="/usr/local/sbin/$helper"
+  if [ -f "$h_src" ] && ! cmp -s "$h_src" "$h_dst"; then
+    install -m 0755 -o root -g root "$h_src" "$h_dst"
+    echo "refreshed $h_dst from the tree (takes effect next run)"
+  fi
+done
 
 # Copy-only, deliberately: this installer never deletes. A beast-* unit that
 # exists in /etc/systemd/system but not in the tree is either mid-rename

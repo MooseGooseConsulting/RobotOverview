@@ -167,6 +167,28 @@ fi
 
 mkdir -p "$STATE_DIR" || die "cannot create $STATE_DIR"
 
+# ------------------------------------------------------ beast-ctl gate ----
+# Every unit operation below goes through sudo -n /usr/local/sbin/beast-ctl.
+# Prove that path works BEFORE anything destructive, because the first thing
+# checkout_build_restart does is stop beast-ros-base — and if the privilege
+# path is broken, the stop fails, the rollback leg calls the same broken
+# command, and an unattended tick ends in a self-hold with the stack down.
+#
+# Two ways it breaks in practice, both during rollout: /usr/local/sbin/beast-ctl
+# is not installed yet, or the robot still carries the pre-beast-ctl sudoers
+# that never named it. `beast-ctl policy` is the right probe — it touches no
+# systemd, mutates nothing, and exits 0 iff the binary is present at the
+# root-owned path AND sudoers grants it passwordlessly. Exiting 0 here (not
+# die) is deliberate: a robot mid-migration should idle until the operator
+# lands the new sudoers, not burn its recovery budget once an hour.
+if ! sudo -n /usr/local/sbin/beast-ctl policy >/dev/null 2>&1; then
+  log "sudo -n /usr/local/sbin/beast-ctl is unavailable; refusing to deploy."
+  log "The robot is mid-migration: install the wrapper + sudoers with"
+  log "  sudo $WS_DIR/deploy/bin/install-beast-sudoers.sh"
+  log "Nothing was stopped or checked out. Retrying next tick."
+  exit 0
+fi
+
 # ------------------------------------------------------------ ros setup ----
 # ROS setup scripts reference unbound vars (AMENT_TRACE_SETUP_FILES et al.),
 # so -u must actually be OFF while sourcing — under set -u the first source
@@ -454,9 +476,9 @@ checkout_build_restart() {
   # probing here would make the rollback leg read the cockpit the FORWARD leg
   # just stopped as "inactive", skip its restart, and beast-verify would then
   # fail an otherwise clean rollback into a self-hold with the UI down.
-  sudo -n /usr/bin/systemctl stop beast-ros-base || return 1
+  sudo -n /usr/local/sbin/beast-ctl stop beast-ros-base || return 1
   if [ "$cockpit_active" = 1 ]; then
-    sudo -n /usr/bin/systemctl stop beast-cockpit || return 1
+    sudo -n /usr/local/sbin/beast-ctl stop beast-cockpit || return 1
   fi
   # beast-nav shares this workspace but is a hand-started supervised unit: a
   # nav session momentarily stationary passes the motion gate, and a live
@@ -466,7 +488,7 @@ checkout_build_restart() {
   # restart it below — deploys leave nav DOWN by design; the owner starts it
   # again by hand.
   log "stopping beast-nav (never survives a workspace swap; deploys leave nav down)"
-  sudo -n /usr/bin/systemctl stop beast-nav \
+  sudo -n /usr/local/sbin/beast-ctl stop beast-nav \
     || log "beast-nav stop failed or unit absent; continuing"
 
   # The marker's lifetime IS the inconsistency window: created just before the
@@ -552,11 +574,11 @@ checkout_build_restart() {
 
   # These verbs are already in /etc/sudoers.d/beast-ops; no new grant needed.
   # beast-nav is deliberately NOT restarted here — see the stop above.
-  sudo -n /usr/bin/systemctl restart beast-ros-base || return 1
+  sudo -n /usr/local/sbin/beast-ctl restart beast-ros-base || return 1
   if [ "$cockpit_active" = 1 ]; then
     # restart, not try-restart: WE stopped it above, so try-restart on the now
     # stopped unit would silently never bring the cockpit back.
-    sudo -n /usr/bin/systemctl restart beast-cockpit || return 1
+    sudo -n /usr/local/sbin/beast-ctl restart beast-cockpit || return 1
   fi
   sleep 20
 }

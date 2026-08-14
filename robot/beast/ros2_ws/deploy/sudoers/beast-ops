@@ -3,208 +3,26 @@
 # Intentionally NOT NOPASSWD:ALL — only the ops agents/scripts already automate.
 # Doppler BEAST_JETSON_ADMIN_PASSWORD remains break-glass / bootstrap only.
 #
-# Unit names listed both bare and with .service — systemctl accepts either.
-# Wildcards cover enable --now / disable --now variants.
+# Unit operations go through /usr/local/sbin/beast-ctl, NOT through a
+# systemctl allowlist. sudoers matches the entire command line literally, so
+# expressing per-unit policy here cost 193 lines of (verb x unit x .service x
+# flag) and was still full of holes — `is-enabled beast-wifi-telemetry.timer`
+# was refused while `enable` on the same unit was allowed, and `list-timers X`
+# needed a second entry just to also permit `--no-pager`. The policy now lives
+# in beast-ctl's table where it is greppable, reviewable, and unit-tested by
+# tools/ci/test_beast_ctl.py. beast-ctl default-denies: unknown verb, unknown
+# unit, or unknown flag exits 2 with no passthrough path.
 #
-# beast-nav is deliberately start/stop/status/is-active ONLY (no comment can
-# sit inside the alias without breaking the line continuation, so it is said
-# here): no enable/disable — the unit has no [Install] section and the
-# never-enable contract (owner-supervised sessions only) is enforced in this
-# file too; no restart — a nav session that died stays down until a human
-# starts it again.
+# The wildcard below is safe ONLY because beast-ctl validates every argument
+# itself and execs systemctl with an explicit argv array. It is also why
+# beast-ctl must live in root-owned /usr/local/sbin and never be run from the
+# repo checkout — /home/beast is writable by `beast`, so allowlisting a path
+# under it would be a trivial root escalation.
 
-Cmnd_Alias BEAST_SYSTEMCTL = \
-    /usr/bin/systemctl start beast-ros-base, \
-    /usr/bin/systemctl start beast-ros-base.service, \
-    /usr/bin/systemctl stop beast-ros-base, \
-    /usr/bin/systemctl stop beast-ros-base.service, \
-    /usr/bin/systemctl restart beast-ros-base, \
-    /usr/bin/systemctl restart beast-ros-base.service, \
-    /usr/bin/systemctl try-restart beast-ros-base, \
-    /usr/bin/systemctl try-restart beast-ros-base.service, \
-    /usr/bin/systemctl status beast-ros-base, \
-    /usr/bin/systemctl status beast-ros-base.service, \
-    /usr/bin/systemctl is-active beast-ros-base, \
-    /usr/bin/systemctl is-active beast-ros-base.service, \
-    /usr/bin/systemctl is-enabled beast-ros-base, \
-    /usr/bin/systemctl is-enabled beast-ros-base.service, \
-    /usr/bin/systemctl enable beast-ros-base, \
-    /usr/bin/systemctl enable beast-ros-base.service, \
-    /usr/bin/systemctl enable --now beast-ros-base, \
-    /usr/bin/systemctl enable --now beast-ros-base.service, \
-    /usr/bin/systemctl disable beast-ros-base, \
-    /usr/bin/systemctl disable beast-ros-base.service, \
-    /usr/bin/systemctl disable --now beast-ros-base, \
-    /usr/bin/systemctl disable --now beast-ros-base.service, \
-    /usr/bin/systemctl start beast-cockpit, \
-    /usr/bin/systemctl start beast-cockpit.service, \
-    /usr/bin/systemctl stop beast-cockpit, \
-    /usr/bin/systemctl stop beast-cockpit.service, \
-    /usr/bin/systemctl restart beast-cockpit, \
-    /usr/bin/systemctl restart beast-cockpit.service, \
-    /usr/bin/systemctl try-restart beast-cockpit, \
-    /usr/bin/systemctl try-restart beast-cockpit.service, \
-    /usr/bin/systemctl status beast-cockpit, \
-    /usr/bin/systemctl status beast-cockpit.service, \
-    /usr/bin/systemctl is-active beast-cockpit, \
-    /usr/bin/systemctl is-active beast-cockpit.service, \
-    /usr/bin/systemctl is-active --quiet beast-cockpit, \
-    /usr/bin/systemctl is-active --quiet beast-cockpit.service, \
-    /usr/bin/systemctl is-enabled beast-cockpit, \
-    /usr/bin/systemctl is-enabled beast-cockpit.service, \
-    /usr/bin/systemctl enable beast-cockpit, \
-    /usr/bin/systemctl enable beast-cockpit.service, \
-    /usr/bin/systemctl enable --now beast-cockpit, \
-    /usr/bin/systemctl enable --now beast-cockpit.service, \
-    /usr/bin/systemctl disable beast-cockpit, \
-    /usr/bin/systemctl disable beast-cockpit.service, \
-    /usr/bin/systemctl disable --now beast-cockpit, \
-    /usr/bin/systemctl disable --now beast-cockpit.service, \
-    /usr/bin/systemctl start beast-cockpit-serve, \
-    /usr/bin/systemctl start beast-cockpit-serve.service, \
-    /usr/bin/systemctl stop beast-cockpit-serve, \
-    /usr/bin/systemctl stop beast-cockpit-serve.service, \
-    /usr/bin/systemctl restart beast-cockpit-serve, \
-    /usr/bin/systemctl restart beast-cockpit-serve.service, \
-    /usr/bin/systemctl try-restart beast-cockpit-serve, \
-    /usr/bin/systemctl try-restart beast-cockpit-serve.service, \
-    /usr/bin/systemctl status beast-cockpit-serve, \
-    /usr/bin/systemctl status beast-cockpit-serve.service, \
-    /usr/bin/systemctl is-active beast-cockpit-serve, \
-    /usr/bin/systemctl is-active beast-cockpit-serve.service, \
-    /usr/bin/systemctl is-enabled beast-cockpit-serve, \
-    /usr/bin/systemctl is-enabled beast-cockpit-serve.service, \
-    /usr/bin/systemctl enable beast-cockpit-serve, \
-    /usr/bin/systemctl enable beast-cockpit-serve.service, \
-    /usr/bin/systemctl enable --now beast-cockpit-serve, \
-    /usr/bin/systemctl enable --now beast-cockpit-serve.service, \
-    /usr/bin/systemctl disable beast-cockpit-serve, \
-    /usr/bin/systemctl disable beast-cockpit-serve.service, \
-    /usr/bin/systemctl disable --now beast-cockpit-serve, \
-    /usr/bin/systemctl disable --now beast-cockpit-serve.service, \
-    /usr/bin/systemctl start beast-blackbox-record, \
-    /usr/bin/systemctl start beast-blackbox-record.service, \
-    /usr/bin/systemctl stop beast-blackbox-record, \
-    /usr/bin/systemctl stop beast-blackbox-record.service, \
-    /usr/bin/systemctl restart beast-blackbox-record, \
-    /usr/bin/systemctl restart beast-blackbox-record.service, \
-    /usr/bin/systemctl try-restart beast-blackbox-record, \
-    /usr/bin/systemctl try-restart beast-blackbox-record.service, \
-    /usr/bin/systemctl status beast-blackbox-record, \
-    /usr/bin/systemctl status beast-blackbox-record.service, \
-    /usr/bin/systemctl is-active beast-blackbox-record, \
-    /usr/bin/systemctl is-active beast-blackbox-record.service, \
-    /usr/bin/systemctl is-enabled beast-blackbox-record, \
-    /usr/bin/systemctl is-enabled beast-blackbox-record.service, \
-    /usr/bin/systemctl enable beast-blackbox-record, \
-    /usr/bin/systemctl enable beast-blackbox-record.service, \
-    /usr/bin/systemctl enable --now beast-blackbox-record, \
-    /usr/bin/systemctl enable --now beast-blackbox-record.service, \
-    /usr/bin/systemctl disable beast-blackbox-record, \
-    /usr/bin/systemctl disable beast-blackbox-record.service, \
-    /usr/bin/systemctl disable --now beast-blackbox-record, \
-    /usr/bin/systemctl disable --now beast-blackbox-record.service, \
-    /usr/bin/systemctl start beast-mission-record@*, \
-    /usr/bin/systemctl start beast-mission-record@*.service, \
-    /usr/bin/systemctl stop beast-mission-record@*, \
-    /usr/bin/systemctl stop beast-mission-record@*.service, \
-    /usr/bin/systemctl restart beast-mission-record@*, \
-    /usr/bin/systemctl restart beast-mission-record@*.service, \
-    /usr/bin/systemctl status beast-mission-record@*, \
-    /usr/bin/systemctl status beast-mission-record@*.service, \
-    /usr/bin/systemctl is-active beast-mission-record@*, \
-    /usr/bin/systemctl is-active beast-mission-record@*.service, \
-    /usr/bin/systemctl start beast-wifi-telemetry, \
-    /usr/bin/systemctl start beast-wifi-telemetry.service, \
-    /usr/bin/systemctl stop beast-wifi-telemetry, \
-    /usr/bin/systemctl stop beast-wifi-telemetry.service, \
-    /usr/bin/systemctl status beast-wifi-telemetry, \
-    /usr/bin/systemctl status beast-wifi-telemetry.service, \
-    /usr/bin/systemctl is-active beast-wifi-telemetry, \
-    /usr/bin/systemctl is-active beast-wifi-telemetry.service, \
-    /usr/bin/systemctl start beast-wifi-telemetry.timer, \
-    /usr/bin/systemctl stop beast-wifi-telemetry.timer, \
-    /usr/bin/systemctl status beast-wifi-telemetry.timer, \
-    /usr/bin/systemctl is-active beast-wifi-telemetry.timer, \
-    /usr/bin/systemctl enable beast-wifi-telemetry.timer, \
-    /usr/bin/systemctl enable --now beast-wifi-telemetry.timer, \
-    /usr/bin/systemctl disable beast-wifi-telemetry.timer, \
-    /usr/bin/systemctl disable --now beast-wifi-telemetry.timer, \
-    /usr/bin/systemctl list-timers beast-wifi-telemetry.timer, \
-    /usr/bin/systemctl list-timers beast-wifi-telemetry.timer --no-pager, \
-    /usr/bin/systemctl start beast-pull, \
-    /usr/bin/systemctl start beast-pull.service, \
-    /usr/bin/systemctl status beast-pull, \
-    /usr/bin/systemctl status beast-pull.service, \
-    /usr/bin/systemctl is-active beast-pull, \
-    /usr/bin/systemctl is-active beast-pull.service, \
-    /usr/bin/systemctl start beast-pull.timer, \
-    /usr/bin/systemctl stop beast-pull.timer, \
-    /usr/bin/systemctl status beast-pull.timer, \
-    /usr/bin/systemctl is-active beast-pull.timer, \
-    /usr/bin/systemctl is-enabled beast-pull.timer, \
-    /usr/bin/systemctl enable beast-pull.timer, \
-    /usr/bin/systemctl enable --now beast-pull.timer, \
-    /usr/bin/systemctl disable beast-pull.timer, \
-    /usr/bin/systemctl disable --now beast-pull.timer, \
-    /usr/bin/systemctl mask beast-pull.timer, \
-    /usr/bin/systemctl unmask beast-pull.timer, \
-    /usr/bin/systemctl list-timers beast-pull.timer, \
-    /usr/bin/systemctl list-timers beast-pull.timer --no-pager, \
-    /usr/bin/systemctl start beast-slam, \
-    /usr/bin/systemctl start beast-slam.service, \
-    /usr/bin/systemctl stop beast-slam, \
-    /usr/bin/systemctl stop beast-slam.service, \
-    /usr/bin/systemctl restart beast-slam, \
-    /usr/bin/systemctl restart beast-slam.service, \
-    /usr/bin/systemctl try-restart beast-slam, \
-    /usr/bin/systemctl try-restart beast-slam.service, \
-    /usr/bin/systemctl status beast-slam, \
-    /usr/bin/systemctl status beast-slam.service, \
-    /usr/bin/systemctl is-active beast-slam, \
-    /usr/bin/systemctl is-active beast-slam.service, \
-    /usr/bin/systemctl is-enabled beast-slam, \
-    /usr/bin/systemctl is-enabled beast-slam.service, \
-    /usr/bin/systemctl enable beast-slam, \
-    /usr/bin/systemctl enable beast-slam.service, \
-    /usr/bin/systemctl enable --now beast-slam, \
-    /usr/bin/systemctl enable --now beast-slam.service, \
-    /usr/bin/systemctl disable beast-slam, \
-    /usr/bin/systemctl disable beast-slam.service, \
-    /usr/bin/systemctl disable --now beast-slam, \
-    /usr/bin/systemctl disable --now beast-slam.service, \
-    /usr/bin/systemctl start beast-nav, \
-    /usr/bin/systemctl start beast-nav.service, \
-    /usr/bin/systemctl stop beast-nav, \
-    /usr/bin/systemctl stop beast-nav.service, \
-    /usr/bin/systemctl status beast-nav, \
-    /usr/bin/systemctl status beast-nav.service, \
-    /usr/bin/systemctl is-active beast-nav, \
-    /usr/bin/systemctl is-active beast-nav.service, \
-    /usr/bin/systemctl start beast-wifi-watch, \
-    /usr/bin/systemctl start beast-wifi-watch.service, \
-    /usr/bin/systemctl stop beast-wifi-watch, \
-    /usr/bin/systemctl stop beast-wifi-watch.service, \
-    /usr/bin/systemctl restart beast-wifi-watch, \
-    /usr/bin/systemctl restart beast-wifi-watch.service, \
-    /usr/bin/systemctl try-restart beast-wifi-watch, \
-    /usr/bin/systemctl try-restart beast-wifi-watch.service, \
-    /usr/bin/systemctl status beast-wifi-watch, \
-    /usr/bin/systemctl status beast-wifi-watch.service, \
-    /usr/bin/systemctl is-active beast-wifi-watch, \
-    /usr/bin/systemctl is-active beast-wifi-watch.service, \
-    /usr/bin/systemctl is-enabled beast-wifi-watch, \
-    /usr/bin/systemctl is-enabled beast-wifi-watch.service, \
-    /usr/bin/systemctl enable beast-wifi-watch, \
-    /usr/bin/systemctl enable beast-wifi-watch.service, \
-    /usr/bin/systemctl enable --now beast-wifi-watch, \
-    /usr/bin/systemctl enable --now beast-wifi-watch.service, \
-    /usr/bin/systemctl disable beast-wifi-watch, \
-    /usr/bin/systemctl disable beast-wifi-watch.service, \
-    /usr/bin/systemctl disable --now beast-wifi-watch, \
-    /usr/bin/systemctl disable --now beast-wifi-watch.service, \
-    /usr/bin/systemctl daemon-reload, \
-    /usr/bin/systemctl reboot
+Cmnd_Alias BEAST_CTL = /usr/local/sbin/beast-ctl *
+
+# daemon-reload takes no unit, so it has no place in beast-ctl's table.
+Cmnd_Alias BEAST_DAEMON_RELOAD = /usr/bin/systemctl daemon-reload
 
 Cmnd_Alias BEAST_TAILSCALE = /usr/bin/tailscale serve *
 
@@ -214,4 +32,4 @@ Cmnd_Alias BEAST_LINGER = /usr/bin/loginctl enable-linger beast
 
 Cmnd_Alias BEAST_REBOOT = /usr/sbin/reboot, /sbin/reboot, /usr/bin/systemctl reboot
 
-beast ALL=(root) NOPASSWD: BEAST_SYSTEMCTL, BEAST_TAILSCALE, BEAST_INSTALL_UNITS, BEAST_LINGER, BEAST_REBOOT
+beast ALL=(root) NOPASSWD: BEAST_CTL, BEAST_DAEMON_RELOAD, BEAST_TAILSCALE, BEAST_INSTALL_UNITS, BEAST_LINGER, BEAST_REBOOT
