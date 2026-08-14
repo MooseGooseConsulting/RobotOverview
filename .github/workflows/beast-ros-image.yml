@@ -2,30 +2,26 @@ name: Build BEAST ROS image
 
 on:
   pull_request:
+    # The WHOLE robot tree, not a package subset. This workflow's completion
+    # triggers deploy-pin.yml, whose deploy-ref job advances the source ref
+    # BEAST-01 follows — so a path missing here is a robot change that never
+    # deploys. The old subset list excluded ugv_nav, the build scripts, and
+    # deploy/** entirely; a few extra image builds are cheaper than a deploy
+    # pipeline that silently ignores whole directories.
     paths:
-      - 'robot/beast/ros2_ws/Dockerfile'
-      - 'robot/beast/ros2_ws/.dockerignore'
-      - 'robot/beast/ros2_ws/src/ugv_main/beast_power/**'
-      - 'robot/beast/ros2_ws/src/ugv_main/beast_base/**'
-      - 'robot/beast/ros2_ws/src/ugv_main/ugv_bringup/**'
-      - 'robot/beast/ros2_ws/src/ugv_main/ugv_cockpit/**'
-      - 'robot/beast/ros2_ws/src/ugv_main/ugv_description/**'
-      - 'robot/beast/ros2_ws/src/ugv_else/ldlidar/**'
-      - 'robot/beast/ros2_ws/src/ugv_else/rf2o_laser_odometry/**'
+      - 'robot/beast/ros2_ws/**'
       - '.github/workflows/beast-ros-image.yml'
   push:
     branches:
       - main
+    # The WHOLE robot tree, not a package subset. This workflow's completion
+    # triggers deploy-pin.yml, whose deploy-ref job advances the source ref
+    # BEAST-01 follows — so a path missing here is a robot change that never
+    # deploys. The old subset list excluded ugv_nav, the build scripts, and
+    # deploy/** entirely; a few extra image builds are cheaper than a deploy
+    # pipeline that silently ignores whole directories.
     paths:
-      - 'robot/beast/ros2_ws/Dockerfile'
-      - 'robot/beast/ros2_ws/.dockerignore'
-      - 'robot/beast/ros2_ws/src/ugv_main/beast_power/**'
-      - 'robot/beast/ros2_ws/src/ugv_main/beast_base/**'
-      - 'robot/beast/ros2_ws/src/ugv_main/ugv_bringup/**'
-      - 'robot/beast/ros2_ws/src/ugv_main/ugv_cockpit/**'
-      - 'robot/beast/ros2_ws/src/ugv_main/ugv_description/**'
-      - 'robot/beast/ros2_ws/src/ugv_else/ldlidar/**'
-      - 'robot/beast/ros2_ws/src/ugv_else/rf2o_laser_odometry/**'
+      - 'robot/beast/ros2_ws/**'
       - '.github/workflows/beast-ros-image.yml'
   workflow_dispatch:
 

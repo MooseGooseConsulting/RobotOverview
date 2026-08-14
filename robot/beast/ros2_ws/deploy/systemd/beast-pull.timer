@@ -8,9 +8,11 @@ OnBootSec=5min
 OnUnitActiveSec=1h
 # Jitter so a fleet (or a reboot loop) does not hit GitHub in lockstep.
 RandomizedDelaySec=5min
-# Catch up after downtime — a robot that was off for a day should deploy on the
-# next boot rather than wait a full hour.
-Persistent=true
+# No Persistent=true: it only applies to OnCalendar= timers, so on a monotonic
+# timer like this one it would be a silent no-op. Catch-up after downtime is
+# OnBootSec's job — a robot that was off for a day checks the deploy ref five
+# minutes after it comes back, which is the behaviour Persistent= would have
+# promised and not delivered.
 AccuracySec=1min
 
 [Install]

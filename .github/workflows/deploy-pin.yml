@@ -386,7 +386,21 @@ jobs:
                 ;;
             esac
             echo
-            echo "Roll back by reverting the pin commit in \`$HOMELAB_REPO\`."
+            # Rollback instructions must point at what the consumer actually
+            # reads: the cluster reads the homelab pin; the robot reads only
+            # the deploy ref, which a homelab revert cannot move.
+            case "${SURFACE:-}" in
+              beast)
+                echo "Roll back by force-pushing the previous sha to the deploy ref"
+                echo "in RobotOverview:"
+                echo '```'
+                echo "git push --force origin <previous-sha>:refs/deploy/beast-01"
+                echo '```'
+                ;;
+              *)
+                echo "Roll back by reverting the pin commit in \`$HOMELAB_REPO\`."
+                ;;
+            esac
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
@@ -438,7 +452,11 @@ jobs:
             exit 1
           fi
 
-          before="$(git rev-parse --verify refs/deploy/beast-01 2>/dev/null || echo none)"
+          # The checkout above only fetched branch refs; refs/deploy/* never
+          # exists locally here. Ask the remote, or `before` is always "none"
+          # and this job force-pushes (and mis-reports) on every single run.
+          before="$(git ls-remote origin refs/deploy/beast-01 | cut -f1)"
+          [ -n "$before" ] || before=none
           if [ "$before" = "$SHA" ]; then
             echo "refs/deploy/beast-01 already at $SHORT_SHA; nothing to do"
             exit 0

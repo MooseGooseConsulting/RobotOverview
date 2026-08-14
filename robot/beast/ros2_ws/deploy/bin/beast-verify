@@ -251,29 +251,45 @@ fi
 gate_before="$(timeout 8 ros2 topic echo --once /ugv/allow_motion 2>/dev/null | awk '/^data:/ {print $2; exit}')"
 probe_stamp="$(date '+%Y-%m-%d %H:%M:%S')"
 timeout 15 ros2 service call /ugv/set_allow_motion std_srvs/srv/SetBool '{data: false}' >/dev/null 2>&1 || true
-timeout 8 ros2 topic pub -r 10 /cmd_vel_ui geometry_msgs/msg/Twist \
-  '{linear: {x: 0.3, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}' >/dev/null 2>&1 || true
-sleep 1
-rejections="$(journalctl -u beast-ros-base --since "$probe_stamp" --no-pager 2>/dev/null \
-  | grep -c 'Rejected non-zero cmd_vel' || true)"
-# Restore the gate, FAIL CLOSED. Only re-arm when the pre-probe read said
-# literally "true". This used to re-arm on anything that was not "false",
-# which included the empty string returned when the 8 s read above times out —
-# so a verify run against a deliberately disarmed robot could silently arm it.
-# Harmless while a human is watching; not harmless once beast-pull runs verify
-# on an hourly timer. Leaving it disarmed is always the recoverable direction.
-if [ "$gate_before" = "true" ]; then
+# "Motion-free by construction" is only true if the disarm actually LANDED.
+# The gate defaults to armed, so if the service call was lost (node still
+# settling after a restart, DDS discovery race), the burst below would be a
+# real 0.3 m/s drive command, not a rejected one. Confirm the gate reads
+# false before publishing anything; otherwise the drive path stays unverified
+# and that is a FAIL, not a risk worth taking unattended.
+gate_probe="$(timeout 8 ros2 topic echo --once /ugv/allow_motion 2>/dev/null | awk '/^data:/ {print $2; exit}')"
+if [ "$gate_probe" = "false" ]; then
+  timeout 8 ros2 topic pub -r 10 /cmd_vel_ui geometry_msgs/msg/Twist \
+    '{linear: {x: 0.3, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}' >/dev/null 2>&1 || true
+  sleep 1
+  rejections="$(journalctl -u beast-ros-base --since "$probe_stamp" --no-pager 2>/dev/null \
+    | grep -c 'Rejected non-zero cmd_vel' || true)"
+  if [ "${rejections:-0}" -ge 1 ] 2>/dev/null; then
+    ok "drive path live: /cmd_vel_ui -> twist_mux -> beast_base (reject logged while disarmed)"
+  else
+    bad "drive path wedged: mux output not reaching beast_base — restart beast-ros-base once, re-verify"
+  fi
+else
+  bad "cannot confirm motion gate disarmed (read: ${gate_probe:-nothing}); drive probe skipped, drive path UNVERIFIED"
+fi
+# Restore the gate, FAIL CLOSED, and only over our own state. Re-read first:
+# if the gate is not the "false" this probe set, an operator changed it while
+# the probe ran, and their newer decision wins — overwriting it from the stale
+# pre-probe snapshot could re-arm a robot someone just disarmed on purpose.
+# When it is untouched, re-arm only if the pre-probe read said literally
+# "true"; the old anything-but-"false" rule re-armed on the empty string a
+# timed-out read returns. Leaving it disarmed is always the recoverable
+# direction.
+gate_final="$(timeout 8 ros2 topic echo --once /ugv/allow_motion 2>/dev/null | awk '/^data:/ {print $2; exit}')"
+if [ -n "$gate_final" ] && [ "$gate_final" != "false" ]; then
+  warn "motion gate changed during the probe (now: $gate_final); leaving it as the operator set it"
+elif [ "$gate_before" = "true" ]; then
   timeout 15 ros2 service call /ugv/set_allow_motion std_srvs/srv/SetBool '{data: true}' >/dev/null 2>&1 || true
 else
   timeout 15 ros2 service call /ugv/set_allow_motion std_srvs/srv/SetBool '{data: false}' >/dev/null 2>&1 || true
   if [ "$gate_before" != "false" ]; then
     warn "could not read allow_motion before the probe; left the gate DISARMED (re-arm from the cockpit)"
   fi
-fi
-if [ "${rejections:-0}" -ge 1 ] 2>/dev/null; then
-  ok "drive path live: /cmd_vel_ui -> twist_mux -> beast_base (reject logged while disarmed)"
-else
-  bad "drive path wedged: mux output not reaching beast_base — restart beast-ros-base once, re-verify"
 fi
 
 exit "$fail"

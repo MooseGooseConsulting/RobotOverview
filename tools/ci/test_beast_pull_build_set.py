@@ -66,10 +66,12 @@ def repo(tmp_path: Path) -> Path:
 
     for name in ("beast_base", "beast_power", "ugv_bringup", "ugv_cockpit", "ugv_nav", "ugv_vision"):
         _add_package(repo, "ugv_main", name)
-    # Parked, exactly as vizanti / ugv_web_app / explore_lite / emcl2 are on the robot.
+    # Parked EXACTLY as the robot parks vizanti: ONE marker at the group
+    # directory, and the nested packages carry no marker of their own. The walk
+    # must honor the ancestor marker or colcon gets handed a package it cannot
+    # discover.
     _add_package(repo, "ugv_else", "vizanti", parked=True)
-    # A nested package, to prove the walk finds the NEAREST package.xml ancestor.
-    _add_package(repo, "ugv_else/vizanti", "vizanti_cpp", parked=True)
+    _add_package(repo, "ugv_else/vizanti", "vizanti_cpp", parked=False)
     (repo / "docs").mkdir()
     (repo / "docs" / "notes.md").write_text("# docs\n")
 
@@ -136,14 +138,59 @@ def test_parked_packages_are_never_selected(repo: Path) -> None:
     assert got == ALWAYS
 
 
-def test_nested_package_resolves_to_the_nearest_package_xml(repo: Path) -> None:
+def test_ancestor_colcon_ignore_parks_nested_packages(repo: Path) -> None:
+    """vizanti_cpp has no marker of its own — only the group dir is marked.
+
+    colcon ignores the whole subtree below a COLCON_IGNORE, so selecting the
+    nested package would fail the entire deploy. This is the robot's actual
+    layout: one marker at src/ugv_else/vizanti/ parks five nested packages.
+    """
     base = _git(repo, "rev-parse", "HEAD").strip()
     head = commit_touching(repo, f"{WS_REL}/src/ugv_else/vizanti/vizanti_cpp/vizanti_cpp.py")
     got = build_set(repo, base, head)
-    # vizanti_cpp is the nearest package and is parked; the outer vizanti must
-    # not be picked up as a consolation prize.
     assert "vizanti_cpp" not in got
     assert "vizanti" not in got
+
+
+def test_package_added_by_the_target_commit_is_built(repo: Path) -> None:
+    """The build set must resolve against the TARGET tree, not the checkout.
+
+    beast-pull computes the set before moving the checkout, so a package the
+    target commit ADDS has no package.xml on disk yet. The worktree is pinned
+    back to base to prove the mapping never touches the filesystem.
+    """
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _add_package(repo, "ugv_main", "ugv_newcomer")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add package")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-q", base)
+    assert build_set(repo, base, head) == ALWAYS | {"ugv_newcomer"}
+
+
+def test_deleted_package_resolves_to_nothing(repo: Path) -> None:
+    """Paths whose package no longer exists in the target must drop out —
+    a deleted package cannot be built, and selecting it would error."""
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "rm", "-rq", f"{WS_REL}/src/ugv_main/ugv_vision")
+    _git(repo, "commit", "-qm", "remove package")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    assert build_set(repo, base, head) == ALWAYS
+
+
+def test_package_name_comes_from_the_name_tag_not_the_directory(repo: Path) -> None:
+    """colcon selects by the <name> tag; directory names are convention only."""
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    pkg = repo / WS_REL / "src" / "ugv_main" / "ugv_extras_dir"
+    pkg.mkdir(parents=True)
+    (pkg / "package.xml").write_text("<package><name>ugv_extras</name></package>\n")
+    (pkg / "node.py").write_text("# source\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add mismatched-name package")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    got = build_set(repo, base, head)
+    assert "ugv_extras" in got
+    assert "ugv_extras_dir" not in got
 
 
 def test_a_deploy_with_no_source_changes_still_rebuilds_the_boot_path(repo: Path) -> None:

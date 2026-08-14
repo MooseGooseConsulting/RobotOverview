@@ -1,32 +1,28 @@
 #!/bin/bash
-# Refuse to start the ROS stack while beast-pull is mid-deploy.
+# Refuse to start the ROS stack while the workspace is mid-rebuild.
 #
 # install/ is a --symlink-install tree, so between "checkout moved" and "colcon
 # build finished" the workspace is inconsistent: new Python and launch files,
 # old compiled artefacts. Starting into that window yields a running robot on a
 # half-built stack — the worst outcome, because it looks fine.
 #
-# beast-pull creates the marker before touching the checkout and clears it on
-# every exit path. This guard turns a mid-deploy boot into a STOPPED robot
-# instead, which is recoverable and loud.
+# beast-pull creates the marker before it moves the checkout and removes it
+# when the build completes, so the marker's lifetime IS the inconsistency
+# window. If it exists at start time, the last deploy was interrupted and the
+# workspace cannot be trusted: FAIL CLOSED.
 #
-# The staleness bound matters as much as the check: if the agent were killed
-# hard enough to skip its own EXIT trap, an unbounded guard would brick every
-# subsequent boot. After the bound expires we start anyway and let verify judge.
+# There is deliberately no staleness TTL. An age bound would eventually start a
+# half-built stack anyway, which is the exact outcome this guard exists to
+# prevent, and marker age says nothing about whether the build finished.
+# Recovery is not this script's job and does not need root: beast-pull's next
+# timer tick (<= ~1h, 5 min after a reboot) detects the surviving marker,
+# rebuilds, and clears it. Manual override: remove the marker file.
 set -u
 
 MARKER="${BEAST_DEPLOY_MARKER:-/data/beast/deploy/in-progress}"
-STALE_AFTER_SECONDS="${BEAST_DEPLOY_MARKER_TTL:-1800}"
 
 [ -e "$MARKER" ] || exit 0
 
-marker_mtime="$(stat -c %Y "$MARKER" 2>/dev/null)" || exit 0
-age=$(( $(date +%s) - marker_mtime ))
-
-if [ "$age" -gt "$STALE_AFTER_SECONDS" ]; then
-  echo "beast-deploy-guard: ignoring stale deploy marker (${age}s old, bound ${STALE_AFTER_SECONDS}s)" >&2
-  exit 0
-fi
-
-echo "beast-deploy-guard: beast-pull is mid-deploy (marker ${age}s old); refusing to start a half-built workspace" >&2
+echo "beast-deploy-guard: deploy marker present ($MARKER) — a deploy was interrupted mid-build; refusing to start a possibly half-built workspace." >&2
+echo "beast-deploy-guard: beast-pull's next tick will rebuild and recover automatically; or remove the marker to force a start." >&2
 exit 1
