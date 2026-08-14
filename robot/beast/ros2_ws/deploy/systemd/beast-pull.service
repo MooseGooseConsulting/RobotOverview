@@ -19,7 +19,10 @@ WorkingDirectory=/home/beast/beast/RobotOverview/robot/beast/ros2_ws
 EnvironmentFile=/etc/beast/ugv.env
 Environment=PYTHONUNBUFFERED=1
 Environment=XDG_RUNTIME_DIR=/run/user/1000
-ExecStart=/home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-pull
+# Wrapped in /bin/sh -c so `systemd-analyze verify` (beast-storage-tests.yml)
+# resolves the command on a CI runner that has no robot filesystem. Same shape
+# as beast-wifi-telemetry.service; ConditionPathExists above is the real check.
+ExecStart=/bin/sh -c 'exec /home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-pull'
 # A colcon build plus a 20 s settle plus the verify sweep. Generous, but the
 # agent must never be killed between "checkout moved" and "verify finished" —
 # that is precisely the half-deploy state it exists to prevent.
