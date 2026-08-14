@@ -78,3 +78,11 @@ Then paste App ID into `OPENHANDS_COLD_REVIEW_APP_ID` and the PEM into
 
 Optional Doppler `homelab/dev` copy of those **names** only — do not reuse
 `CODEX_GITHUB_*`.
+
+## Runner group (public repo)
+
+RobotOverview is public. Org scale set `moosegoose-general` lives in
+`moosegoose-arc-private`, which must list this repository and allow public
+repos (`allows_public_repositories: true`, visibility `selected`). Other
+public org repos stay off the group. Without that, Cold Review queues forever
+and the ARC listener reports `assigned job=0`.
