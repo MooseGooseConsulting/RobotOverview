@@ -14,9 +14,9 @@ const CHIPS: Array<{ tone: 'red' | 'amber'; text: string; title: string }> = [
   },
   {
     tone: 'amber',
-    text: 'BATTERY % = NOT SHOWN, BY DESIGN',
+    text: 'BATTERY % = OCV TABLE · LOAD-SAGS',
     title:
-      'Pack volts are real (driver-board INA219, verified 2026-08-07). Signed current is real but logic-rail only — the INA219 shunt sits in the buck/5 V branch, so motor, servo, and IO loads never cross it (traced connectivity PWR-E003/E013–E020); treat it as the 5 V rail\'s draw, not whole-pack draw. /ugv/voltage.percentage is now usable-range OCV (8.332 V = 0 %, 12.364 V clean-log full = 100 %) with a still-generic mid-curve; the old V/12.6 field is gone. A % still does not appear here — the banner stays voltage-only until mid-curve rest samples earn it.',
+      'Pack volts are real (driver-board INA219, verified 2026-08-07). Signed current is real but logic-rail only — the INA219 shunt sits in the buck/5 V branch, so motor, servo, and IO loads never cross it (traced connectivity PWR-E003/E013–E020); treat it as the 5 V rail\'s draw, not whole-pack draw. /ugv/voltage.percentage is usable-range OCV (8.332 V = 0 %, 12.364 V clean-log full = 100 %) with a still-generic mid-curve; the old V/12.6 field is gone. The SafetyStrip now shows that % beside volts and alarms on the worse of V or SOC. OCV reads LOW under load and HIGH on charge — alerts suppress while CHARGING/FULL. Not a coulomb counter.',
   },
   {
     tone: 'amber',

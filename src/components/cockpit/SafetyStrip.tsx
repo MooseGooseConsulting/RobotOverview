@@ -141,21 +141,22 @@ export function SafetyStrip() {
     voltage === null ? 0 : Math.max(0, Math.min(100, ((voltage - minVolts) / (maxVolts - minVolts)) * 100));
   const isLowVoltage = voltage !== null && voltage < motionFloorVolts;
   const voltStale = volts.stale && volts.hasReceived;
-  // Voltage-only pack alert (2026-08-13): the pack died twice on 2026-08-10
-  // with nothing reaching the operator. Live /ugv/voltage has no honest SOC
-  // (HonestyRail — usable OCV endpoints are pinned; mid-curve is still generic; % is not shown) so the banner keys off
-  // volts alone. Suppressed while CHARGING/FULL (bus reads high on charge)
-  // and while stale/absent.
-  //   warn:     ≤ 10.8 V
-  //   critical: ≤ 10.2 V
+  // SOC-aware pack alert: the pack died twice on 2026-08-10 with nothing
+  // reaching the operator. OCV SOC reads low under load and high while
+  // charging, so alerts are SUPPRESSED while charging (recovery is underway)
+  // and use whichever signal reads worse. Absent only when BOTH voltage and
+  // SOC are missing — a lone SOC still alarms.
+  //   warn:     ≤ 10.8 V or SOC ≤ 25%
+  //   critical: ≤ 10.2 V or SOC ≤ 8%
+  const soc = volts.percentage ?? null;
   const psStatus = volts.powerSupplyStatus ?? null;
   const isChargingNow = psStatus === 1 || psStatus === 4; // CHARGING | FULL
   const packLevel: 'ok' | 'warn' | 'critical' =
-    voltage === null || voltStale || isChargingNow
+    voltStale || isChargingNow || (voltage === null && soc === null)
       ? 'ok'
-      : voltage <= 10.2
+      : (voltage !== null && voltage <= 10.2) || (soc !== null && soc <= 0.08)
         ? 'critical'
-        : voltage <= 10.8
+        : (voltage !== null && voltage <= 10.8) || (soc !== null && soc <= 0.25)
           ? 'warn'
           : 'ok';
   // Current is pre-gated at ingest: non-null only when the publisher filled
@@ -172,7 +173,7 @@ export function SafetyStrip() {
       {/* SCANLINE SHEEN EFFECT */}
       <div className="pointer-events-none absolute inset-0 z-0 bg-[repeating-linear-gradient(0deg,rgba(255,255,255,0.015)_0_1px,transparent_1px_3px)] opacity-50" />
 
-      {/* ── PACK ALERT BANNER (persistent while low; voltage only) ── */}
+      {/* ── PACK ALERT BANNER (persistent while low) ── */}
       {packLevel !== 'ok' && (
         <div
           role="alert"
@@ -185,8 +186,8 @@ export function SafetyStrip() {
         >
           <ShieldAlert className="h-4 w-4 shrink-0" />
           {packLevel === 'critical'
-            ? `CRITICAL PACK — ${voltage?.toFixed(2)} V — charge now, BMS cutoff near`
-            : `LOW PACK — ${voltage?.toFixed(2)} V — plan a charge stop`}
+            ? `CRITICAL PACK — ${voltage?.toFixed(2)} V${soc !== null ? ` · ${(soc * 100).toFixed(0)}%` : ''} — charge now, BMS cutoff near`
+            : `LOW PACK — ${voltage?.toFixed(2)} V${soc !== null ? ` · ${(soc * 100).toFixed(0)}%` : ''} — plan a charge stop`}
         </div>
       )}
 
@@ -312,6 +313,11 @@ export function SafetyStrip() {
             )}
           >
             {voltage === null ? '— V' : `${voltage.toFixed(2)} V`}
+            {soc !== null && voltage !== null && (
+              <span className="ml-1.5 text-xs font-bold text-ink-dim">
+                {(soc * 100).toFixed(0)}%
+              </span>
+            )}
           </span>
         </div>
 
