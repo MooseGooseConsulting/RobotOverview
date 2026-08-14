@@ -21,6 +21,20 @@ install -m 0644 "${units[@]}" /etc/systemd/system/
 systemctl daemon-reload
 echo "installed ${#units[@]} unit(s) from $SRC"
 
+# Re-install THIS script from the tree while we already hold root. The sudoers
+# grant names the /usr/local/sbin copy, which nothing else on the unattended
+# path can update — without this, a deploy that fixes the installer ships the
+# fix into the checkout and keeps executing the stale binary forever (the
+# other deploy/bin helpers are invoked from the checkout and do not have this
+# problem). Compare first so the common case stays a no-op, and note the
+# refresh takes effect on the NEXT invocation, not this one.
+self_src="$WS_DIR/deploy/bin/beast-install-systemd-units"
+self_dst="/usr/local/sbin/beast-install-systemd-units"
+if [ -f "$self_src" ] && ! cmp -s "$self_src" "$self_dst"; then
+  install -m 0755 "$self_src" "$self_dst"
+  echo "refreshed $self_dst from the tree (takes effect next run)"
+fi
+
 # Copy-only, deliberately: this installer never deletes. A beast-* unit that
 # exists in /etc/systemd/system but not in the tree is either mid-rename
 # residue or something installed by hand — removal is rare and judgement-laden

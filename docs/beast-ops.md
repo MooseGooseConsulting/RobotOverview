@@ -7,6 +7,26 @@ re-verify against the live robot before relying on anything stale.
 
 ## Quick connect
 
+**Unattended deploy LIVE + SLAM converged 2026-08-14 ~19:35Z (live):** First
+production `beast-pull` deploy executed supervised: `refs/deploy/beast-01`
+(`ff13bca`) fetched anonymously, 4 boot-path packages rebuilt (14.6 s), 16
+units reinstalled, stack restarted, **beast-verify 13 PASS / 2 WARN / 0 FAIL**,
+`/data/beast/deploy/pull-state.json` records `verify:pass`. HEAD is now
+**detached at the deploy ref** (no branch — by design). Motion gate proven
+motion-free the same hour: disarm → published 0.05 m/s `/cmd_vel` → beast_base
+logged rejects → agent skipped before fetching → re-arm confirmed by readback.
+**beast-slam ended its boot crash loop** (139 restarts this boot) the moment
+the fresh-mode unit landed; `/map` publishes a live 69×84 grid; the poisoned
+posegraph is archived in `/data/beast/maps/bak-2026-08-14-segfault/`.
+Two operational caveats: (1) the robot's **pre-NTP→synced clock jump at boot
+wedges the per-user `ros2` CLI daemon** (`!rclpy.ok()` on every graph query) —
+symptom is beast-pull skipping every tick with "cannot rule out motion";
+remedy `ros2 daemon stop && ros2 daemon start` (agent self-heals this after
+the hardening PR). (2) `beast-pull.timer` is installed but **NOT enabled**,
+and `/data/beast/deploy/pull-hold` is present — owner action R5 (sudoers
+reinstall via `install-beast-sudoers.sh`, `enable --now beast-pull.timer`,
+remove the hold) arms the hourly loop.
+
 **beast-slam crash loop found + stopped 2026-08-14 ~16:10Z (live):** the unit
 had restarted **397 times**: `async_slam_toolbox_node` segfaults (exit −11)
 seconds after deserializing the 6.4 MB `beast-map.posegraph` (the
