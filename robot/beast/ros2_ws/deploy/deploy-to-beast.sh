@@ -12,13 +12,17 @@
 #
 # What a full run does, over SSH to $BEAST_HOST (default beast-01 / LAN mDNS;
 # override e.g. BEAST_HOST=beast-01-ts for Tailscale, or a direct Wi-Fi IP):
-#   1. fetch + fast-forward the on-robot checkout to <ref> (default origin/main);
-#      refuses to touch a dirty tree.
+#   1. sync the on-robot checkout to <ref> (default origin/main). A local
+#      commit (unpushed branch) is git-pushed to the robot first so origin
+#      is not required. Tracked dirt is reset; untracked files the incoming
+#      tree will add are removed so checkout can write them. Other untracked
+#      files (e.g. slam / wifi-telemetry scp leftovers) are left alone.
 #   2. colcon build --symlink-install the affected packages
 #      (default: beast_power beast_base ugv_bringup ugv_cockpit — the base
 #      service set).
-#   3. install deploy/storage payloads and systemd units, daemon-reload,
-#      restart beast-ros-base and try-restart beast-cockpit (one sudo prompt).
+#   3. install systemd units via the passwordless helper, restart
+#      beast-ros-base and try-restart beast-cockpit + beast-wifi-watch.
+#      Does NOT restart beast-slam. Doppler sudo is break-glass only.
 #   4. verify the live graph (see --verify-only below) and print a dated
 #      evidence block to paste into docs/beast-ops.md "Quick connect".
 #
@@ -69,6 +73,8 @@ WS_DIR="$REPO_DIR/robot/beast/ros2_ws"
 PACKAGES="beast_power beast_base ugv_bringup ugv_cockpit"
 REF="origin/main"
 VERIFY_ONLY=0
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOCAL_REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -85,23 +91,32 @@ say() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 
 ssh_opts=(-o ConnectTimeout=10 -o BatchMode=yes)
 
-# --- sudo credential ---------------------------------------------------------
-# Step 3 needs root on the robot. Resolve the password up front, before the
-# long build, so a missing credential fails in seconds rather than after
-# minutes of colcon. Order: explicit env override, then Doppler
-# (homelab/dev BEAST_JETSON_ADMIN_PASSWORD — see docs/beast-ops.md "Credential
-# map"), then an interactive prompt. The Doppler path is what lets an agent or
-# CI run this end to end; a human at a terminal still gets the old behaviour.
+# Passwordless sudo via /etc/sudoers.d/beast-ops is the routine path
+# (systemctl on beast-* units, daemon-reload, beast-install-systemd-units,
+# tailscale serve). Doppler BEAST_JETSON_ADMIN_PASSWORD is break-glass only
+# and is resolved later if a binary install is not allowlisted.
 sudo_pw=""
 sudo_pw_source=""
-if [ -n "${BEAST_SUDO_PASSWORD:-}" ]; then
-  sudo_pw="$BEAST_SUDO_PASSWORD"
-  sudo_pw_source="\$BEAST_SUDO_PASSWORD"
-elif command -v doppler >/dev/null 2>&1; then
-  sudo_pw="$(doppler secrets get BEAST_JETSON_ADMIN_PASSWORD \
-    --project homelab --config dev --plain 2>/dev/null || true)"
-  [ -n "$sudo_pw" ] && sudo_pw_source="Doppler homelab/dev"
-fi
+
+resolve_break_glass_sudo() {
+  if [ -n "$sudo_pw" ]; then
+    return 0
+  fi
+  if [ -n "${BEAST_SUDO_PASSWORD:-}" ]; then
+    sudo_pw="$BEAST_SUDO_PASSWORD"
+    sudo_pw_source="\$BEAST_SUDO_PASSWORD"
+    return 0
+  fi
+  if command -v doppler >/dev/null 2>&1; then
+    sudo_pw="$(doppler secrets get BEAST_JETSON_ADMIN_PASSWORD \
+      --project homelab --config dev --plain 2>/dev/null || true)"
+    if [ -n "$sudo_pw" ]; then
+      sudo_pw_source="Doppler homelab/dev (break-glass)"
+      return 0
+    fi
+  fi
+  return 1
+}
 
 run_verify() {
   say "verify live graph on $HOST"
@@ -368,8 +383,51 @@ if [ "$VERIFY_ONLY" = 1 ]; then
   exit $?
 fi
 
+LOCAL_SHA=""
+ROBOT_BRANCH="deploy-incoming"
+if git -C "$LOCAL_REPO_ROOT" rev-parse --verify "$REF^{commit}" >/dev/null 2>&1; then
+  LOCAL_SHA="$(git -C "$LOCAL_REPO_ROOT" rev-parse --verify "$REF^{commit}")"
+  current_branch="$(git -C "$LOCAL_REPO_ROOT" branch --show-current || true)"
+  if [ -n "$current_branch" ]; then
+    ROBOT_BRANCH="$current_branch"
+  fi
+fi
+
 say "1/4 sync robot checkout to $REF"
-ssh "${ssh_opts[@]}" "$HOST" bash -s -- "$REPO_DIR" "$REF" <<'REMOTE'
+if [ -n "$LOCAL_SHA" ]; then
+  say "push $LOCAL_SHA -> $HOST:$REPO_DIR ($ROBOT_BRANCH)"
+  git -C "$LOCAL_REPO_ROOT" push --no-thin \
+    "$HOST:$REPO_DIR" "$LOCAL_SHA:refs/heads/$ROBOT_BRANCH"
+  ssh "${ssh_opts[@]}" "$HOST" bash -s -- "$REPO_DIR" "$LOCAL_SHA" "$ROBOT_BRANCH" <<'REMOTE'
+set -euo pipefail
+repo_dir="$1"
+target_sha="$2"
+robot_branch="$3"
+
+# Discard tracked dirt (e.g. a one-file rosbridge scp). Do NOT git clean:
+# untracked slam / wifi-telemetry leftovers must stay.
+git -C "$repo_dir" reset --hard HEAD
+
+# Incoming tree will add files that already exist untracked from prior scp.
+# Remove only those paths so checkout can write the committed copies.
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  if [ -e "$repo_dir/$f" ] \
+      && ! git -C "$repo_dir" ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+    rm -f "$repo_dir/$f"
+  fi
+done < <(git -C "$repo_dir" diff --name-only --diff-filter=A HEAD "$target_sha")
+
+git -C "$repo_dir" checkout -B "$robot_branch" "$target_sha"
+actual_sha="$(git -C "$repo_dir" rev-parse HEAD)"
+if [ "$actual_sha" != "$target_sha" ]; then
+  echo "checkout is at $actual_sha, not requested $target_sha; refusing to build" >&2
+  exit 1
+fi
+git -C "$repo_dir" log --oneline -1
+REMOTE
+else
+  ssh "${ssh_opts[@]}" "$HOST" bash -s -- "$REPO_DIR" "$REF" <<'REMOTE'
 set -euo pipefail
 repo_dir="$1"
 ref="$2"
@@ -389,41 +447,71 @@ if [ "$actual_sha" != "$target_sha" ]; then
 fi
 git -C "$repo_dir" log --oneline -1
 REMOTE
+fi
 
 say "2/4 colcon build: $PACKAGES"
 ssh "${ssh_opts[@]}" "$HOST" "bash -lc 'cd \"$WS_DIR\" \
   && source /opt/ros/humble/setup.bash \
   && colcon build --packages-select $PACKAGES --symlink-install'"
 
-say "3/4 install storage/systemd/sudoers + restart"
-# One ssh session so a single sudo timestamp covers install, reload, restart.
-# After install-beast-sudoers.sh lands, later agent/ops SSH can use sudo -n for
-# the allowlisted beast-* / tailscale serve commands (Doppler becomes break-glass).
-remote_privileged="sudo install -m 0644 '$WS_DIR'/deploy/systemd/*.service /etc/systemd/system/ \
-  && sudo install -m 0644 '$WS_DIR'/deploy/systemd/*.timer /etc/systemd/system/ \
-  && sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-link-watch /usr/local/sbin/beast-link-watch \
-  && sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-wifi-watch /usr/local/sbin/beast-wifi-watch \
-  && sudo install -d -m 0755 /etc/systemd/system/tailscaled.service.d \
-  && sudo install -m 0644 '$WS_DIR'/deploy/systemd/tailscaled.service.d/time-sync.conf /etc/systemd/system/tailscaled.service.d/ \
-  && sudo bash '$WS_DIR'/deploy/bin/install-beast-sudoers.sh \
-  && sudo '$WS_DIR'/deploy/storage/install.sh --apply \
-  && sudo systemctl daemon-reload \
-  && sudo systemctl enable --now beast-link-watch.timer \
-  && sudo systemctl enable --now beast-wifi-watch \
-  && sudo systemctl restart beast-ros-base \
-  && sudo systemctl try-restart beast-cockpit \
-  && sleep 20"
+say "3/4 install units + restart (passwordless; no slam)"
+# Allowlisted via /etc/sudoers.d/beast-ops. Does not restart beast-slam.
+# Binary install of wifi-watch/link-watch is not allowlisted; skip when the
+# installed copy already matches the tree, otherwise fall back to break-glass.
+remote_passwordless=$(cat <<REMOTE
+set -euo pipefail
+ws='$WS_DIR'
+sudo -n /usr/local/sbin/beast-install-systemd-units
+install_bin_if_needed() {
+  src="\$1"
+  dest="\$2"
+  if [ ! -f "\$src" ]; then
+    echo "missing \$src" >&2
+    return 1
+  fi
+  if [ -f "\$dest" ] && cmp -s "\$src" "\$dest"; then
+    echo "skip install \$dest (already matches tree)"
+    return 0
+  fi
+  if sudo -n install -m 0755 "\$src" "\$dest"; then
+    echo "installed \$dest"
+    return 0
+  fi
+  echo "WARN cannot passwordless-install \$dest; leaving installed copy" >&2
+  return 0
+}
+install_bin_if_needed "\$ws/deploy/bin/beast-wifi-watch" /usr/local/sbin/beast-wifi-watch
+install_bin_if_needed "\$ws/deploy/bin/beast-link-watch" /usr/local/sbin/beast-link-watch
+sudo -n systemctl daemon-reload
+sudo -n systemctl try-restart beast-wifi-watch
+sudo -n systemctl restart beast-ros-base
+sudo -n systemctl try-restart beast-cockpit
+# Deliberately not: beast-slam
+sleep 20
+REMOTE
+)
 
-if [ -n "$sudo_pw" ]; then
-  echo "sudo: using $sudo_pw_source"
-  # Password goes over stdin, never argv — argv is world-readable in ps on the
-  # robot. The leading `sudo -S -v` consumes it and caches the timestamp, so
-  # every later sudo in this same session needs no password.
+set +e
+ssh "${ssh_opts[@]}" "$HOST" "bash -s" <<<"$remote_passwordless"
+pw_rc=$?
+set -e
+if [ "$pw_rc" -eq 0 ]; then
+  echo "sudo: passwordless beast-ops path"
+elif [ "$pw_rc" -eq 2 ] && resolve_break_glass_sudo; then
+  echo "sudo: $sudo_pw_source for binary install"
+  remote_break_glass="sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-link-watch /usr/local/sbin/beast-link-watch \
+    && sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-wifi-watch /usr/local/sbin/beast-wifi-watch \
+    && sudo -n /usr/local/sbin/beast-install-systemd-units \
+    && sudo -n systemctl daemon-reload \
+    && sudo -n systemctl try-restart beast-wifi-watch \
+    && sudo -n systemctl restart beast-ros-base \
+    && sudo -n systemctl try-restart beast-cockpit \
+    && sleep 20"
   printf '%s\n' "$sudo_pw" \
-    | ssh "${ssh_opts[@]}" "$HOST" "sudo -S -p '' -v && $remote_privileged"
+    | ssh "${ssh_opts[@]}" "$HOST" "sudo -S -p '' -v && $remote_break_glass"
 else
-  echo "sudo: no stored credential found — prompting interactively"
-  ssh -t "$HOST" "sudo -v && $remote_privileged"
+  echo "passwordless deploy failed and no break-glass sudo is available" >&2
+  exit 1
 fi
 
 say "4/4 post-deploy verification"

@@ -5,9 +5,11 @@
 
 ``spd-say`` and the 5 s double-fire guard are the whole point: the ESP32
 streams the same low voltage at 20 Hz, so without the guard every frame would
-spawn a subprocess.  The OLED T:3 "V:" line is written only after the voice
-command succeeds.  The fire threshold is 0.1 < V < 9 (a real low-cell read);
-a full pack or a dead-rail glitch must never fire.
+spawn a subprocess.  The OLED T:3 "V:" line is written FIRST, unconditionally —
+it is the reliable channel on a headless robot; voice is best-effort and
+latches off after the first ``spd-say`` failure.  The fire threshold is
+0.1 < V < 9 (a real low-cell read); a full pack or a dead-rail glitch must
+never fire.
 """
 
 import pytest
@@ -61,7 +63,9 @@ def test_low_voltage_fires_the_warning():
     voice.check(frame(720))  # 7.2 V — low cell
 
     assert voice._last_warn > 0.0
-    assert commands.commands == []  # the T:3 line comes from the worker thread
+    # No assertion on commands here: the worker thread writes the OLED line
+    # FIRST now (not after spd-say), so whether it has landed yet is a race
+    # this test must not depend on.
 
 
 def test_full_voltage_does_not_fire():
@@ -122,7 +126,7 @@ def test_warning_fires_again_after_the_interval(monkeypatch):
     assert fired['count'] == 3
 
 
-def test_worker_writes_the_oled_line_after_speech_succeeds(monkeypatch):
+def test_worker_writes_the_oled_line_when_speech_succeeds(monkeypatch):
     monkeypatch.setattr(
         'beast_base.beast_audio.subprocess.run',
         lambda *args, **kwargs: None,
@@ -135,9 +139,10 @@ def test_worker_writes_the_oled_line_after_speech_succeeds(monkeypatch):
 
     assert b'{"T": "3", "lineNum": 2, "Text": "V:7.2"}\n' in commands.commands
     assert logger.errors == []
+    assert voice._voice_broken is False
 
 
-def test_worker_logs_and_skips_serial_write_when_speech_fails(monkeypatch):
+def test_worker_still_writes_oled_and_latches_voice_when_speech_fails(monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError('spd-say missing')
 
@@ -148,5 +153,27 @@ def test_worker_logs_and_skips_serial_write_when_speech_fails(monkeypatch):
 
     voice._low_battery_warn_worker(7.20)
 
-    assert commands.commands == []
-    assert any('Failed low battery warning' in e for e in logger.errors)
+    # The OLED line is the reliable channel: written even when voice fails.
+    assert b'{"T": "3", "lineNum": 2, "Text": "V:7.2"}\n' in commands.commands
+    assert voice._voice_broken is True
+    assert any('spd-say failure' in e for e in logger.errors)
+
+
+def test_voice_stays_off_after_first_failure_but_oled_keeps_firing(monkeypatch):
+    calls = {'n': 0}
+
+    def boom(*args, **kwargs):
+        calls['n'] += 1
+        raise RuntimeError('spd-say missing')
+
+    monkeypatch.setattr('beast_base.beast_audio.subprocess.run', boom)
+    commands = RecordingCommands()
+    voice = LowBatteryVoice(commands, lambda: RecordingLogger())
+
+    voice._low_battery_warn_worker(7.20)
+    voice._low_battery_warn_worker(7.20)
+    voice._low_battery_warn_worker(7.20)
+
+    assert calls['n'] == 1  # spd-say attempted exactly once
+    assert len(commands.commands) == 3  # OLED line every time
+    assert voice._voice_broken is True
