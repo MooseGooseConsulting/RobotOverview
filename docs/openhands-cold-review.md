@@ -86,3 +86,6 @@ RobotOverview is public. Org scale set `moosegoose-general` lives in
 repos (`allows_public_repositories: true`, visibility `selected`). Other
 public org repos stay off the group. Without that, Cold Review queues forever
 and the ARC listener reports `assigned job=0`.
+
+First wet-run: https://github.com/MooseGooseConsulting/RobotOverview/actions/runs/31826909618
+posted as `openhands-cold-review[bot]` with `Selected LLM model: gpt-5.6-luna/xhigh`.
