@@ -29,6 +29,8 @@ export const ACTIVE_HOST_LABELS: Record<ActiveHost, string> = {
 };
 
 type Edge = 'top' | 'right' | 'bottom' | 'left';
+/** Declaration order doubles as the deterministic tie-break for edge choice. */
+const EDGES: readonly Edge[] = ['top', 'right', 'bottom', 'left'];
 
 /** Semantic color key per net kind; the UI maps this to CSS vars. */
 export type NetColorKey = 'amber' | 'cyan' | 'mixed' | 'idle';
@@ -72,6 +74,20 @@ export interface TwinLayout {
   modules: ModuleBox[];
   ports: PortNode[];
   wires: WirePath[];
+  /**
+   * Terminals placed by geometry because no hand-authored edge names them —
+   * i.e. wiring ingested into Postgres since this layout was drawn. Their
+   * anchors are a reasonable guess, not authored truth; surface them rather
+   * than let the drift stay invisible.
+   */
+  unmappedTerminalIds: string[];
+  /**
+   * Terminals on a unit this layout has no box for, so they are not drawn at
+   * all and any net through them loses an endpoint. A whole unit missing from
+   * the placement tables, not a nudged anchor — a louder problem than
+   * `unmappedTerminalIds`, and silent until reported here.
+   */
+  unplacedTerminalIds: string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -188,7 +204,11 @@ interface Anchor {
 
 /** Evenly place the i-th of `count` ports along a module edge. */
 function edgeAnchor(m: ModuleBox, edge: Edge, i: number, count: number): Anchor {
-  const t = (i + 1) / (count + 1);
+  return edgeAnchorAt(m, edge, (i + 1) / (count + 1));
+}
+
+/** Anchor at an explicit fraction `t` along `edge`, 0 → 1 in reading order. */
+function edgeAnchorAt(m: ModuleBox, edge: Edge, t: number): Anchor {
   switch (edge) {
     case 'top':
       return { x: m.x + t * m.w, y: m.y, nx: 0, ny: -1 };
@@ -300,31 +320,133 @@ const BOARD_EDGES: Record<string, Edge> = {
 
 const BOARD_MODULE_ORDER = ['stock-ups', 'oak-d-lite', 'd500-lidar', 'driver-board', 'pi5', 'orin-nano', 'beast'];
 
+/** The unit every satellite cables back to; its box anchors the fallback. */
+const HUB_UNIT_ID = 'driver-board';
+
+/**
+ * Centre of the hub, in whatever space the caller's modules live in (board or
+ * iso). Falls back to the centroid of the placed modules when the driver-board
+ * itself is unwired, so the result is always inside the drawing.
+ */
+function hubCenter(modules: Iterable<ModuleBox>): { x: number; y: number } {
+  const all = [...modules];
+  const hub = all.find((m) => m.unitId === HUB_UNIT_ID);
+  const boxes = hub ? [hub] : all;
+  if (!boxes.length) return { x: 0, y: 0 };
+  return {
+    x: boxes.reduce((s, m) => s + m.x + m.w / 2, 0) / boxes.length,
+    y: boxes.reduce((s, m) => s + m.y + m.h / 2, 0) / boxes.length,
+  };
+}
+
+/**
+ * Which edge a terminal exits when BOARD_EDGES doesn't name it.
+ *
+ * BOARD_EDGES only covers the terminals that existed when these layouts were
+ * drawn by hand. Anything ingested into Postgres since then used to land on
+ * 'top' regardless of where its module sits, so a newly wired unit rendered
+ * its wires leaving the wrong side of the box — geometry that looks
+ * authoritative and isn't. Face the hub instead: deterministic, right for most
+ * real connectors (they point at whatever they cable to), and it degrades
+ * toward the truth rather than toward a fixed lie.
+ */
+function hubFacingEdge(
+  m: ModuleBox,
+  hub: { x: number; y: number },
+  authoredPerEdge: (edge: Edge) => number,
+): Edge {
+  const dx = hub.x - (m.x + m.w / 2);
+  const dy = hub.y - (m.y + m.h / 2);
+  if (dx !== 0 || dy !== 0) {
+    if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 'right' : 'left';
+    return dy > 0 ? 'bottom' : 'top';
+  }
+  // The hub's own box: it faces nothing, so geometry gives no signal. Use the
+  // emptiest edge instead of a fixed side — it keeps the densest module in the
+  // drawing from stacking every new connector on one face. EDGES order breaks
+  // ties, so the result stays deterministic.
+  return EDGES.reduce((best, e) =>
+    authoredPerEdge(e) < authoredPerEdge(best) ? e : best,
+  );
+}
+
 function buildEdgeGroupedPorts(terminals: Terminal[], moduleById: Map<string, ModuleBox>) {
-  // Group each unit's terminals by the edge they exit, preserving spine order.
-  const byUnitEdge = new Map<string, Terminal[]>();
+  const hub = hubCenter(moduleById.values());
+  const unmappedTerminalIds: string[] = [];
+  const unplacedTerminalIds: string[] = [];
+
+  // Pass 1 — authored terminals only, grouped by the edge they were drawn on.
+  // Guessed terminals are held back so they cannot influence authored anchors.
+  const authored = new Map<string, Terminal[]>();
+  const guessedByUnit = new Map<string, Terminal[]>();
   for (const t of terminals) {
-    if (!moduleById.has(t.unitId)) continue;
-    const edge = BOARD_EDGES[t.id] ?? 'top';
-    const key = `${t.unitId}|${edge}`;
-    const list = byUnitEdge.get(key);
-    if (list) list.push(t);
-    else byUnitEdge.set(key, [t]);
+    if (!moduleById.has(t.unitId)) {
+      // No module box for this unit, so the terminal is not drawn at all. That
+      // is a whole ingested unit missing from the layout, not a nudged anchor —
+      // report it separately rather than dropping it on the floor.
+      unplacedTerminalIds.push(t.id);
+      continue;
+    }
+    const edge = BOARD_EDGES[t.id];
+    if (edge) push(authored, `${t.unitId}|${edge}`, t);
+    else push(guessedByUnit, t.unitId, t);
+  }
+
+  // Pass 2 — assign each guessed terminal an edge, now that authored counts
+  // per edge are known.
+  const guessed = new Map<string, Terminal[]>();
+  for (const [unitId, ts] of guessedByUnit) {
+    const m = moduleById.get(unitId)!;
+    const countOn = (e: Edge) => authored.get(`${unitId}|${e}`)?.length ?? 0;
+    for (const t of ts) {
+      const edge = hubFacingEdge(m, hub, countOn);
+      push(guessed, `${unitId}|${edge}`, t);
+      unmappedTerminalIds.push(t.id);
+    }
   }
 
   const ports: PortNode[] = [];
   const positions = new Map<string, Anchor>();
-  for (const [key, ts] of byUnitEdge) {
+  const place = (t: Terminal, a: Anchor) => {
+    positions.set(t.id, a);
+    ports.push({ key: t.id, terminalId: t.id, x: round(a.x), y: round(a.y), nx: a.nx, ny: a.ny });
+  };
+
+  for (const key of new Set([...authored.keys(), ...guessed.keys()])) {
     const [unitId, edge] = key.split('|') as [string, Edge];
     const m = moduleById.get(unitId)!;
-    ts.forEach((t, i) => {
-      const a = edgeAnchor(m, edge, i, ts.length);
-      positions.set(t.id, a);
-      ports.push({ key: t.id, terminalId: t.id, x: round(a.x), y: round(a.y), nx: a.nx, ny: a.ny });
+    const authoredTs = authored.get(key) ?? [];
+    const guessedTs = guessed.get(key) ?? [];
+
+    // Authored anchors are computed from the authored count alone, so ingesting
+    // a new terminal never shifts a connector that was placed by hand — nor the
+    // wires and labels hanging off it.
+    authoredTs.forEach((t, i) => place(t, edgeAnchor(m, edge, i, authoredTs.length)));
+
+    if (!guessedTs.length) continue;
+    if (!authoredTs.length) {
+      guessedTs.forEach((t, i) => place(t, edgeAnchor(m, edge, i, guessedTs.length)));
+      continue;
+    }
+    // Pack guesses into the margin past the last authored anchor. edgeAnchor
+    // spaces n items at (i+1)/(n+1), leaving exactly 1/(n+1) of the edge free
+    // beyond the last one; subdivide that so guesses never land on an authored
+    // anchor however many arrive.
+    const n = authoredTs.length;
+    const margin = 1 / (n + 1);
+    guessedTs.forEach((t, j) => {
+      const frac = n / (n + 1) + ((j + 1) / (guessedTs.length + 1)) * margin;
+      place(t, edgeAnchorAt(m, edge, frac));
     });
   }
 
-  return { ports, positions };
+  return { ports, positions, unmappedTerminalIds, unplacedTerminalIds };
+}
+
+function push<T>(map: Map<string, T[]>, key: string, value: T): void {
+  const list = map.get(key);
+  if (list) list.push(value);
+  else map.set(key, [value]);
 }
 
 export function buildBoardLayout(units: Unit[], terminals: Terminal[], nets: Net[]): TwinLayout {
@@ -333,13 +455,14 @@ export function buildBoardLayout(units: Unit[], terminals: Terminal[], nets: Net
     (id) => wired.has(id) && BOARD_MODULES[id],
   ).map((id) => ({ unitId: id, ...BOARD_MODULES[id] }));
   const moduleById = new Map(modules.map((m) => [m.unitId, m]));
-  const { ports, positions } = buildEdgeGroupedPorts(terminals, moduleById);
+  const { ports, positions, unmappedTerminalIds, unplacedTerminalIds } =
+    buildEdgeGroupedPorts(terminals, moduleById);
 
   const wires = nets
     .map((n) => routeWire(n, positions, BOARD_WIRE_BOW))
     .filter((w): w is WirePath => Boolean(w));
 
-  return { width: BOARD_W, height: BOARD_H, modules, ports, wires };
+  return { width: BOARD_W, height: BOARD_H, modules, ports, wires, unmappedTerminalIds, unplacedTerminalIds };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -390,13 +513,14 @@ export function buildIsoLayout(units: Unit[], terminals: Terminal[], nets: Net[]
     return { unitId: id, x: round(c.x - ISO_MODULE_W / 2), y: round(c.y - ISO_MODULE_H / 2), w: ISO_MODULE_W, h: ISO_MODULE_H };
   });
   const moduleById = new Map(modules.map((m) => [m.unitId, m]));
-  const { ports, positions } = buildEdgeGroupedPorts(terminals, moduleById);
+  const { ports, positions, unmappedTerminalIds, unplacedTerminalIds } =
+    buildEdgeGroupedPorts(terminals, moduleById);
 
   const wires = nets
     .map((n) => routeWire(n, positions, ISO_WIRE_BOW))
     .filter((w): w is WirePath => Boolean(w));
 
-  return { width: ISO_W, height: ISO_H, modules, ports, wires };
+  return { width: ISO_W, height: ISO_H, modules, ports, wires, unmappedTerminalIds, unplacedTerminalIds };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -480,7 +604,21 @@ export function buildBusLayout(units: Unit[], terminals: Terminal[], nets: Net[]
     });
   });
 
-  return { width: BUS_W, height: BUS_H, modules, ports, wires };
+  const unplacedTerminalIds = terminals
+    .filter((t) => !colX.has(t.unitId))
+    .map((t) => t.id);
+
+  // Bus mode lays terminals on net rows, not module edges, so no terminal is
+  // ever edge-placed by guesswork here.
+  return {
+    width: BUS_W,
+    height: BUS_H,
+    modules,
+    ports,
+    wires,
+    unmappedTerminalIds: [],
+    unplacedTerminalIds,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

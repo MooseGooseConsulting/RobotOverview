@@ -192,6 +192,112 @@ describe('board & iso place every terminal', () => {
   });
 });
 
+describe('terminals with no authored edge', () => {
+  // A terminal ingested into Postgres after these layouts were hand-drawn has
+  // no BOARD_EDGES entry. It used to land on 'top' whatever module carried it,
+  // so its wires left the wrong side of the box.
+  const strays = [
+    // orin-nano sits right of the driver-board hub -> should exit left
+    { id: 'zz-orin-stray', unitId: 'orin-nano', name: 'Ingested Orin port' },
+    // stock-ups sits above-left of the hub -> should exit right or bottom
+    { id: 'zz-ups-stray', unitId: 'stock-ups', name: 'Ingested UPS port' },
+  ];
+
+  it.each([
+    ['board', buildBoardLayout],
+    ['iso', buildIsoLayout],
+  ] as const)('%s reports them instead of hiding them', (_mode, build) => {
+    const layout = build(units, [...terminals, ...strays], nets);
+    expect(layout.unmappedTerminalIds).toEqual(strays.map((s) => s.id));
+    // Everything hand-authored stays authored.
+    for (const t of terminals) expect(layout.unmappedTerminalIds).not.toContain(t.id);
+  });
+
+  it('board places them facing the hub, not always on top', () => {
+    const layout = buildBoardLayout(units, [...terminals, ...strays], nets);
+    const orin = layout.ports.find((p) => p.terminalId === 'zz-orin-stray');
+    // orin-nano is right of the hub, so its stray port must exit leftward.
+    expect(orin?.nx).toBe(-1);
+    expect(orin?.ny).toBe(0);
+
+    const ups = layout.ports.find((p) => p.terminalId === 'zz-ups-stray');
+    // stock-ups is up and to the left; either inward edge is correct, but the
+    // old 'top' fallback (ny === -1) points away from the hub and is not.
+    expect(ups?.ny).not.toBe(-1);
+  });
+
+  it.each([
+    ['board', buildBoardLayout],
+    ['iso', buildIsoLayout],
+  ] as const)('%s never moves an authored anchor to make room', (_mode, build) => {
+    // Guessed terminals used to join the authored edge group, which changed the
+    // group count and slid every hand-placed connector — and the wires and
+    // labels hanging off it — along the edge. Authored geometry must be inert
+    // to ingestion.
+    const before = build(units, terminals, nets);
+    const after = build(units, [...terminals, ...strays], nets);
+    for (const t of terminals) {
+      const b = before.ports.find((p) => p.terminalId === t.id);
+      const a = after.ports.find((p) => p.terminalId === t.id);
+      expect({ x: a?.x, y: a?.y }, `authored port "${t.id}" moved`).toEqual({ x: b?.x, y: b?.y });
+    }
+  });
+
+  it('places a hub-owned stray on the hub’s emptiest edge', () => {
+    // The hub faces nothing, so geometry gives no signal. driver-board authors
+    // 3 top / 2 left / 1 right / 4 bottom, making 'right' the emptiest.
+    const hubStray = { id: 'zz-hub-stray', unitId: 'driver-board', name: 'Ingested hub port' };
+    const layout = buildBoardLayout(units, [...terminals, hubStray], nets);
+    expect(layout.unmappedTerminalIds).toContain('zz-hub-stray');
+    const p = layout.ports.find((x) => x.terminalId === 'zz-hub-stray');
+    expect({ nx: p?.nx, ny: p?.ny }).toEqual({ nx: 1, ny: 0 });
+  });
+
+  it('reports nothing when every terminal is authored', () => {
+    expect(buildBoardLayout(units, terminals, nets).unmappedTerminalIds).toEqual([]);
+    expect(buildIsoLayout(units, terminals, nets).unmappedTerminalIds).toEqual([]);
+    // Bus mode never edge-places, so it has nothing to report either.
+    expect(buildBusLayout(units, [...terminals, ...strays], nets).unmappedTerminalIds).toEqual([]);
+  });
+
+  it('keeps authored port positions stable when stray terminals are added', () => {
+    const before = buildBoardLayout(units, terminals, nets);
+    const after = buildBoardLayout(units, [...terminals, ...strays], nets);
+
+    for (const t of terminals) {
+      const pBefore = before.ports.find((p) => p.terminalId === t.id);
+      const pAfter = after.ports.find((p) => p.terminalId === t.id);
+      expect(pAfter).toEqual(pBefore);
+    }
+  });
+
+  it.each([
+    ['board', buildBoardLayout],
+    ['iso', buildIsoLayout],
+    ['bus', buildBusLayout],
+  ] as const)('%s reports unplaced terminals for units with no layout box', (_mode, build) => {
+    const unplaced = [{ id: 'zz-orphan-port', unitId: 'unplaced-device', name: 'Orphan' }];
+    const layout = build(units, [...terminals, ...unplaced], nets);
+    expect(layout.unplacedTerminalIds).toEqual(['zz-orphan-port']);
+  });
+});
+
+describe('terminals on a unit with no module box', () => {
+  const orphan = { id: 'zz-orphan', unitId: 'zz-unplaced-unit', name: 'Orphan port' };
+
+  it.each([
+    ['board', buildBoardLayout],
+    ['iso', buildIsoLayout],
+    ['bus', buildBusLayout],
+  ] as const)('%s reports rather than silently dropping them', (_mode, build) => {
+    const layout = build(units, [...terminals, orphan], nets);
+    // Still not drawn — there is nowhere to draw it — but no longer invisible.
+    expect(layout.ports.some((p) => p.terminalId === orphan.id)).toBe(false);
+    expect(layout.unplacedTerminalIds).toContain(orphan.id);
+    expect(build(units, terminals, nets).unplacedTerminalIds).toEqual([]);
+  });
+});
+
 describe('bus taps each net terminal on its row', () => {
   it('gives every net at least two tap nodes', () => {
     const layout = buildBusLayout(units, terminals, nets);
