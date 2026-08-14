@@ -58,21 +58,32 @@ stop early units seeing 1969) quarantined to `power-log-garbage-epoch0.csv`,
 backup `power-log.csv.bak-2026-08-14-pre-gc`, log now 27k clean rows.
 Barrel-jack multimeter still owed (Schottky vs 12 V brick).
 
-**Services + deployed source 2026-08-14 13:25Z (live, `ssh beast-01-ts`):**
-Checkout `/home/beast/beast/RobotOverview` is on **`main` @ `98a11a1`**. It
-moved off `feat/cockpit-map-render` @ `edae18d` at 03:30 CDT — *after* the
-units came up — and **nothing has rebuilt or restarted since**:
-`install/setup.bash` is stamped 00:57:30 CDT, `beast-ros-base` entered active
-at 00:59:13 CDT. **The running overlay is `edae18d`; the checkout is not the
-running code.** That overlay is the one deployed at 05:58Z (all 15 verify
-PASS): usable-range SOC on clean-log Vmax, coulomb persist (`resumed
-−93.0 mAh / −1.14 Wh` across the GC restart), `/map` over rosbridge,
-cockpit-serve retry loop, deploy push via the `refs/deploy/incoming` staging
-ref (re-deploying the checked-out branch used to hit
-`receive.denyCurrentBranch`). Working tree is clean apart from three untracked
-`beast-wifi-telemetry` artefacts (`deploy/bin/` + two `deploy/systemd/` units)
-— installed and running from `/etc/systemd/system`, but not present in
-`98a11a1`.
+**Services + deployed source 2026-08-14 13:45Z (live, `ssh beast-01-ts`):**
+Checkout `/home/beast/beast/RobotOverview` is at **`d714082`** (main, #221),
+rebuilt and restarted, and the timestamps now read in the right order —
+checkout 08:43:54, `install/setup.bash` 08:44:03, `beast-ros-base` active
+08:44:57 CDT. **Running code == built code == checkout.** All 15
+`--verify-only` checks PASS; pack 12.11 V.
+
+Check that ordering before trusting any claim about deployed code. Earlier the
+same day it read the other way: the checkout moved to `main` @ `98a11a1` at
+03:30 CDT while the overlay was still `feat/cockpit-map-render` @ `edae18d`
+built at 00:57:30, so `git rev-parse HEAD` named code the robot was not
+running. `install/` is a `--symlink-install` tree (70 symlinked `.py` vs 2
+real, launch files included), so a *restart alone* would have swapped the
+Python and launch layers to the new checkout against the old build artefacts.
+`git rev-parse HEAD` is not the running version — compare the three
+timestamps.
+
+**`deploy-to-beast.sh` cannot finish passwordlessly right now.** The robot's
+`/etc/sudoers.d/beast-ops` (stamped Aug 13 21:22) predates the tree's, which
+carries 18 `beast-wifi-telemetry` NOPASSWD entries the installed copy lacks.
+Step 3 therefore fails on `systemctl enable --now beast-wifi-telemetry.timer`
+and aborts *before* the script reaches its `exit 2` break-glass sentinel, so
+the break-glass path never engages and no restart happens — a half-deploy:
+new code built on disk, old processes still running. Until the sudoers file is
+reinstalled, finish the deploy by hand:
+`sudo systemctl restart beast-ros-base && sudo systemctl try-restart beast-cockpit`.
 
 Units: `beast-ros-base` **active/enabled** (host colcon overlay —
 `ros2 launch ugv_bringup bringup_lidar.launch.py … allow_motion:=true`),
