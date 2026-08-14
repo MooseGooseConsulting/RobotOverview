@@ -1,0 +1,77 @@
+# BEAST-01 Nav2 navigation layer ONLY (autonomy on-ramp Phase 3).
+# Starts controller_server, smoother_server, planner_server, behavior_server,
+# velocity_smoother, collision_monitor, bt_navigator, waypoint_follower and
+# lifecycle_manager_navigation — nothing else. No amcl, no map_server, no
+# slam_toolbox: map->odom must already exist (see below).
+#
+# INSTALLED BUT NEVER ENABLED. This unit is started BY HAND for
+# owner-supervised sessions only — a Nav2 stack that autostarts on a robot
+# nobody is watching is exactly what the safety spine exists to prevent
+# (autonomy on-ramp plan Phase 3: do not enable). There is deliberately no
+# [Install] section, so `systemctl enable beast-nav` fails loudly instead of
+# quietly arming autonomy at boot.
+#
+# Manual start (owner present, hand on cockpit DISARM/WASD):
+#     sudo systemctl start beast-nav
+#     sudo systemctl stop beast-nav      # before walking away
+#
+# Requires a live map->odom source, which this unit does NOT provide:
+#   - live-SLAM mode (first light): start beast-slam.service first — its
+#     slam_toolbox online_async publishes /map and the map->odom TF;
+#   - saved-map mode (later): stop beast-slam and run the map_server+amcl
+#     variant instead — ros2 launch ugv_nav nav2_bringup.launch.py
+#     map:=/data/beast/maps/beast-map.yaml use_slam:=False
+#     use_localization:=amcl (that path starts its own localization AND the
+#     same nav layer as this unit, so never run both at once).
+#
+# Why navigation_launch.py directly, not nav2_bringup.launch.py or
+# nav.launch.py (verified against the launch sources, 2026-08-14):
+#   - nav2_bringup.launch.py use_slam:=True includes slam_launch.py, which
+#     starts a SECOND slam_toolbox (online_sync) plus map_saver against the
+#     live beast-slam session — two map->odom publishers fighting;
+#   - nav2_bringup.launch.py use_slam:=False includes localization_launch.py
+#     -> map_server + amcl, which fights the live slam_toolbox the same way;
+#   - ugv_nav/launch/nav.launch.py includes bringup_lidar.launch.py and
+#     double-starts twist_mux against beast-ros-base (its WARNING says so).
+# navigation_launch.py is the nav layer alone. use_composition:=False is
+# REQUIRED standalone: the composable branch only loads into an existing
+# nav2_container, which only nav2_bringup.launch.py creates.
+#
+# Params: rpp.yaml — RotationShimController wrapping RegulatedPurePursuit,
+# allow_reversing: false, use_rotate_to_heading: true. The right shape for a
+# robot with a 104° blind wedge astern: turn to face where you are going,
+# never reverse into unsensed space. Effective speed cap is the velocity
+# smoother's max_velocity [0.26, 0.0, 1.0], not RPP's desired_linear_vel.
+
+[Unit]
+Description=BEAST-01 Nav2 navigation layer (owner-supervised, never enabled)
+Documentation=file:///home/beast/beast/RobotOverview/robot/beast/ros2_ws/docs/navigation.md
+# Same clock ordering as beast-slam.service: a cold boot starts at epoch 0
+# (no RTC battery) and an NTP jump mid-bringup is exactly the failure the
+# time-sync ordering exists to prevent.
+After=beast-ros-base.service network-online.target time-sync.target systemd-timesyncd.service
+Wants=beast-ros-base.service time-sync.target
+# Fails fast if ugv_nav is not built into the workspace install tree.
+ConditionPathExists=/home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/ugv_nav/share/ugv_nav/params/rpp.yaml
+
+[Service]
+Type=simple
+# Runs as beast (like beast-ros-base/beast-slam): root has no usable HOME for
+# rcutils' logging dir and the node aborts with "Failed to get logging
+# directory".
+User=beast
+Group=beast
+WorkingDirectory=/home/beast/beast/RobotOverview/robot/beast/ros2_ws
+EnvironmentFile=-/etc/beast/ugv.env
+Environment=PYTHONUNBUFFERED=1
+# Same guard as beast-ros-base/beast-slam: the sudoers allowlist lets an
+# operator start this unit while beast-pull is mid-rebuild — and Nav2 launched
+# onto a half-built workspace navigates garbage. Fail loudly until the deploy
+# marker clears. (sh has no login-shell baggage; the guard needs no ROS env.)
+ExecStartPre=/bin/sh -c 'exec /home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-deploy-guard'
+ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/setup.bash && exec ros2 launch ugv_nav navigation_launch.py params_file:=/home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/ugv_nav/share/ugv_nav/params/rpp.yaml use_composition:=False autostart:=true'
+Restart=on-failure
+RestartSec=10
+
+# No [Install] section, deliberately — see header. `systemctl start` works;
+# `systemctl enable` has nothing to hook.
