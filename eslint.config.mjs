@@ -15,6 +15,10 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Independently tested ROS/Python/C++ workspace with vendored browser assets.
     "robot/beast/ros2_ws/**",
+    // Agent worktrees: a full second copy of src that would be linted as if it
+    // were this branch's code. CI never sees these (clean checkout), so the
+    // noise is local-only — and misleading, since the findings aren't yours.
+    ".claude/**",
   ]),
 ]);
 
