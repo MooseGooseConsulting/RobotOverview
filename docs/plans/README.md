@@ -22,6 +22,8 @@ disagree, the code is right and the plan is stale.
 | [BEAST autonomy on-ramp](2026-08-14-beast-autonomy-on-ramp.md) | Phase 0 repairs `beast-slam.service` (no `time-sync.target` ordering on a robot with no RTC battery), then calibration, first real map, Nav2 bringup, `/goal_pose`, `explore_lite` un-park. | Phases 3–5 blocked on the roslib-convergence plan |
 | [BEAST vendored surface + doc drift](2026-08-14-beast-vendor-parked-surface-and-doc-drift.md) | DELETE `vizanti` and `ugv_web_app`; LEAVE PARKED `explore_lite`/`emcl2`; RESTORE `beast_base` to both build allowlists; 21 drift items. | **`beast_base` absent from both build scripts — a clean rebuild loses the boot stop** |
 
+| [Verification surfaces (2026-08-14 set)](2026-08-14-verification-surfaces.md) | Reference, not a work order: the evidence tier each unit of the five plans below deserves, which tests exist vs. must be added, and which items CI would silently let you revert. Delete each section with its plan. | No — reference |
+
 ### Execution order for the 2026-08-14 set
 
 Dependency-ordered, not priority-ordered. Each item's evidence lives in its own plan.
