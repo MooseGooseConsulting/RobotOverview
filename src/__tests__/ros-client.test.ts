@@ -296,7 +296,11 @@ describe('rosClient and hooks', () => {
       expect(topics).toContain('/map');
       expect(topics).toContain('/scan');
       expect(topics).toContain('/tf');
-      expect(DEFERRED_WIRE_TOPICS).not.toContain('/map');
+      // The deferral list must actually keep topics off the wire — if a topic
+      // is ever re-deferred, this catches a subscribe leaking through.
+      for (const deferred of DEFERRED_WIRE_TOPICS) {
+        expect(topics).not.toContain(deferred);
+      }
     });
 
     it('unsubscribes /map when the bridge starts fragmenting an oversized dump', () => {

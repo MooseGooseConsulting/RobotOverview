@@ -274,6 +274,8 @@ principals. SSH-only grants leave `ssh beast-01-ts` healthy while Hangar shows
 ROBOT UNREACHABLE. Verify from a workstation on the tailnet:
 
 ```powershell
+# Verify-BeastCockpitAcl.ps1 lives in the coldaine-homelab repo (which owns the
+# tailnet policy), not here — run it from a coldaine-homelab checkout.
 doppler run --project homelab --config dev -- pwsh -File scripts/Verify-BeastCockpitAcl.ps1
 pwsh -File tools/beast/Verify-Beast-Cockpit.ps1
 ```

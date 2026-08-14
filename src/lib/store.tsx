@@ -67,14 +67,18 @@ function readStoredSource(): SourcePreference {
   }
 }
 
-function readStoredLensMissionId(): string | null {
+function readStoredLensMissionId(missions: ReadonlyArray<{ id: string }>): string | null {
   if (typeof window === 'undefined') return null;
 
   try {
     const storedMissionId = window.localStorage.getItem(STORE_KEYS.lensMissionId);
     if (!storedMissionId) return null;
 
-    return hangarData.missions.some((mission) => mission.id === storedMissionId) ? storedMissionId : null;
+    // Validate against the missions the app is actually rendering (the live
+    // spine when Postgres answered) — NOT the stale-by-design hangarData
+    // fixture, which silently dropped saved lenses for missions that only
+    // exist in the database.
+    return missions.some((mission) => mission.id === storedMissionId) ? storedMissionId : null;
   } catch {
     return null;
   }
@@ -288,7 +292,7 @@ export function HangarProvider({
 }) {
   const spine = initialData ?? hangarData;
   const [theme, setTheme] = useState<ThemeMode>(() => readStoredTheme());
-  const [lensMissionId, setLensMissionId] = useState<string | null>(() => readStoredLensMissionId());
+  const [lensMissionId, setLensMissionId] = useState<string | null>(() => readStoredLensMissionId(spine.missions));
   const [source, setSource] = useState<SourcePreference>(() => readStoredSource());
   const [spotlightId, setSpotlightId] = useState<string | null>(null);
   const [units, setUnits] = useState<Unit[]>(() => spine.units);

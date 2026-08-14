@@ -146,6 +146,17 @@ def _utc_year(utc: str) -> Optional[int]:
     return year
 
 
+# The Orin has no RTC battery; a cold boot starts at epoch 0 until NTP steps
+# the clock (~100 s with network). Anything before this year is that window.
+REAL_CLOCK_MIN_YEAR = 2020
+
+
+def utc_is_real_clock(utc: str) -> bool:
+    """True when the ISO utc cell carries a post-NTP (non-epoch) clock."""
+    year = _utc_year(utc)
+    return year is not None and year >= REAL_CLOCK_MIN_YEAR
+
+
 def _last_durable_row(path: str) -> Optional[tuple[float, float]]:
     """Last row in one CSV with finite totals and a real clock, else None."""
     if not os.path.exists(path) or os.path.getsize(path) == 0:
@@ -155,8 +166,7 @@ def _last_durable_row(path: str) -> Optional[tuple[float, float]]:
             reader = csv.DictReader(handle)
             last: Optional[tuple[float, float]] = None
             for row in reader:
-                year = _utc_year(row.get('utc') or '')
-                if year is None or year < 2020:
+                if not utc_is_real_clock(row.get('utc') or ''):
                     continue
                 try:
                     charge_mah = float(row['charge_mah'])

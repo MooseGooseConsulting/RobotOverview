@@ -99,10 +99,6 @@ export function terminalById(terminals: Terminal[], id: string): Terminal | unde
   return terminals.find((t) => t.id === id);
 }
 
-export function unitById(units: Unit[], id: string): Unit | undefined {
-  return units.find((u) => u.id === id);
-}
-
 /** Every net that includes the given terminal. */
 export function netsForTerminal(nets: Net[], terminalId: string): Net[] {
   return nets.filter((n) => n.terminals.includes(terminalId));

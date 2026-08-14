@@ -22,6 +22,7 @@ from beast_power.logging_core import (
     LogAlreadyActive,
     build_row,
     resume_integrator,
+    utc_is_real_clock,
 )
 from beast_power.soc import legacy_fake_percentage
 
@@ -99,6 +100,7 @@ class PowerLogger(Node):
         self._last_mono: Optional[float] = None
         self._charging: Optional[bool] = None
         self._rows = 0
+        self._pre_clock_rows = 0
         self._start_note = 'session_start'
 
         # Battery telemetry is sampled state, not a stream to replay: keep the
@@ -142,6 +144,29 @@ class PowerLogger(Node):
 
         self._integrator.add(current, voltage, dt)
 
+        utc = datetime.now(timezone.utc).isoformat(
+            timespec='milliseconds'
+        ).replace('+00:00', 'Z')
+        # No RTC battery: a cold boot writes epoch-1970 timestamps until NTP
+        # steps the clock (~100 s). Those rows poisoned every Vmax analysis
+        # and needed manual GC — suppress them at the source. Integration
+        # runs on time.monotonic above, so the totals stay correct across
+        # the gap; only the unusable CSV rows are skipped.
+        if not utc_is_real_clock(utc):
+            self._pre_clock_rows += 1
+            if self._pre_clock_rows == 1:
+                self.get_logger().warning(
+                    'System clock is pre-NTP (epoch); suppressing CSV rows '
+                    'until it syncs. Charge integration continues.'
+                )
+            return
+        if self._pre_clock_rows:
+            self.get_logger().info(
+                f'Clock synced; suppressed {self._pre_clock_rows} '
+                'pre-NTP row(s)'
+            )
+            self._pre_clock_rows = 0
+
         legacy = legacy_fake_percentage(voltage) if voltage is not None else None
 
         note = self._start_note
@@ -150,9 +175,7 @@ class PowerLogger(Node):
         try:
             self._writer.write_row(
                 build_row(
-                    utc=datetime.now(timezone.utc).isoformat(
-                        timespec='milliseconds'
-                    ).replace('+00:00', 'Z'),
+                    utc=utc,
                     mono_s=mono,
                     dt_s=dt,
                     voltage_v=voltage,

@@ -1,0 +1,45 @@
+name: Hangar web tests
+
+# The web app previously had NO test gate: 41 vitest files and eslint ran
+# only on developer machines, while CI's sole web check was the Docker image
+# build (incidental typechecking via `next build`). This closes that gap.
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'db/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'next.config.ts'
+      - 'vitest.config.ts'
+      - 'eslint.config.mjs'
+      - '.github/workflows/web-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'db/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'next.config.ts'
+      - 'vitest.config.ts'
+      - 'eslint.config.mjs'
+      - '.github/workflows/web-tests.yml'
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          # Node 25 breaks vitest's localStorage stub (`localStorage.clear is
+          # not a function`); 22 is the supported LTS for this suite.
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:run

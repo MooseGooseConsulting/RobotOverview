@@ -488,6 +488,22 @@ class TestLockFailureModes:
         w2.close()
 
 
+class TestUtcIsRealClock:
+    def test_epoch_rows_are_not_real(self):
+        from beast_power.logging_core import utc_is_real_clock
+
+        assert not utc_is_real_clock('1970-01-01T00:00:42.957Z')
+        assert not utc_is_real_clock('2019-12-31T23:59:59.000Z')
+        assert not utc_is_real_clock('')
+        assert not utc_is_real_clock('not-a-date')
+
+    def test_synced_clock_is_real(self):
+        from beast_power.logging_core import utc_is_real_clock
+
+        assert utc_is_real_clock('2026-08-14T05:50:56.249Z')
+        assert utc_is_real_clock('2020-01-01T00:00:00.000Z')
+
+
 class TestResumeIntegrator:
     def test_missing_file_is_zero(self, tmp_path):
         assert resume_integrator(str(tmp_path / 'nope.csv')) == (0.0, 0.0)

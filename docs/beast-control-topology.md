@@ -2,7 +2,7 @@
 
 Stable map of how Hangar (this repo) and the robot brain (`ugv_ws`) share authority
 over BEAST-01. Architecture decisions live in the
-[master plan](plans/2026-08-02-beast-agent-architecture.md). **Volatile live facts**
+[master plan](plans/2026-08-02-control-plane-architecture.md). **Volatile live facts**
 (SSH paths, pack voltage, boot args, HEAD SHAs, bridge presence) live only in
 [`docs/beast-ops.md`](beast-ops.md) Quick connect — re-verify there; do not copy
 dated probe numbers into this doc.
@@ -190,8 +190,7 @@ bridge; the robot sees topics, not clients. Closed-glob contract:
 
 - Intent: [`docs/NORTH_STAR.md`](NORTH_STAR.md) (G7)
 - Live ops: [`docs/beast-ops.md`](beast-ops.md)
-- Master plan + PR sets: [`docs/plans/2026-08-02-beast-agent-architecture.md`](plans/2026-08-02-beast-agent-architecture.md)
-- Immobile session work order: [`docs/plans/2026-08-02-beast-immobile-execution.md`](plans/2026-08-02-beast-immobile-execution.md)
+- Master plan + PR sets: [`docs/plans/2026-08-02-control-plane-architecture.md`](plans/2026-08-02-control-plane-architecture.md)
 - Advanced cockpit idea bank (not a live plan): Datacore
   [`/datacore/briefing/beast-cockpit-future-roadmap`](/datacore/briefing/beast-cockpit-future-roadmap)
-  · thin pointer [`docs/beast-cockpit-future-roadmap.md`](beast-cockpit-future-roadmap.md)
+  · thin pointer [`docs/plans/2026-08-01-beast-cockpit-future-roadmap.md`](plans/2026-08-01-beast-cockpit-future-roadmap.md)
