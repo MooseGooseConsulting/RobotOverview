@@ -1,0 +1,162 @@
+#!/bin/bash
+# beast-ctl - the single root entry point for BEAST-01 unit operations.
+#
+# WHY THIS EXISTS
+# ---------------
+# sudoers matches the ENTIRE command line literally. Expressing "the beast user
+# may manage the beast units" as a Cmnd_Alias therefore costs one line per
+# (verb x unit x .service-suffix x flag) combination — 193 lines by 2026-08-14,
+# and still full of holes: `systemctl is-enabled beast-wifi-telemetry.timer` was
+# refused while `enable` on the same unit was allowed, and `list-timers X` and
+# `list-timers X --no-pager` each needed their own entry. A policy you cannot
+# read is a policy nobody audits, and every hole shows up as a deploy that dies
+# on `sudo: a password is required` at 2 a.m.
+#
+# So: sudoers allowlists exactly ONE command (this script), and the policy moves
+# into the table below, where it is greppable, reviewable, and unit-testable
+# (see tools/ci/test_beast_ctl.py).
+#
+# SECURITY CONTRACT — read before editing
+# ---------------------------------------
+#   * Installed to /usr/local/sbin/beast-ctl, root-owned, mode 0755. It MUST NOT
+#     be executed from the repo checkout: /home/beast is writable by `beast`, so
+#     allowlisting a path under it would let the beast user rewrite the script
+#     and hand itself root. install-beast-sudoers.sh installs the copy.
+#   * No eval, no `$*` re-splitting, no shelling out to a string. systemctl is
+#     invoked with an explicit argv array built only from validated tokens.
+#   * Unknown verb, unknown unit, or unknown flag => refuse and exit 2. Default
+#     deny; there is no passthrough path.
+#
+# Usage: beast-ctl <verb> <unit> [flags]
+#        beast-ctl policy            # dump the effective table (no privilege)
+set -euo pipefail
+
+# --- policy table -----------------------------------------------------------
+# unit|classes   Classes are additive. Every managed unit implicitly gets READ.
+#   run       start stop restart try-restart reload-or-restart
+#   hold      start stop ONLY - no restart. For units whose death must be
+#             noticed by a human rather than papered over.
+#   lifecycle enable disable (with or without --now)
+#   mask      mask unmask
+#
+# beast-nav is `hold` and deliberately has NO lifecycle: the unit ships without
+# an [Install] section and the never-enable contract (owner-supervised nav
+# sessions only) is enforced here as well as there. No restart either — a nav
+# session that died stays down until someone starts it again on purpose.
+POLICY="
+beast-ros-base|run,lifecycle
+beast-cockpit|run,lifecycle
+beast-cockpit-serve|run,lifecycle
+beast-slam|run,lifecycle
+beast-nav|hold
+beast-pull|run
+beast-pull.timer|run,lifecycle,mask
+beast-wifi-telemetry|run,lifecycle
+beast-wifi-telemetry.timer|run,lifecycle,mask
+beast-wifi-watch|run,lifecycle
+beast-link-watch|run,lifecycle
+beast-link-watch.timer|run,lifecycle,mask
+beast-storage-maintenance|run,lifecycle
+beast-storage-maintenance.timer|run,lifecycle,mask
+beast-storage-prepare|run,lifecycle
+beast-blackbox-record|run,lifecycle
+beast-mission-record@|run
+"
+
+VERBS_READ="status is-active is-enabled is-failed show cat list-timers list-units"
+VERBS_RUN="start stop restart try-restart reload-or-restart"
+VERBS_HOLD="start stop"
+VERBS_LIFECYCLE="enable disable"
+VERBS_MASK="mask unmask"
+
+die() { printf 'beast-ctl: %s\n' "$1" >&2; exit 2; }
+in_list() { case " $2 " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+
+policy_classes() {
+  # $1 = normalized unit key -> prints its class list, or nothing if unmanaged
+  printf '%s\n' "$POLICY" | while IFS='|' read -r u c; do
+    [ -n "$u" ] || continue
+    [ "$u" = "$1" ] && { printf '%s' "$c"; return; }
+  done
+}
+
+if [ "${1:-}" = "policy" ]; then
+  printf '%s\n' "$POLICY" | sed '/^$/d'
+  exit 0
+fi
+
+[ $# -ge 2 ] || die "usage: beast-ctl <verb> <unit> [flags]"
+# Flags may appear on either side of the unit — `enable --now X` is the order
+# systemctl's own docs use, and requiring `enable X --now` here would be a
+# gratuitous trap. First non-flag token after the verb is the unit.
+verb=$1; shift
+unit=""
+raw_flags=()
+for a in "$@"; do
+  case $a in
+    --*) raw_flags+=("$a") ;;
+    *)   [ -n "$unit" ] && die "more than one unit given ('$unit' and '$a')"
+         unit=$a ;;
+  esac
+done
+[ -n "$unit" ] || die "no unit given"
+set -- "${raw_flags[@]+"${raw_flags[@]}"}"
+
+# --- validate the unit ------------------------------------------------------
+# Templated instances (beast-mission-record@undercroft) map to the '@' key.
+case $unit in
+  *[!A-Za-z0-9@._-]*) die "unit '$unit' contains illegal characters" ;;
+esac
+key=${unit%.service}
+case $key in
+  *@*) key="${key%%@*}@" ;;
+esac
+classes=$(policy_classes "$key")
+[ -n "$classes" ] || die "unit '$unit' is not managed by beast-ctl (see: beast-ctl policy)"
+
+# --- validate the verb against that unit's classes ---------------------------
+allowed=$VERBS_READ
+case ,$classes, in
+  *,run,*)       allowed="$allowed $VERBS_RUN" ;;
+esac
+case ,$classes, in
+  *,hold,*)      allowed="$allowed $VERBS_HOLD" ;;
+esac
+case ,$classes, in
+  *,lifecycle,*) allowed="$allowed $VERBS_LIFECYCLE" ;;
+esac
+case ,$classes, in
+  *,mask,*)      allowed="$allowed $VERBS_MASK" ;;
+esac
+
+in_list "$verb" "$allowed" \
+  || die "verb '$verb' not permitted on '$unit' (allowed: $allowed)"
+
+# --- validate flags ---------------------------------------------------------
+# --now only means anything on enable/disable; accepting it elsewhere would let
+# a typo silently become a different operation.
+args=()
+for a in "$@"; do
+  case $a in
+    --now)
+      in_list "$verb" "$VERBS_LIFECYCLE" \
+        || die "--now is only valid with enable/disable"
+      args+=("$a") ;;
+    --quiet|--no-pager|--no-legend|--plain)
+      args+=("$a") ;;
+    *)
+      die "flag '$a' not permitted" ;;
+  esac
+done
+
+# BEAST_CTL_DRYRUN prints the argv instead of running it, so the policy table
+# can be exercised in CI without systemd. Safe under sudo: env_reset drops it,
+# and even if it survived, dry-run strictly REDUCES what this script does.
+if [ -n "${BEAST_CTL_DRYRUN:-}" ]; then
+  printf 'systemctl %s %s' "$verb" "$unit"
+  for a in "${args[@]+"${args[@]}"}"; do printf ' %s' "$a"; done
+  printf '\n'
+  exit 0
+fi
+
+exec /usr/bin/systemctl "$verb" "$unit" "${args[@]+"${args[@]}"}"

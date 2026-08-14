@@ -454,9 +454,9 @@ checkout_build_restart() {
   # probing here would make the rollback leg read the cockpit the FORWARD leg
   # just stopped as "inactive", skip its restart, and beast-verify would then
   # fail an otherwise clean rollback into a self-hold with the UI down.
-  sudo -n /usr/bin/systemctl stop beast-ros-base || return 1
+  sudo -n /usr/local/sbin/beast-ctl stop beast-ros-base || return 1
   if [ "$cockpit_active" = 1 ]; then
-    sudo -n /usr/bin/systemctl stop beast-cockpit || return 1
+    sudo -n /usr/local/sbin/beast-ctl stop beast-cockpit || return 1
   fi
   # beast-nav shares this workspace but is a hand-started supervised unit: a
   # nav session momentarily stationary passes the motion gate, and a live
@@ -466,7 +466,7 @@ checkout_build_restart() {
   # restart it below — deploys leave nav DOWN by design; the owner starts it
   # again by hand.
   log "stopping beast-nav (never survives a workspace swap; deploys leave nav down)"
-  sudo -n /usr/bin/systemctl stop beast-nav \
+  sudo -n /usr/local/sbin/beast-ctl stop beast-nav \
     || log "beast-nav stop failed or unit absent; continuing"
 
   # The marker's lifetime IS the inconsistency window: created just before the
@@ -552,11 +552,11 @@ checkout_build_restart() {
 
   # These verbs are already in /etc/sudoers.d/beast-ops; no new grant needed.
   # beast-nav is deliberately NOT restarted here — see the stop above.
-  sudo -n /usr/bin/systemctl restart beast-ros-base || return 1
+  sudo -n /usr/local/sbin/beast-ctl restart beast-ros-base || return 1
   if [ "$cockpit_active" = 1 ]; then
     # restart, not try-restart: WE stopped it above, so try-restart on the now
     # stopped unit would silently never bring the cockpit back.
-    sudo -n /usr/bin/systemctl restart beast-cockpit || return 1
+    sudo -n /usr/local/sbin/beast-ctl restart beast-cockpit || return 1
   fi
   sleep 20
 }
