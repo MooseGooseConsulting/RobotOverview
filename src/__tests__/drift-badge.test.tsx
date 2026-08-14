@@ -39,7 +39,9 @@ describe('DriftBadge', () => {
 
   it('counts guessed and undrawn terminals together', () => {
     renderFor([stray, orphan]);
-    const button = screen.getByRole('button', { name: /2 unplaced terminals/i });
+    // One of each: the label names what happened to each, because "unplaced"
+    // is untrue of a terminal that is drawn from a guess.
+    const button = screen.getByRole('button', { name: /1 guessed, 1 unplaced/i });
     expect(button).toHaveAttribute('aria-expanded', 'false');
 
     fireEvent.click(button);
@@ -54,7 +56,9 @@ describe('DriftBadge', () => {
 
   it('singularises a lone finding and hides detail until asked', () => {
     renderFor([stray]);
-    expect(screen.getByRole('button', { name: /1 unplaced terminal$/i })).toBeInTheDocument();
+    // Drawn from a guess, so "guessed" — not "unplaced".
+    expect(screen.getByRole('button', { name: /^1 guessed$/i })).toBeInTheDocument();
+    expect(screen.queryByText(/unplaced/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/no authored edge/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button'));
@@ -70,7 +74,7 @@ describe('DriftBadge', () => {
     // Inert text, not a control: the preview sits inside a card-wide <Link>,
     // where a nested button is invalid and a disabled one eats the card click.
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
-    expect(screen.getByText(/2 unplaced terminals/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 guessed, 1 unplaced/i)).toBeInTheDocument();
     expect(screen.queryByText(/no authored edge/i)).not.toBeInTheDocument();
   });
 

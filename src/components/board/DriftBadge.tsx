@@ -38,7 +38,15 @@ export function DriftBadge({ layout, terminals, units, compact = false }: DriftB
   const unitNameById = useMemo(() => new Map(units.map((u) => [u.id, u.name])), [units]);
   if (!total) return null;
 
-  const label = `${total} unplaced ${total === 1 ? 'terminal' : 'terminals'}`;
+  // "Unplaced" is only true of the second list. Guessed terminals ARE drawn —
+  // calling them unplaced sends someone hunting for missing connectors that are
+  // on screen the whole time. Name each kind by what actually happened to it.
+  const label = [
+    unmappedTerminalIds.length ? `${unmappedTerminalIds.length} guessed` : null,
+    unplacedTerminalIds.length ? `${unplacedTerminalIds.length} unplaced` : null,
+  ]
+    .filter(Boolean)
+    .join(', ');
 
   // Connector names repeat across units — "USB Host Ports" exists on both the Pi
   // and the Orin — so the name alone cannot tell an operator which placement to
