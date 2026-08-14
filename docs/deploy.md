@@ -1,6 +1,6 @@
 ---
 title: Deployment — verified facts
-last_verified: 2026-08-10
+last_verified: 2026-08-14
 ---
 
 # Deployment — verified facts
@@ -13,16 +13,22 @@ bodies. When this page and reality disagree, reality wins — check the named li
 building on anything here.
 
 **This repo** owns the Hangar app code, `Dockerfile`, and content tooling.
-**[`coldaine-homelab`](https://github.com/Coldaine/coldaine-homelab)** owns runtime
+**[`coldaine-homelab`](https://github.com/MooseGooseConsulting/coldaine-homelab)** owns runtime
 manifests, secrets (via Doppler/ESO), Gateway listeners, and Flux reconciliation.
 
 ## What runs today
 
 - **Workload:** Deployment `hangar` in namespace `hangar` (Flux `target-apps` →
-  `infra/k8s/apps/hangar/`). Image is **digest-pinned** since 2026-07-31
-  ([coldaine-homelab PR #285](https://github.com/Coldaine/coldaine-homelab/pull/285)):
-  `ghcr.io/coldaine/robot-overview@sha256:177180e6…` (the PR #134 build, verified against
-  the running pod) with `imagePullPolicy: IfNotPresent`. `:latest` + `Always` is retired.
+  `infra/k8s/apps/hangar/`, GitRepository 1 min + Kustomization 10 min, `prune: true`).
+  Image is **digest-pinned** since 2026-07-31
+  ([coldaine-homelab PR #285](https://github.com/MooseGooseConsulting/coldaine-homelab/pull/285)):
+  `ghcr.io/moosegooseconsulting/robot-overview@sha256:999186404f…` (main `5375738`, #218 —
+  verified in-cluster 2026-08-14) with `imagePullPolicy: IfNotPresent`.
+  Until 2026-08-14 this pin was hand-edited and had gone stale at `7481575` (#199),
+  **37 commits behind main**, because nothing wrote it. That is the gap `deploy-pin.yml` closes.
+  `:latest` + `Always` is retired and must not come back: it does not auto-deploy either.
+  `IfNotPresent` never re-pulls, and `Always` only re-pulls **when a pod starts** — nothing
+  starts one on an image push. Only a spec change rolls a Deployment.
 - **Database:** Logical DB `hangar` on CloudNativePG `pg18-core` (`data-platform`).
   App env from Secret `hangar-runtime-secrets` (`HANGAR_DB_*`, `HANGAR_INGEST_TOKEN`,
   `DATACORE_LIBRARY_URL`, `HANGAR_LIBRARY_*`).
@@ -43,8 +49,9 @@ manifests, secrets (via Doppler/ESO), Gateway listeners, and Flux reconciliation
   plan kinds. When Postgres is unavailable, the app serves `src/data/datacore-corpus.ts`
   under a **DATACORE OFFLINE** banner (content + loud state — not an empty wall).
 - **Build:** GitHub Actions (`.github/workflows/image.yml`) builds and publishes to GHCR
-  on `main` (and PR proof tags). Shipwright is installed on the cluster but is not the
-  Hangar image path today.
+  on `main` (and PR proof tags). `.github/workflows/deploy-pin.yml` then writes the digest
+  into `coldaine-homelab` — see "Shipping a change". Shipwright is installed on the cluster
+  but is not the Hangar image path today.
 - **Route:** HTTPRoute `hangar` → hostname `hangar.moosegoose.xyz` on Gateway
   `platform-gateway` listener `https-hangar` (TLS via cert-manager DNS-01). LAN path:
   Gateway VIP `192.168.30.201` (verify with
@@ -74,11 +81,34 @@ manifests, secrets (via Doppler/ESO), Gateway listeners, and Flux reconciliation
 
 ## Shipping a change
 
-1. Merge app code to `RobotOverview` `main` → GHA publishes a new GHCR image.
-2. Bump the `@sha256:` image ref in `coldaine-homelab/infra/k8s/apps/hangar/deployment.yaml`
-   to the new build's digest and merge — Flux (`target-apps`, 10 min interval) reconciles and
-   rolls the Deployment. Merging code alone deploys nothing.
-3. Verify: `GET https://hangar.moosegoose.xyz/api/hangar/preflight` and Shell DATA lamp = PG.
+Merge app code to `RobotOverview` `main`. That is the whole procedure.
+
+`.github/workflows/deploy-pin.yml` runs after the image build succeeds, refuses to pin a
+commit whose test workflows failed, resolves the published manifest digest from GHCR, and
+commits it to `coldaine-homelab/infra/k8s/apps/hangar/deployment.yaml`. Flux reconciles
+within ~11 minutes (GitRepository 1 min + Kustomization 10 min) and rolls the Deployment.
+
+- **Verify:** `GET https://hangar.moosegoose.xyz/api/hangar/preflight` and Shell DATA lamp = PG.
+  The workflow's job summary prints the digest it pinned and where to look.
+- **Roll back:** revert the pin commit in `coldaine-homelab`. This is the property digest
+  pinning bought and `:latest` gives away.
+- **Re-pin by hand:** `workflow_dispatch` on **Pin deployed image** with `surface: hangar` and
+  an explicit `sha` — the way to redeploy an older known-good commit. An automatic pin only ever
+  moves production to whatever `main` is *now*, so re-running an old build cannot roll it back.
+- **Credential:** no PAT and no deploy key (deploy keys are disabled on `coldaine-homelab`).
+  The workflow mints a GitHub App installation token from the org's existing `cold-claude-code`
+  app, scoped to `coldaine-homelab` alone with Contents: write, expiring with the job. The app id
+  and private key are mirrored from Doppler `homelab`/`dev` (`CLAUDE_GITHUB_APP_ID`,
+  `CLAUDE_GITHUB_PRIVATE_KEY`) into the `HOMELAB_DEPLOY_APP_ID` /
+  `HOMELAB_DEPLOY_APP_PRIVATE_KEY` repository secrets.
+
+The writer is `tools/ci/pin_deploy_image.py`. It is deliberately strict: every edit is anchored
+on a pattern that must match exactly once, and it fails loudly rather than leaving the file
+untouched, because a silent no-op reads as a successful deploy while nothing ships. If it
+starts failing, the manifest changed shape — fix the anchor, do not bypass it.
+
+Full reasoning, including why Flux image automation was rejected and what the robot still
+needs: [`docs/plans/2026-08-14-continuous-deploy-both-surfaces.md`](plans/2026-08-14-continuous-deploy-both-surfaces.md).
 
 ## Agent ingest
 
@@ -103,9 +133,12 @@ psql … -f db/hangar/seed.sql
 
 ## Known gaps
 
-- The pinned digest lags `main` until the next deliberate digest bump in
-  `coldaine-homelab/infra/k8s/apps/hangar/deployment.yaml` (step 2 above). The library proxy
-  ships only after that bump rolls the Hangar image.
+- **The robot has no auto-deploy.** `deployments/beast-01/manifest.yaml` gets pinned by the
+  same workflow, but the `beast-pull` agent that reads it is not installed on BEAST-01
+  (`/usr/local/bin/beast-pull` absent, `beast-pull.timer` inactive, `beast-ros-base` running
+  the host colcon build — verified 2026-08-14). Deploy the robot with
+  `robot/beast/ros2_ws/deploy/deploy-to-beast.sh` until Phase 2 of the plan lands. That
+  script's header calling itself "the manual override" is stale: it is the only path.
 - Wiki catalog objects are fresh 2026-08-10 HTML captures (hashes unset in the upload source
   map); the 2026-07-01 `.md` snapshots from UGV-Beast-Archive are gone.
 - Shipwright `Build` for Hangar is optional future work; not required for production today.

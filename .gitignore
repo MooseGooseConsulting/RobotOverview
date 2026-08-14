@@ -31,3 +31,7 @@ keyArtifactstosort/reference/*.zip
 
 # machine-local agent settings stay out of git (frozenSkillz project-agent-config convention)
 .claude/settings.local.json
+
+# Python bytecode (tools/ci, robot-side pytest lanes)
+__pycache__/
+*.py[cod]
