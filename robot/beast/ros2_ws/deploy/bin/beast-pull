@@ -240,6 +240,10 @@ if [ -e "$IN_PROGRESS" ]; then
     exit 1
   fi
   log "in-progress marker found: a previous deploy was interrupted mid-build; recovering (attempt $attempt)"
+else
+  # No marker means no interrupted deploy: drop any stale counter (e.g. a
+  # marker an operator removed by hand) so a future recovery starts at 1.
+  rm -f "$RECOVERY_COUNT"
 fi
 
 # --------------------------------------------------------------- fetch ----
