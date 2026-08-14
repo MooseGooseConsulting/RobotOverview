@@ -25,6 +25,7 @@
 # 3. Label `review-this` already exists. Apply it to re-run a review.
 #
 # Full operator note: docs/openhands-cold-review.md
+# Wet-run: public repo must be selected on moosegoose-arc-private.
 name: OpenHands Cold Review
 on:
   pull_request:
