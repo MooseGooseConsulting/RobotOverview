@@ -24,6 +24,18 @@ LAN fallback: `ssh beast-01` / `ssh beast@192.168.0.187` (`wlP1p1s0`).
 - Wi‑Fi MAC `20:bd:1d:d4:91:35` → `192.168.0.187` (name `beast-01`)
 - Ethernet MAC `4c:bb:47:a6:4e:bd` → `192.168.0.166` (name `beast-01-eth`)
 
+**Cockpit /scan 2026-08-14 (live):** WSS connected but published no `/scan` while
+DDS `/scan` was 10 Hz because leftover cockpit clients subscribed `/map`. Live
+grid is still **4185×6765**, origin (−203, −335) — ~85 MB JSON; Humble
+rosbridge 2.0.7 fragments that into 8–9 × 10 MB parts and starves `/scan`.
+QoS is not the bug (LD19 RELIABLE, rosbridge BEST_EFFORT). Client now defers
+`/map`; robot whitelist dropped `/map` (one-file scp of `rosbridge.launch.py`).
+`/scan` then 119 frames / 12 s. SpatialView: front wall ~0.77 m up, rear-mast
+wedge down (`feat/cockpit-map-render` @ `ff87c3f`, +90° body yaw). **No
+pre-01:09 posegraph backup** under `/data/beast/maps` or siblings — do not
+treat the NVMe files as the 15:19 map. `power-log.csv` still stuck at
+**22:19:15Z**.
+
 **Clock hardening (2026-08-10):** The Orin Nano dev kit has no RTC battery —
 cold boot starts at epoch 0. `tailscaled` started before NTP synced, rejected
 control plane certs as "not yet valid," and stayed offline. Fix: `fake-hwclock`
