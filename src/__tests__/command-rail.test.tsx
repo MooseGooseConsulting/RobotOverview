@@ -13,10 +13,16 @@ import {
   STOP_TAIL_INTERVAL_MS,
 } from "@/lib/ros/drive-law";
 
+type ServiceResult = { ok: boolean; message?: string };
+
 const mocks = vi.hoisted(() => ({
   publish: vi.fn<(topic: string, message: unknown) => boolean>(() => true),
-  setMotionAllowed: vi.fn(async () => ({ ok: true })),
-  callService: vi.fn(async () => ({ ok: true })),
+  setMotionAllowed: vi.fn<(allowed: boolean) => Promise<{ ok: boolean; message?: string }>>(
+    async () => ({ ok: true }),
+  ),
+  callService: vi.fn<(name: string, args: unknown) => Promise<{ ok: boolean; message?: string }>>(
+    async () => ({ ok: true }),
+  ),
   allowMotion: true as boolean | null,
   isCharging: false,
   isEthernetConnected: false,
@@ -87,6 +93,7 @@ describe("CommandRail control lifecycle", () => {
     mocks.publish.mockClear();
     mocks.publish.mockReturnValue(true);
     mocks.setMotionAllowed.mockClear();
+    mocks.setMotionAllowed.mockResolvedValue({ ok: true } as ServiceResult);
     mocks.callService.mockClear();
     mocks.allowMotion = true;
     mocks.isCharging = false;
@@ -391,6 +398,120 @@ describe("CommandRail control lifecycle", () => {
     expect(forward.className).toMatch(/emerald/);
     expect(left.className).toMatch(/emerald/);
     expect(right.className).not.toMatch(/emerald/);
+  });
+
+  // ── EXIT PATHS: every way out of a drive must actually stop the robot ─────
+  it("stops the robot on unmount — a route change under a held key must not leave it driving", () => {
+    const { unmount } = render(<CommandRail />);
+    act(() => vi.advanceTimersByTime(250));
+
+    fireEvent.keyDown(window, { key: "w", repeat: false });
+    expect(movingPublishes()).toHaveLength(1);
+    mocks.publish.mockClear();
+
+    unmount();
+
+    // The ESP32 latches its last command and there is no robot-side cmd_vel
+    // watchdog, so tearing down the timers without commanding a stop would
+    // leave BEAST-01 driving with nothing left alive to stop it.
+    expect(zeroPublishes()).toHaveLength(STOP_TAIL_COUNT);
+    expect(movingPublishes()).toHaveLength(0);
+  });
+
+  it("does not publish a stop on unmount when nothing was driving", () => {
+    const { unmount } = render(<CommandRail />);
+    act(() => vi.advanceTimersByTime(250));
+    mocks.publish.mockClear();
+
+    unmount();
+
+    // An idle source must not claim the priority-50 rung on its way out.
+    expect(twistPublishes()).toHaveLength(0);
+  });
+
+  it("a re-press cancels the pending stop tail — no stray zero lands on the new drive", () => {
+    render(<CommandRail />);
+    act(() => vi.advanceTimersByTime(250));
+
+    fireEvent.keyDown(window, { key: "w", repeat: false });
+    fireEvent.keyUp(window, { key: "w" });
+    mocks.publish.mockClear();
+
+    // Re-press before the tail finishes. Left running, one of its remaining
+    // zeros lands AFTER this command and stops a drive the operator just
+    // started — felt as a stutter or a dropped input.
+    fireEvent.keyDown(window, { key: "w", repeat: false });
+    act(() => vi.advanceTimersByTime(300));
+
+    expect(zeroPublishes()).toHaveLength(0);
+    expect(lastTwist().linear.x).toBeCloseTo(DEFAULT_STRAIGHT, PRECISION);
+  });
+
+  it("clears the held key when the drive publish never leaves the browser", () => {
+    render(<CommandRail />);
+    act(() => vi.advanceTimersByTime(250));
+
+    mocks.publish.mockReturnValue(false);
+    fireEvent.keyDown(window, { key: "w", repeat: false });
+
+    // The command did not leave, so the UI must not keep rendering a hold the
+    // robot was never told about.
+    expect(screen.getByTitle(/^Commanded —/)).toHaveTextContent("X +0.00 m/s · Z +0.00 rad/s");
+    expect(screen.getByTitle("Forward (W)").className).not.toMatch(/emerald/);
+  });
+
+  it("a cancelled pointer elsewhere on the page does not stop an active keyboard drive", () => {
+    render(<CommandRail />);
+    act(() => vi.advanceTimersByTime(250));
+
+    fireEvent.keyDown(window, { key: "w", repeat: false });
+    mocks.publish.mockClear();
+
+    // A cancelled drag on the gimbal box has nothing to do with driving.
+    fireEvent.pointerCancel(screen.getByTitle("Drag to aim the pan-tilt head"), { pointerId: 3 });
+    act(() => vi.advanceTimersByTime(200));
+
+    expect(zeroPublishes()).toHaveLength(0);
+    expect(lastTwist().linear.x).toBeCloseTo(DEFAULT_STRAIGHT, PRECISION);
+  });
+
+  it("does not register held keys in the readout while the motion gate is closed", () => {
+    mocks.allowMotion = false;
+    render(<CommandRail />);
+    act(() => vi.advanceTimersByTime(500));
+    mocks.publish.mockClear();
+
+    fireEvent.keyDown(window, { key: "w", repeat: false });
+
+    // Nothing left the browser, so the readout must not claim a command.
+    expect(mocks.publish).not.toHaveBeenCalled();
+    expect(screen.getByTitle(/^Commanded —/)).toHaveTextContent("X +0.00 m/s · Z +0.00 rad/s");
+  });
+
+  it("reports a FAILED emergency disarm instead of rendering it as success", async () => {
+    render(<CommandRail />);
+    act(() => vi.advanceTimersByTime(250));
+
+    fireEvent.keyDown(window, { key: "w", repeat: false });
+    fireEvent.keyUp(window, { key: "w" });
+    mocks.publish.mockReturnValue(false);
+    act(() => vi.advanceTimersByTime(STOP_TAIL_INTERVAL_MS));
+    expect(screen.getByRole("alert")).toHaveTextContent(/stop not confirmed/i);
+
+    // setMotionAllowed resolves {ok:false} on a closed socket, a timeout, or a
+    // bridge rejection — it never throws. Swallowing that would render a failed
+    // disarm as success, on the one control that must never lie.
+    mocks.setMotionAllowed.mockResolvedValue({
+      ok: false,
+      message: "socket not open",
+    } as ServiceResult);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle(/disarm motion/i));
+    });
+
+    expect(mocks.setMotionAllowed).toHaveBeenCalledWith(false);
+    expect(screen.getByRole("alert")).toHaveTextContent(/DISARM FAILED — socket not open/);
   });
 
   it("does not gate drive controls while charging — no automatic interlock (ugv_safety_monitor removed 2026-08-07)", () => {

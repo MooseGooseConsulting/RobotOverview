@@ -107,6 +107,8 @@ export function CommandRail() {
     sent: number;
     reason: string;
   } | null>(null);
+  const [disarming, setDisarming] = useState(false);
+  const [disarmError, setDisarmError] = useState<string | null>(null);
 
   const gimbalBoxRef = useRef<HTMLDivElement | null>(null);
   const driveIntentRef = useRef<DriveIntent | null>(null);
@@ -164,6 +166,18 @@ export function CommandRail() {
       clearTimeout(tailTimerRef.current);
       tailTimerRef.current = null;
     }
+  }, []);
+
+  /**
+   * Drop every held key and the boost flag from the input model and the render
+   * mirror. Does NOT publish — callers pair it with a stop when one is owed.
+   * The rendered readout must never outlive the command it describes.
+   */
+  const clearHeldKeys = useCallback(() => {
+    const prev = driveInputRef.current;
+    const next: DriveInput = { held: idleHeld(), rateIndex: prev.rateIndex, boost: false };
+    driveInputRef.current = next;
+    setDriveView({ input: cloneInput(next), twist: composeTwist(next) });
   }, []);
 
   /**
@@ -225,10 +239,18 @@ export function CommandRail() {
   const setDriveIntent = useCallback(
     (intent: DriveIntent) => {
       if (!driveEnabled) return;
+      // A tail from the PREVIOUS release may still have ticks scheduled. Left
+      // running, one of its zeros lands after this command and stops a drive
+      // the operator just started — felt as a stutter or a dropped input. The
+      // operator has asked to move again; that supersedes the old stop.
+      clearPendingTailTimer();
       driveIntentRef.current = intent;
       setDriving(true);
       if (!publishTwist(intent.linearX, intent.angularZ)) {
         setFault('drive: /cmd_vel_ui publish failed — command did not leave the browser');
+        // The command never left the browser, so the held key it came from is
+        // not commanding anything — drop it rather than render a phantom hold.
+        clearHeldKeys();
         runStopTail('drive publish failed');
         return;
       }
@@ -246,12 +268,13 @@ export function CommandRail() {
           driveIntentRef.current = next;
           if (!publishTwist(next.linearX, next.angularZ)) {
             setFault('drive: socket closed mid-command — intent cleared');
+            clearHeldKeys();
             runStopTail('socket closed mid-command');
           }
         }, DRIVE_PUBLISH_MS);
       }
     },
-    [driveEnabled, publishTwist, runStopTail],
+    [driveEnabled, publishTwist, runStopTail, clearPendingTailTimer, clearHeldKeys],
   );
 
   /**
@@ -262,6 +285,13 @@ export function CommandRail() {
    */
   const applyDriveInput = useCallback(
     (patch: DrivePatch, reason: string) => {
+      // With the gate closed nothing leaves the browser, so a held key must not
+      // register: the readout says "what left the browser", and lighting an
+      // arrow for a command the robot was never told about is exactly the lie
+      // this cockpit is built to avoid. Throttle selection is a *choice*, not a
+      // command, so it stays live — it commands nothing until the gate reopens,
+      // and a fresh keydown is required then either way.
+      if (!driveEnabled && (patch.key !== undefined || patch.boost !== undefined)) return;
       const prev = driveInputRef.current;
       const next: DriveInput = {
         held: patch.key ? { ...prev.held, [patch.key]: patch.down === true } : { ...prev.held },
@@ -279,7 +309,7 @@ export function CommandRail() {
       }
       setDriveIntent(twist);
     },
-    [setDriveIntent, runStopTail],
+    [driveEnabled, setDriveIntent, runStopTail],
   );
 
   /**
@@ -293,11 +323,8 @@ export function CommandRail() {
    */
   const releaseAll = useCallback(
     (reason: string, force = false) => {
-      const prev = driveInputRef.current;
-      const wasCommanding = driveIntentRef.current !== null || anyHeld(prev);
-      const next: DriveInput = { held: idleHeld(), rateIndex: prev.rateIndex, boost: false };
-      driveInputRef.current = next;
-      setDriveView({ input: cloneInput(next), twist: composeTwist(next) });
+      const wasCommanding = driveIntentRef.current !== null || anyHeld(driveInputRef.current);
+      clearHeldKeys();
       if (wasCommanding || force) {
         runStopTail(reason);
         return;
@@ -305,7 +332,7 @@ export function CommandRail() {
       clearRepublishInterval();
       setDriving(false);
     },
-    [runStopTail, clearRepublishInterval],
+    [clearHeldKeys, runStopTail, clearRepublishInterval],
   );
 
   // The gate can close underneath a held button (e-stop pressed, link dropped,
@@ -324,14 +351,26 @@ export function CommandRail() {
     }
   }, [connection, runStopTail]);
 
-  // Tear the timers down with the component so a route change cannot leave a
-  // drive republishing from an unmounted tree.
+  // Unmount is an exit from the drive path like every other, and the robot has
+  // no way to notice it: the ESP32 latches its last command and there is no
+  // robot-side cmd_vel watchdog, so navigating away under a held key would
+  // leave BEAST-01 driving with nothing left to stop it. Tearing the timers
+  // down is not enough — a stop must actually go out.
+  //
+  // The tail is emitted SYNCHRONOUSLY here rather than on timers: once this
+  // cleanup returns there is nothing left alive to run a scheduled tick or to
+  // cancel one, and no state may be touched from an unmounted tree.
   useEffect(
     () => () => {
       clearRepublishInterval();
       clearPendingTailTimer();
+      if (driveIntentRef.current === null) return;
+      driveIntentRef.current = null;
+      for (let i = 0; i < STOP_TAIL_COUNT; i += 1) {
+        if (!publishTwist(0, 0)) return;
+      }
     },
-    [clearRepublishInterval, clearPendingTailTimer],
+    [clearRepublishInterval, clearPendingTailTimer, publishTwist],
   );
 
   // ── KEYBOARD ──────────────────────────────────────────────────────────────
@@ -393,10 +432,16 @@ export function CommandRail() {
     };
 
     // A keyup that lands on another window never reaches us, so the intent would
-    // stay held with the operator's hand off the keyboard. Blur, tab-hide and
-    // cancelled pointers all mean "we are no longer in control" — release.
+    // stay held with the operator's hand off the keyboard. Blur and tab-hide
+    // both mean "we are no longer in control" — release everything.
+    //
+    // There is deliberately NO window-level `pointercancel` handler. The D-pad
+    // buttons cancel themselves through holdProps, per key; a global one also
+    // fires for pointers that have nothing to do with driving — a cancelled
+    // drag on the gimbal box would stop an active keyboard drive, which is the
+    // same "stops when you did not ask it to" complaint this rewrite exists to
+    // fix. (The old blanket-stop implementation had this listener too.)
     const handleBlur = () => releaseAll('focus lost');
-    const handlePointerCancel = () => releaseAll('pointer cancelled');
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') releaseAll('tab hidden');
     };
@@ -404,13 +449,11 @@ export function CommandRail() {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('blur', handleBlur);
-    window.addEventListener('pointercancel', handlePointerCancel);
     document.addEventListener('visibilitychange', handleVisibility);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleBlur);
-      window.removeEventListener('pointercancel', handlePointerCancel);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [applyDriveInput, releaseAll]);
@@ -421,6 +464,16 @@ export function CommandRail() {
   // Waveshare's `move_buttons[moveKey] === 0/1` guards: an event for a key that
   // is already in that state is not an event at all. Set membership — not the
   // browser's repeat flag — is what makes a held key idempotent.
+  //
+  // DELIBERATE: one boolean per direction, shared by keyboard and pointer, so
+  // releasing the on-screen ▲ while W is physically down clears the hold. This
+  // is Waveshare's own model (`move_buttons.forward` is likewise shared between
+  // its touch buttons and its key handlers), and reproducing it is the point of
+  // this port. Per-source ownership sets would double the state to fix only the
+  // case where an operator drives the SAME direction with both hands at once —
+  // and would make a released button stop feeling like a stop, which is the
+  // worse failure on a robot with no cmd_vel watchdog. Not worth it; if it ever
+  // is, the fix is a Set<'key'|'pointer'> per direction, not a second flag.
   const pressDriveKey = useCallback(
     (driveKey: DriveKey) => {
       if (driveInputRef.current.held[driveKey]) return;
@@ -454,8 +507,28 @@ export function CommandRail() {
     applyDriveInput({ rateIndex: index }, 'throttle changed');
   };
 
-  const disarmMotion = () => {
-    void rosClient.setMotionAllowed(false);
+  /**
+   * Emergency disarm from the STOP-NOT-CONFIRMED banner.
+   *
+   * `setMotionAllowed` resolves `{ok: false}` on a closed socket, a timeout, or
+   * a bridge-level failure — it never throws. Discarding that would render a
+   * FAILED disarm as success, which is the same defect as the single unchecked
+   * zero this whole rewrite replaced, in the one place it matters most. The
+   * Promise only answers "did the call complete"; whether motion is actually
+   * disarmed comes from the latched /ugv/allow_motion echo in the safety strip,
+   * so success is reported by that chip flipping, not by anything claimed here.
+   */
+  const disarmMotion = async () => {
+    setDisarming(true);
+    setDisarmError(null);
+    try {
+      const result = await rosClient.setMotionAllowed(false);
+      if (!result.ok) {
+        setDisarmError(result.message ?? 'no response from /ugv/set_allow_motion');
+      }
+    } finally {
+      setDisarming(false);
+    }
   };
 
   // Each arrow lights on its own flag, so a W+A diagonal visibly lights two —
@@ -620,11 +693,18 @@ export function CommandRail() {
             </span>
             <button
               onClick={disarmMotion}
-              className="self-start rounded border border-red-500/70 bg-red-500/15 px-2 py-1 font-bold uppercase tracking-widest text-red-200 hover:bg-red-500/25"
+              disabled={disarming}
+              className="self-start rounded border border-red-500/70 bg-red-500/15 px-2 py-1 font-bold uppercase tracking-widest text-red-200 hover:bg-red-500/25 disabled:opacity-60"
               title="Disarm motion — /ugv/set_allow_motion false"
             >
-              Disarm motion
+              {disarming ? 'Disarming…' : 'Disarm motion'}
             </button>
+            {disarmError && (
+              <span className="font-bold text-red-200">
+                DISARM FAILED — {disarmError}. Motion authority is unchanged; use the safety strip
+                or cut power.
+              </span>
+            )}
           </div>
         )}
 
