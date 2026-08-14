@@ -7,6 +7,56 @@ re-verify against the live robot before relying on anything stale.
 
 ## Quick connect
 
+**R5 CLOSED — unit ops go through `beast-ctl`, hourly deploy armed 2026-08-14
+~21:35Z (live):** The 193-line systemctl allowlist is gone. Root unit
+operations now run through **`sudo -n /usr/local/sbin/beast-ctl <verb> <unit>`**
+(PR #232), a wrapper whose policy table lives in
+`robot/beast/ros2_ws/deploy/bin/beast-ctl` and is unit-tested by
+`tools/ci/test_beast_ctl.py`. **Bare `sudo -n systemctl <verb> <unit>` is now
+refused** — only `daemon-reload` and `reboot` remain direct. Dump the effective
+policy with `beast-ctl policy` (no privilege needed). Verbs are granted per
+unit by class: `run` (start/stop/restart/try-restart), `hold` (start/stop
+only), `lifecycle` (enable/disable), `mask`; every managed unit implicitly gets
+the read verbs. **`beast-nav` is `hold`** — `enable` is refused by the wrapper
+as well as by the unit's missing `[Install]`.
+
+All three R5 actions are **done**: sudoers reinstalled from the tree
+(`visudo -c` clean), `beast-pull.timer` **enabled + active** (hourly), and
+`/data/beast/deploy/pull-hold` removed. Verified live after install:
+`is-active beast-cockpit` → `active`; `enable beast-nav` → refused, rc 2;
+**`is-enabled beast-wifi-telemetry.timer` → `enabled`, rc 0** — that call was
+*refused* under the old allowlist while `enable` on the same unit was allowed,
+which is the concrete hole this replaced. Supervised tick first advanced the
+checkout to `2487575` (4 packages, verify 15/15 PASS); the first timer tick
+then logged `already at 248757541a48; nothing to do` and left the stack
+untouched. Parked state at that moment: base+slam+cockpit active, **nav
+inactive**, no holds, detached HEAD `2487575`.
+
+**ROBOT WENT DARK ~21:40Z, minutes after the above — 3S pack exhaustion, again.**
+Both `beast-01-ts` (Tailscale) and `beast-01` (mDNS) stopped answering. Not a
+rollout failure: every verification above had already passed, and all of it is
+on-disk state that survives the outage (sudoers file, `/usr/local/sbin/beast-ctl`,
+the `beast-pull.timer` enable symlink, the removed hold). The cause is recorded
+in the run's own telemetry — `beast-verify` at 21:32Z logged `/ugv/voltage`
+**8.832 V** with the ESP32 reading **8.67 V**, and the measured hard cutoff for
+this pack is **~8.3 V** (Hangar `ins-beast-pack-cutoff-measured`, from the
+2026-08-07 run-to-empty: last telemetry 8.368 V, unreachable 21 s later). The
+robot had been parked at 10.88 V after the morning shakedown with a
+"plug the charger back in" note that was never actioned; it discharged to
+cutoff across the afternoon. **Plug in the charger before the next session** —
+and treat any `beast-verify` voltage under ~9.0 V as minutes of runtime, not
+hours. On next power-up the stack returns with the hourly deploy timer already
+armed; `refs/deploy/beast-01` equals the checkout, so the first tick is a no-op.
+
+Two things to know when working this path. `/usr/local/sbin/beast-ctl` is the
+**only** copy ever executed — `/home/beast` is writable by `beast`, so pointing
+sudoers into the checkout would be a root escalation — which also makes it the
+only copy that can go stale; `beast-install-systemd-units` now refreshes it
+from the tree on every deploy. And `beast-pull` **preflights the privilege path
+before it stops anything**: if `sudo -n beast-ctl policy` fails it logs the
+`install-beast-sudoers.sh` command and exits 0 without touching the stack,
+rather than half-deploying into a self-hold.
+
 **Shakedown: first autonomous navigation 2026-08-14 ~20:45Z (live):** Robot ran
 the whole session **untethered** (Ethernet + charger unplugged ~19:48Z) and was
 parked at **10.88 V (~3.6 V/cell) — plug the charger back in.** Supervised tick
@@ -31,7 +81,8 @@ timestamps — verify `beast-slam-save` fires on ExecStop next session. Parked
 state: base+cockpit+slam active, nav inactive, deploy hold present, armed,
 detached HEAD `7578a11`. R5 (sudoers reinstall — now also delivers the
 `beast-nav` verbs — plus `enable --now beast-pull.timer` and hold removal)
-remains the one owner action.
+was the one owner action outstanding **as of this block**; it was closed later
+the same day — see the R5 block at the top.
 
 **Unattended deploy LIVE + SLAM converged 2026-08-14 ~19:35Z (live):** First
 production `beast-pull` deploy executed supervised: `refs/deploy/beast-01`
@@ -51,7 +102,8 @@ remedy `ros2 daemon stop && ros2 daemon start` (agent self-heals this after
 the hardening PR). (2) `beast-pull.timer` is installed but **NOT enabled**,
 and `/data/beast/deploy/pull-hold` is present — owner action R5 (sudoers
 reinstall via `install-beast-sudoers.sh`, `enable --now beast-pull.timer`,
-remove the hold) arms the hourly loop.
+remove the hold) arms the hourly loop. **Closed 2026-08-14 ~21:35Z** — the
+timer is enabled and active and the hold is gone; see the R5 block at the top.
 
 **beast-slam crash loop found + stopped 2026-08-14 ~16:10Z (live):** the unit
 had restarted **397 times**: `async_slam_toolbox_node` segfaults (exit −11)
@@ -196,10 +248,14 @@ control plane certs as "not yet valid," and stayed offline. Fix: `fake-hwclock`
 (`After=time-sync.target`). `beast-link-watch` (60s timer) re-ups Wi‑Fi and
 restarts `tailscaled` if the underlay or Tailscale drops.
 
-**Passwordless ops sudo (2026-08-10):** User `beast` has a scoped
+**Passwordless ops sudo (2026-08-10)** — *mechanism SUPERSEDED 2026-08-14 by
+`beast-ctl`; see the R5 block at the top. The per-unit `systemctl` grants
+described here no longer exist, and the gate command below is refused now.*
+User `beast` has a scoped
 `/etc/sudoers.d/beast-ops` allowlist (not `NOPASSWD:ALL`) for
 `systemctl` on `beast-*` units, `daemon-reload`, and `tailscale serve`.
-Gate: `ssh beast-01-ts 'sudo -n systemctl is-active beast-cockpit && sudo -n tailscale serve status'`.
+Gate: `ssh beast-01-ts 'sudo -n systemctl is-active beast-cockpit && sudo -n tailscale serve status'`
+(current form: `sudo -n /usr/local/sbin/beast-ctl is-active beast-cockpit && sudo -n tailscale serve status`).
 Installed by `robot/beast/ros2_ws/deploy/bin/install-beast-sudoers.sh`
 (also wired into `deploy-to-beast.sh` step 3). Doppler
 `BEAST_JETSON_ADMIN_PASSWORD` is **break-glass / bootstrap only** —
