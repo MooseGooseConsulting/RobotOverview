@@ -52,7 +52,7 @@ try {
         Write-Warn "Differential: if ssh beast-01-ts works → ACL missing tcp:443 or serve down."
         Write-Warn "If SSH also times out → robot/tailscaled offline (not an ACL regression)."
         Write-Warn "ACL (from a coldaine-homelab checkout): doppler run --project homelab --config dev -- pwsh -File scripts/Verify-BeastCockpitAcl.ps1"
-        Write-Warn "Serve: sudo systemctl start beast-cockpit-serve  (or beast-01-serve.sh)"
+        Write-Warn "Serve: sudo -n /usr/local/sbin/beast-ctl start beast-cockpit-serve  (or beast-01-serve.sh)"
         exit 1
     }
     $tcp.EndConnect($iar)

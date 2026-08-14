@@ -40,4 +40,4 @@ Write-Host "Hangar page: $url (bridge from Hangar server env; default $hangarDef
 Write-Host "Workstation bridge hint: $bridge"
 Write-Host "Smoke test: pwsh -File $verifyScript"
 Write-Host "If ROBOT UNREACHABLE but ssh beast-01-ts works: tag:robot ACL needs tcp:443 + tailscale serve."
-Write-Host "On robot: systemctl is-active beast-cockpit; sudo -n systemctl restart beast-cockpit-serve"
+Write-Host "On robot: systemctl is-active beast-cockpit; sudo -n /usr/local/sbin/beast-ctl restart beast-cockpit-serve"

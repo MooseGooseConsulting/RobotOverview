@@ -19,6 +19,7 @@ Exercised through BEAST_CTL_DRYRUN, so no systemd, no root, and no robot.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -119,16 +120,100 @@ def test_refused(args, needle):
     assert needle in r.stderr
 
 
+def policy_key(filename: str) -> str:
+    """Map a deploy/systemd filename to the key beast-ctl looks up.
+
+    Mirrors the script: strip a trailing `.service` (but NOT `.timer` — a timer
+    is a distinct unit with its own policy row), and collapse a template to its
+    `name@` form.
+    """
+    key = filename[: -len(".service")] if filename.endswith(".service") else filename
+    if "@" in key:
+        key = key.split("@", 1)[0] + "@"
+    return key
+
+
 def test_policy_dump_lists_every_managed_unit():
     r = run("policy")
     assert r.returncode == 0
     units = {line.split("|")[0] for line in r.stdout.strip().splitlines()}
     # If a unit file exists in deploy/systemd but is absent here, an operator
-    # will hit a password prompt the first time they touch it.
+    # will hit a password prompt the first time they touch it. Timers count:
+    # they are the units the old allowlist actually got wrong (`is-enabled
+    # beast-wifi-telemetry.timer` was refused), so a test that scanned only
+    # *.service would leave the exact class of drift this PR exists to kill.
     systemd_dir = REPO_ROOT / "robot" / "beast" / "ros2_ws" / "deploy" / "systemd"
-    for path in systemd_dir.glob("beast-*.service"):
-        stem = path.stem.replace("@", "") + ("@" if "@" in path.stem else "")
-        assert stem in units, f"{path.name} has no beast-ctl policy entry"
+    found = sorted(
+        p.name for p in systemd_dir.iterdir() if p.name.startswith("beast-") and p.is_file()
+    )
+    assert found, "no beast-* unit files found; the glob or the layout moved"
+    for name in found:
+        assert name.endswith((".service", ".timer")), f"unexpected unit kind: {name}"
+        assert policy_key(name) in units, f"{name} has no beast-ctl policy entry"
+
+
+def test_every_timer_unit_is_in_the_policy():
+    """Explicit timer guard — the old allowlist's holes were all timers."""
+    systemd_dir = REPO_ROOT / "robot" / "beast" / "ros2_ws" / "deploy" / "systemd"
+    timers = sorted(p.name for p in systemd_dir.glob("beast-*.timer"))
+    assert timers, "expected at least one beast-* timer unit"
+    dumped = {line.split("|")[0] for line in run("policy").stdout.strip().splitlines()}
+    for name in timers:
+        assert name in dumped, f"{name} missing from the policy table"
+        # and the read verb the old sudoers refused must actually work
+        r = run("is-enabled", name)
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.strip() == f"systemctl is-enabled {name}"
+
+
+# --- callers must have migrated too -----------------------------------------
+# Tightening sudoers only helps if nothing still calls the old way. A leftover
+# `sudo -n systemctl restart beast-cockpit` does not fail at review time — it
+# fails on the robot, at 2 a.m., as a password prompt on a headless machine.
+#
+# Scope is deliberately `sudo -n` only. That is the automated, must-be-
+# allowlisted path, and it is exactly what the sudoers rewrite can break.
+# Interactive `sudo systemctl …` is the break-glass fallback: it authenticates
+# with BEAST_JETSON_ADMIN_PASSWORD and does not consult the beast-ops
+# allowlist at all, so it stays valid and must not be flagged here.
+# daemon-reload and reboot take no unit and stay legitimately direct.
+DIRECT_OK = ("daemon-reload", "reboot")
+SCAN_DIRS = ("robot/beast/ros2_ws/deploy", "tools/beast", "tools/ci")
+SCAN_SUFFIXES = (".sh", ".ps1", ".py", "")
+
+
+def iter_scanned_files():
+    for rel in SCAN_DIRS:
+        base = REPO_ROOT / rel
+        if not base.is_dir():
+            continue
+        for path in base.rglob("*"):
+            if path.is_file() and path.suffix in SCAN_SUFFIXES:
+                yield path
+
+
+def test_no_caller_still_sudoes_systemctl_with_a_unit():
+    offenders = []
+    for path in iter_scanned_files():
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for n, line in enumerate(text.splitlines(), 1):
+            # Comment lines are prose, not call sites — including the comment
+            # above, which quotes the very pattern this test hunts for.
+            if line.lstrip().startswith("#"):
+                continue
+            for match in re.finditer(
+                r"sudo\s+-n\s+(?:-\w+\s+)*(?:/usr/bin/)?systemctl\s+(\S+)", line
+            ):
+                verb = match.group(1)
+                if verb.startswith("-") or any(ok in line for ok in DIRECT_OK):
+                    continue
+                offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{n}: {line.strip()}")
+    assert not offenders, "sudo systemctl with a unit must go through beast-ctl:\n" + "\n".join(
+        offenders
+    )
 
 
 def test_sudoers_grants_only_beast_ctl_for_unit_ops():

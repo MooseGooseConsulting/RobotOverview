@@ -167,6 +167,28 @@ fi
 
 mkdir -p "$STATE_DIR" || die "cannot create $STATE_DIR"
 
+# ------------------------------------------------------ beast-ctl gate ----
+# Every unit operation below goes through sudo -n /usr/local/sbin/beast-ctl.
+# Prove that path works BEFORE anything destructive, because the first thing
+# checkout_build_restart does is stop beast-ros-base — and if the privilege
+# path is broken, the stop fails, the rollback leg calls the same broken
+# command, and an unattended tick ends in a self-hold with the stack down.
+#
+# Two ways it breaks in practice, both during rollout: /usr/local/sbin/beast-ctl
+# is not installed yet, or the robot still carries the pre-beast-ctl sudoers
+# that never named it. `beast-ctl policy` is the right probe — it touches no
+# systemd, mutates nothing, and exits 0 iff the binary is present at the
+# root-owned path AND sudoers grants it passwordlessly. Exiting 0 here (not
+# die) is deliberate: a robot mid-migration should idle until the operator
+# lands the new sudoers, not burn its recovery budget once an hour.
+if ! sudo -n /usr/local/sbin/beast-ctl policy >/dev/null 2>&1; then
+  log "sudo -n /usr/local/sbin/beast-ctl is unavailable; refusing to deploy."
+  log "The robot is mid-migration: install the wrapper + sudoers with"
+  log "  sudo $WS_DIR/deploy/bin/install-beast-sudoers.sh"
+  log "Nothing was stopped or checked out. Retrying next tick."
+  exit 0
+fi
+
 # ------------------------------------------------------------ ros setup ----
 # ROS setup scripts reference unbound vars (AMENT_TRACE_SETUP_FILES et al.),
 # so -u must actually be OFF while sourcing — under set -u the first source

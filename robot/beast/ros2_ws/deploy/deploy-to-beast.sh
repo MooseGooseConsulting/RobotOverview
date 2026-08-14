@@ -287,7 +287,7 @@ elif [ "$pw_rc" -eq 2 ] && resolve_break_glass_sudo; then
     && sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-slam-save /usr/local/sbin/beast-slam-save \
     && sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-wifi-telemetry /usr/local/sbin/beast-wifi-telemetry \
     && sudo -n /usr/local/sbin/beast-install-systemd-units \
-    && sudo -n systemctl daemon-reload \
+    && sudo -n /usr/bin/systemctl daemon-reload \
     && sudo -n /usr/local/sbin/beast-ctl enable --now beast-wifi-telemetry.timer \
     && sudo -n /usr/local/sbin/beast-ctl try-restart beast-wifi-watch \
     && sudo -n /usr/local/sbin/beast-ctl restart beast-ros-base \
