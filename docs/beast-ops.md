@@ -58,22 +58,31 @@ stop early units seeing 1969) quarantined to `power-log-garbage-epoch0.csv`,
 backup `power-log.csv.bak-2026-08-14-pre-gc`, log now 27k clean rows.
 Barrel-jack multimeter still owed (Schottky vs 12 V brick).
 
-**Services + deployed source 2026-08-14 13:45Z (live, `ssh beast-01-ts`):**
+**Services + deployed source 2026-08-14 08:45 CDT (UTC−5; live, `ssh beast-01-ts`).**
+All times in this block are CDT so the ordering can be read directly.
 Checkout `/home/beast/beast/RobotOverview` is at **`d714082`** (main, #221),
 rebuilt and restarted, and the timestamps now read in the right order —
 checkout 08:43:54, `install/setup.bash` 08:44:03, `beast-ros-base` active
-08:44:57 CDT. **Running code == built code == checkout.** All 15
-`--verify-only` checks PASS; pack 12.11 V.
+08:44:57. All 15 `--verify-only` checks PASS; pack 12.11 V.
 
-Check that ordering before trusting any claim about deployed code. Earlier the
+**What that ordering does and does not prove.** It proves a colcon build ran
+*after* the checkout moved and the services restarted *after* the build — which
+is the failure this replaced. It does **not** prove the whole workspace matches
+the checkout: `install/setup.bash`'s mtime records only that *some* build
+finished, and `deploy-to-beast.sh` defaults to `--packages-select beast_power
+beast_base ugv_bringup ugv_cockpit`. A commit touching a package outside that
+set leaves stale compiled artefacts beside newly symlinked sources. For the four
+selected packages at this commit, running code == built code == checkout; treat
+anything wider as unverified until the build set is recorded per deploy.
+
+Check the ordering before trusting any claim about deployed code. Earlier the
 same day it read the other way: the checkout moved to `main` @ `98a11a1` at
-03:30 CDT while the overlay was still `feat/cockpit-map-render` @ `edae18d`
-built at 00:57:30, so `git rev-parse HEAD` named code the robot was not
-running. `install/` is a `--symlink-install` tree (70 symlinked `.py` vs 2
-real, launch files included), so a *restart alone* would have swapped the
-Python and launch layers to the new checkout against the old build artefacts.
-`git rev-parse HEAD` is not the running version — compare the three
-timestamps.
+03:30 while the overlay was still `feat/cockpit-map-render` @ `edae18d` built at
+00:57:30, so `git rev-parse HEAD` named code the robot was not running.
+`install/` is a `--symlink-install` tree (70 symlinked `.py` vs 2 real, launch
+files included), so a *restart alone* would have swapped the Python and launch
+layers to the new checkout against the old build artefacts. `git rev-parse HEAD`
+is not the running version — compare the three timestamps.
 
 **`deploy-to-beast.sh` cannot finish passwordlessly right now.** The robot's
 `/etc/sudoers.d/beast-ops` (stamped Aug 13 21:22) predates the tree's, which
@@ -81,9 +90,23 @@ carries 18 `beast-wifi-telemetry` NOPASSWD entries the installed copy lacks.
 Step 3 therefore fails on `systemctl enable --now beast-wifi-telemetry.timer`
 and aborts *before* the script reaches its `exit 2` break-glass sentinel, so
 the break-glass path never engages and no restart happens — a half-deploy:
-new code built on disk, old processes still running. Until the sudoers file is
-reinstalled, finish the deploy by hand:
-`sudo systemctl restart beast-ros-base && sudo systemctl try-restart beast-cockpit`.
+new code built on disk, old processes still running.
+
+That bare `sudo -n systemctl enable --now` under `set -e` is a script bug, not a
+fact of life: every non-allowlisted `systemctl` line added to step 3 re-arms the
+same trap, because only rc 2 reaches the break-glass branch. Make those lines
+sentinel-tolerant when the sudoers file is reinstalled.
+
+Until then, finish the deploy by hand — interactive sudo is not confined by the
+stale allowlist, so include the enable the script never reached, and **verify**,
+because a bare restart is exactly the operation that wedged Fast DDS on
+2026-08-07 with every node check still passing:
+
+```bash
+sudo systemctl enable --now beast-wifi-telemetry.timer
+sudo systemctl restart beast-ros-base && sudo systemctl try-restart beast-cockpit
+robot/beast/ros2_ws/deploy/deploy-to-beast.sh --verify-only   # 15/15 or it is not deployed
+```
 
 Units: `beast-ros-base` **active/enabled** (host colcon overlay —
 `ros2 launch ugv_bringup bringup_lidar.launch.py … allow_motion:=true`),
