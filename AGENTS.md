@@ -50,9 +50,26 @@ This is one monorepo with two independently deployed surfaces:
 - BEAST-01 robot brain: `robot/beast/ros2_ws`, built on the Jetson with ROS 2 Humble.
 
 Robot changes are made, reviewed, and merged here. Do not recreate a `Coldaine/ugv_ws`
-fork or a second local clone. Fetch vendor changes directly from
-`waveshareteam/ugv_ws` and integrate them into the subtree. Never deploy the Hangar web
-app to the Jetson; sharing a repository does not collapse the runtime safety boundary.
+fork or a second local clone. Never deploy the Hangar web app to the Jetson; sharing a
+repository does not collapse the runtime safety boundary.
+
+**`robot/beast/ros2_ws` is a hard fork, not a tracked subtree (recorded 2026-08-14).**
+It was imported once via `git subtree` on 2026-08-03 from `waveshareteam/ugv_ws`
+@ **`f0b3ad9c`** (branch `ros2-humble-develop`). Do not plan work around merging vendor
+updates — **there is no merge path**. Waveshare re-drops the codebase as fresh history
+instead of continuing it: their active branch `ros2-humble-develop-251125` is an
+**orphan** with no common ancestor (GitHub's compare API returns 404 in both
+directions), so subtree, submodule, and cherry-pick-by-history are all mechanically
+impossible. Treat upstream as a **security and idea feed only** — read their diffs, port
+fixes by hand, never expect a merge. We own this tree; normal delete/refactor rules
+apply to it.
+
+Parking a vendor package we don't run: add a `COLCON_IGNORE` file to its directory
+**and** remove its name from the allowlists in `build_common.sh` / `build_first.sh`
+(colcon errors on a selected package it cannot discover). Do not delete the source —
+the ecosystem convention is to ignore, not remove, and re-enabling is then one file
+deletion. Currently parked: `vizanti` (5 packages), `ugv_web_app`, `explore_lite`,
+`emcl2_ros2`.
 
 Start here: [`README.md`](README.md) — what this repo is and where everything lives.
 Intent: [`docs/NORTH_STAR.md`](docs/NORTH_STAR.md) — a statement of intent, nearly frozen.
