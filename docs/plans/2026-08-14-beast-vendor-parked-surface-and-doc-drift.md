@@ -40,9 +40,15 @@ written against a tree where vizanti and `ugv_web_app` were merely neutralized. 
 `361dcc3` ("chore(beast): park unused vendor packages") **parked** them — `COLCON_IGNORE` plus
 removal from the build allowlists — and additionally parked `explore_lite` and `emcl2_ros2`,
 which the 2026-08-07 plan never mentions. `f35a3a1` then stamped ***(parked)*** markers
-through ~20 places in the vendor docs. So "fix references" now means *removing parked
-markers*, not *removing vizanti mentions*, and the reference list in that plan is wrong.
-**§2 and §3 below replace it.**
+through ~20 places in the vendor docs. **Parking is now the repo invariant, not an interim
+step:** `AGENTS.md` reads *"Do not delete a vendor package we don't run — **park** it: add a
+`COLCON_IGNORE` file to its directory **and** remove its name from the allowlists in
+`build_common.sh` / `build_first.sh` … Currently parked: `vizanti` (5 packages),
+`ugv_web_app`, `explore_lite`, `emcl2`."* That names both packages the 2026-08-07 plan
+ordered deleted. Code is truth and the parking shipped, so Phase 2's "Delete" is stale.
+"Fix references" therefore means *correcting the docs that still describe a parked package
+as a live one* — the ***(parked)*** markers stay — and the reference list in that plan is
+wrong. **§2 and §3 below replace it.**
 
 **C. It extends §3 M6 (the stale-comment sweep) with the verified residue.** That sweep list
 was executed only in part. §4 is the complete, file:line-verified list, including four
@@ -93,8 +99,8 @@ cleanup merge), with three untracked `beast-wifi-telemetry` files in `deploy/`.
 
 | # | Surface | Path | State | Size | Verdict |
 |---|---|---|---|---|---|
-| 1 | `vizanti`, `vizanti_cpp`, `vizanti_demos`, `vizanti_msgs`, `vizanti_server` | `src/ugv_else/vizanti/` | Parked (one `COLCON_IGNORE` at the parent parks all five); launch files neutralized 2026-08-07 | 263 files / 2.6 MB | **DELETE** (§2.1) |
-| 2 | `ugv_web_app` | `src/ugv_main/ugv_web_app/` | Parked **and gutted** — one node left | 32 KB | **DELETE** (§2.2) |
+| 1 | `vizanti`, `vizanti_cpp`, `vizanti_demos`, `vizanti_msgs`, `vizanti_server` | `src/ugv_else/vizanti/` | Parked (one `COLCON_IGNORE` at the parent parks all five); launch files neutralized 2026-08-07 | 263 files / 2.6 MB | **LEAVE PARKED, fix the docs that call it live** (§2.1) |
+| 2 | `ugv_web_app` | `src/ugv_main/ugv_web_app/` | Parked **and gutted** — one node left | 32 KB | **LEAVE PARKED, fix the docs that call it live** (§2.2) |
 | 3 | `explore_lite` | `src/ugv_else/explore_lite/` | Parked | 128 KB | **LEAVE PARKED** (§2.3) |
 | 4 | `emcl2` | `src/ugv_else/emcl2_ros2/` | Parked | 147 KB | **LEAVE PARKED** (§2.4) |
 | 5 | `cartographer` | `src/ugv_else/cartographer/` | **Not** parked, built, unused at runtime | — | **LEAVE BUILT** (§2.5) |
@@ -102,23 +108,32 @@ cleanup merge), with three untracked `beast-wifi-telemetry` files in `deploy/`.
 | 7 | `ugv_tools` | `src/ugv_main/ugv_tools/` | Built, installed, all three executables discoverable | — | **NO ACTION — prior "not built" finding is retracted** (§3.1) |
 | 8 | Stale `install/` + `build/` trees for the four parked packages on beast-01 | robot only | Present; shadow the parked source | — | **PRUNE on deploy** (§2.6) |
 
-### 2.1 vizanti — DELETE
+### 2.1 vizanti — LEAVE PARKED
 
-**Owner-decision conflict, surface it before acting.** D6 in the 2026-08-07 plan records the
+**Do not delete it.** `AGENTS.md` states the invariant — park an unused vendor package
+(`COLCON_IGNORE` + removal from the `build_common.sh` / `build_first.sh` allowlists), do not
+remove it — and names `vizanti` (5 packages) in the parked set. Verified in this tree:
+`src/ugv_else/vizanti/COLCON_IGNORE` is present and parks all five, and no vizanti name
+appears in either allowlist. **The park is already correct and complete; this plan's job on
+vizanti is the docs, not the tree.**
+
+**Owner-decision conflict, resolved by what shipped.** D6 in the 2026-08-07 plan records the
 owner's 2026-08-07 decision: *"Delete from tree (interim: neutralized via no-op launch
-files)."* `361dcc3` (authored by an agent, 2026-08-14) parked instead, with a rationale the
-owner never signed: *"Deleting was considered and rejected: the ROS convention is to ignore
-rather than remove."* **Confirm with Patrick that D6 still stands before the delete lands.**
-If he prefers parking, stop at §2.1's doc work and record the reversal in the 2026-08-07
-plan's D6 row. The rest of this plan is unaffected either way.
+files)."* `361dcc3` parked instead and `f35a3a1` stamped the docs to match; `AGENTS.md` then
+codified parking as the rule for every vendor package. That is the state the repo is in, so
+D6 is the stale half. **Record the reversal in the 2026-08-07 plan's D6 row** (parked, not
+deleted, per `AGENTS.md`). If Patrick still wants the tree gone, that is a change to the
+`AGENTS.md` invariant first and a delete second — do not do it the other way round, and do
+not do either in this PR.
 
 The recorded argument for keeping it is that the neutralized launch stubs are *"a tombstone
-that keeps [the unauthenticated rosbridge] from quietly returning."* That argument does not
-survive contact: a `COLCON_IGNORE`'d package cannot be launched at all (`ros2 launch vizanti_server
-…` fails with *package not found*), so the stub is a tombstone nobody can read. The fact worth
-preserving — that `vizanti_server.launch.py` / `vizanti_rws.launch.py` opened a glob-less
-rosbridge on `0.0.0.0:5001` — belongs in a Datacore insight, not in 2.6 MB of dead tree. Land
-that insight as part of the delete (§5 step 5).
+that keeps [the unauthenticated rosbridge] from quietly returning."* Parking already makes
+the stub unreachable — a `COLCON_IGNORE`'d package cannot be launched at all
+(`ros2 launch vizanti_server …` fails with *package not found* on a fresh build; see §2.6
+for why that is not yet true on this robot) — so the tombstone argument carries no weight
+either way. The fact worth preserving — that `vizanti_server.launch.py` /
+`vizanti_rws.launch.py` opened a glob-less rosbridge on `0.0.0.0:5001` — belongs in a
+Datacore insight regardless of whether the tree stays. Land it (§5 step 5).
 
 **Harvest assessment — nothing to harvest.** `vizanti_server/public/templates/` holds 32
 widgets, including the three that overlap the Hangar cockpit:
@@ -141,36 +156,40 @@ loads `roslib` only on the server (`src/server/beast/ros-singleton.ts`).
 `AGENTS.md` is explicit that the UI is the product. vizanti is a robot-hosted Django/JS app
 that would be a *second, unstyled, unauthenticated* product surface. The two capabilities it
 has that the cockpit lacks — a waypoint editor and a `/vizanti/save_map` button — are already
-answered on this robot by Nav2 goals and `beast-slam-save`. **Delete for good.**
+answered on this robot by Nav2 goals and `beast-slam-save`. **So it is never coming back, and
+that is exactly what "parked" means. Do not harvest, do not un-park, do not delete.**
 
-**Changes:**
+**Changes — docs only; the tree, the `COLCON_IGNORE`, and the allowlists are already right:**
 
-- `rm -r robot/beast/ros2_ws/src/ugv_else/vizanti/`
-- `robot/beast/ros2_ws/build_common.sh:7-18` — delete the vizanti lines from the parked
-  comment block (the four-package list shrinks; keep the block's shape and the closing
-  "To bring one back" line for the packages that stay parked).
-- `robot/beast/ros2_ws/mkdocs.yml:31` — remove the `- Web App: web_app.md` nav entry.
-- `robot/beast/ros2_ws/docs/web_app.md` — **delete the file whole.** It documents vizanti +
-  `ugv_web_app`, both gone.
 - `robot/beast/ros2_ws/docs/command_arbitration.md:30` — rung 50 reads *"On-screen teleop —
-  Vizanti's teleop widget, and any browser cockpit."* → **"On-screen teleop — the Hangar
+  Vizanti's teleop widget, and any browser cockpit."* A parked package cannot publish
+  anything, so this names a source that does not exist. → **"On-screen teleop — the Hangar
   cockpit's drive pad (`/cmd_vel_ui`)."**
 - `robot/beast/ros2_ws/docs/experimental.md:118,148` — the port-collision notes ("Vizanti
-  (Web App) defaults to **5100**") describe a service that can no longer start. Drop the
-  Vizanti half; keep the `ugv_chat_ai` `:5000` fact.
+  (Web App) defaults to **5100**") warn about a service that cannot start while parked.
+  Mark the Vizanti half ***(parked — cannot bind; no collision)***; keep the `ugv_chat_ai`
+  `:5000` fact, which is live.
 - `docs/beast-ops.md:660` — see §4 D8.
-- Every remaining `[Web App](web_app.md)` link and ***(parked)*** marker in the vendor docs
-  becomes a dangling link. Sweep them: `docs/index.md` (lines 4, 78, 88, 90, 106, 137, 139,
-  141, 160, 191, 213), `docs/bringup.md:24`, `docs/mapping.md:74,243`,
-  `docs/navigation.md:361`, `docs/teleoperation.md:44,52`, `docs/experimental.md:5,156`,
-  `docs/packages.md:56,76`. Remove the row/link entirely rather than rewording it — a browser
-  UI that does not exist has no place in an operator doc.
-- Verify nothing dangles: `grep -rni "vizanti\|web_app\|Web App" robot/beast/ros2_ws/` must
-  return only this plan's own history in git, i.e. nothing in the working tree.
+- `robot/beast/ros2_ws/docs/web_app.md` and `mkdocs.yml:31` — **keep both.** The page already
+  opens with an accurate parked banner (`COLCON_IGNORE`, off the allowlists, *package not
+  found*, and how to bring it back), which is the documentation a parked package is supposed
+  to have. Leave the ***(parked)*** markers `f35a3a1` stamped across `docs/index.md`,
+  `bringup.md`, `mapping.md`, `navigation.md`, `teleoperation.md`, `experimental.md`,
+  `packages.md` in place; verify each one is present and reads as parked-not-gone rather than
+  removing it.
+- Verify the park itself instead of verifying a delete:
+  `find robot/beast/ros2_ws/src -name COLCON_IGNORE` lists the vizanti parent, and
+  `grep -nE 'vizanti' robot/beast/ros2_ws/build_common.sh robot/beast/ros2_ws/build_first.sh`
+  matches only the parked-comment block at `build_common.sh:7-18`, never an allowlist entry.
+  §3's regression guard makes that permanent.
 
-### 2.2 ugv_web_app — DELETE
+### 2.2 ugv_web_app — LEAVE PARKED
 
-It is not a parked package; it is a stub wearing a package's clothes. The whole tree is
+Same invariant as §2.1: `AGENTS.md` names `ugv_web_app` in the parked set, and
+`src/ugv_main/ugv_web_app/COLCON_IGNORE` is present with no allowlist entry anywhere. The
+case below is a case for never un-parking it, **not** a licence to delete it.
+
+It is barely a package; it is a stub wearing a package's clothes. The whole tree is
 `COLCON_IGNORE`, `package.xml`, `setup.py`/`setup.cfg`, `resource/ugv_web_app`, three vendor
 lint tests, `launch/bringup.launch.py`, `__init__.py`, and **one** node, `roarm_control.py`.
 The browser UI it existed to serve was already removed upstream of this repo.
@@ -186,18 +205,20 @@ The surviving node is dead code on this robot, three ways over:
    ST3215) … Stock 2-DOF camera mount on the servo bus."* Pan-tilt already has a real owner —
    `beast_base`'s T:133 `joint_states` path.
 
-Parking it preserves nothing and costs a permanent asterisk in the docs.
+**Trigger that would change the verdict: none foreseen.** Un-parking requires a RoArm on
+BEAST-01 *and* a publisher for `/web/joint_states`, and the pan-tilt already has a real owner.
+Record that here so a future inventory does not read "parked" as "pending".
 
-**Changes:**
+**Changes — docs and one dead host-service call; the package stays where it is:**
 
-- `rm -r robot/beast/ros2_ws/src/ugv_main/ugv_web_app/`
-- `robot/beast/ros2_ws/build_common.sh:12` — delete the `ugv_web_app` parked-comment line.
-- `robot/beast/ros2_ws/ros2.sh:65-66` — drops `systemctl --user stop roarm_web_app.service`
-  (a *host* service for the vendor's Pi image; it does not exist on the Orin). Remove the two
-  lines and the `echo` above them.
+- `robot/beast/ros2_ws/build_common.sh:12` — leave the `ugv_web_app` parked-comment line; it
+  is the record of the park. Confirm it still reads accurately.
+- `robot/beast/ros2_ws/ros2.sh:65-66` — `systemctl --user stop roarm_web_app.service` is a
+  *host* service from the vendor's Pi image; it does not exist on the Orin, so this is dead
+  regardless of the package's parked state. Remove the two lines and the `echo` above them.
 - `robot/beast/ros2_ws/docs/installation.md:93` — *"`ros2.sh` stops `ugv-app`, `ugv-jupyter`,
   and `roarm_web_app` host services"* → drop `roarm_web_app` from the list to match.
-- The doc sweep in §2.1 already covers the shared `web_app.md` references.
+- The shared `web_app.md` page keeps its parked banner (§2.1).
 
 ### 2.3 explore_lite — LEAVE PARKED
 
@@ -267,14 +288,17 @@ on this robot the parked packages are still on `AMENT_PREFIX_PATH` and still lau
 means:
 
 - The docs' claim that parked packages "fail with *package not found*" is **true for a fresh
-  build and false for this robot right now**.
+  build and false for this robot right now** — including the parked banner at the top of
+  `docs/web_app.md`.
 - `use_localization:=emcl` currently works on beast-01 from a stale artifact and would stop
   working after the next clean build — a confusing failure to debug later.
-- Deleting the vizanti source (§2.1) will **not** remove the launchable neutralized stubs.
+- The neutralized vizanti launch stubs remain launchable on this robot from the stale
+  `install/` tree. **This prune, not a source delete, is what makes them unreachable** — and
+  it is the whole of what §2.1's "tombstone" argument was actually asking for.
 
-**Change:** after the deletes land and before the deploy is declared done, remove the stale
-trees on the robot. Patrick runs this (it touches the deployed workspace); it is read-only
-with respect to running services and needs no sudo:
+**Change:** before the deploy is declared done, remove the stale trees on the robot. Patrick
+runs this (it touches the deployed workspace); it is read-only with respect to running
+services and needs no sudo:
 
 ```bash
 ssh beast-01-ts 'cd ~/beast/RobotOverview/robot/beast/ros2_ws
@@ -407,7 +431,7 @@ workspace path.
 `.claude/skills/` must be run as written before it is called correct. A command that has not
 been executed is not verified, however plausible it reads.
 
-Safety-relevant first. **D1–D4 are the ones that can hurt someone**: each tells a reader that
+Safety-relevant first. **D1–D4 and D3a–D3f are the ones that can hurt someone**: each tells a reader that
 something stops the robot when nothing does. The governing fact, live-verified 2026-08-07 and
 re-confirmed today (`no cmd_vel_timeout param anywhere in the graph`): **on command silence
 nothing stops BEAST-01.** The ESP32 latches its last velocity; the only halt is an explicit
@@ -422,11 +446,17 @@ spine test.
 | **D1** | `robot/beast/ros2_ws/src/ugv_main/ugv_cockpit/config/twist_mux.yaml:30-35` | *"nothing here sends a zero Twist on timeout. That job belongs entirely to ugv_bringup's own 0.5 s `cmd_vel_timeout` watchdog on the robot side (ugv_bringup.py::_cmd_vel_watchdog_tick) … the Jetson-side watchdog is what guarantees the robot actually stops when nobody is driving. Keep both"* | **A live safety config pointing at a function deleted in #174, in a file whose own header says changing it "is a deliberate safety change."** Replace with: *"nothing here sends a zero Twist on timeout — and **nothing downstream does either.** There is no `cmd_vel_timeout` watchdog: it was removed in #174 (2026-08-07) and `beast_base` does not reimplement it. The ESP32 latches its last velocity indefinitely (live-proven: +0.81 m of wheel travel during 5 s of silence). Expiry here means the rung goes quiet, **not** that the robot stops. The only halts are `beast_base`'s unconditional boot stop, the `allow_motion` true→false edge, and a source's own zero tail — which only `ugv_tools` joy/keyboard send."* |
 | **D2** | `robot/beast/ros2_ws/docs/vision.md:23` | *"To stop motion, press **Ctrl+C** in the terminal running the tracking node. Once no source is streaming, twist_mux stops publishing and **ugv_bringup**'s 0.5 s **cmd_vel** watchdog stops the robot."* | **Operator instruction for the exact scenario that failed.** The vision demos have no zero tail; Ctrl+C leaves the ESP32 latched and the robot driving. Replace with: *"**Ctrl+C does not stop the robot.** The tracking nodes send no zero tail, and there is no watchdog — the ESP32 keeps executing the last command. To stop: disarm via `/ugv/set_allow_motion` (`ros2 service call /ugv/set_allow_motion std_srvs/srv/SetBool '{data: false}'`), or drive a zero from a teleop source. Lift the robot before running any tracking demo."* |
 | **D3** | `robot/beast/ros2_ws/docs/teleoperation.md:227` | *"Press **Ctrl+C** … twist_mux stops publishing and **ugv_bringup**'s 0.5 s **cmd_vel** watchdog stops the robot — so this takes up to about half a second, not instantly."* | Accidentally right for the wrong reason (`keyboard_ctrl`/`joy_ctrl` *do* send a 5-message zero tail on shutdown — `keyboard_ctrl.py:310`), so the reader learns a rule that fails the moment they Ctrl+C anything else. Replace the mechanism: *"…the teleop node sends a 5-message zero burst on shutdown, which is what stops the robot. There is no watchdog behind it — Ctrl+C on any node **without** a zero tail (the vision and LiDAR demos, `behavior_ctrl`) leaves the last command latched in the ESP32."* Line 39's existing "**Stopping teleop is not stopping the robot**" note is correct — keep it and cross-link. |
+| **D3a** | `robot/beast/ros2_ws/docs/lidar.md:16` | The D2 sentence again, for the guard/follow demos: *"To stop motion, press **Ctrl+C** … twist_mux stops publishing and **ugv_bringup**'s 0.5 s **cmd_vel** watchdog stops the robot."* | The LiDAR demos publish `cmd_vel_nav` and have **no zero tail**. Apply D2's replacement text. Keep the existing "lift the robot on a bench" instruction on that line — after the correction it is the only thing there that actually stops anything. |
+| **D3b** | `robot/beast/ros2_ws/docs/navigation.md:22` | Same sentence, for `nav.launch.py`. | Nav2 has no zero tail either: Ctrl+C on the nav launch leaves the last `cmd_vel_nav` command latched in the ESP32. D2's replacement text, naming `nav.launch.py`. |
+| **D3c** | `robot/beast/ros2_ws/docs/experimental.md:23` | Same sentence, for `behavior_ctrl`. | `grep -rl ZERO_TAIL src/ugv_main/` does not match `behavior_ctrl` — no zero tail, and D3's own correction already names it as an example. D2's replacement text. |
+| **D3d** | `robot/beast/ros2_ws/docs/mapping.md:24` | Same sentence, for teleop. | This is the **D3** case, not the D2 case: teleop *does* send the 5-message zero burst, so the outcome is right and only the mechanism is invented. Use D3's replacement wording — do not paste D2's here, or the doc will tell an operator that teleop leaves the robot driving when it does not. |
+| **D3e** | `robot/beast/ros2_ws/docs/command_arbitration.md:161` | *"If `twist_mux` dies, `/cmd_vel` has no publisher at all and **ugv_bringup**'s watchdog stops the robot — the fail-closed direction."* | **Inverts the safety argument inside the doc that owns the ladder.** A dead `twist_mux` mid-command leaves the ESP32 driving on the latched velocity with no arbiter left to send a zero; there is nothing fail-closed about it. The no-`respawn` decision still stands on its second reason (a respawned arbiter returns with the e-stop lock released) — keep that, drop the watchdog clause, and say plainly that a dead `twist_mux` needs an explicit stop. |
+| **D3f** | `robot/beast/ros2_ws/docs/bringup.md:92` and the *"Why the watchdog has to publish this itself"* note directly below it | Topic-table row for `ugv/watchdog_state` — *"`armed`, `fired`, `watching`, `timeout`. 2 Hz, latched, plus an immediate republish the moment the watchdog stops the robot"* — presented as a live interface. | The topic went with the watchdog in #174 (D5); `beast_base` publishes nothing of the kind. Delete the row and the note. This is the operator-facing twin of D5, which only covers the `package.xml` comment. |
 | **D4** | `robot/beast/ros2_ws/src/ugv_main/ugv_tools/launch/teleop_twist_joy.launch.py:39-42` | Justifies `autorepeat_rate` by claiming that without it *"twist_mux expires that source 0.5 s later, and ugv_bringup's cmd_vel watchdog stops the robot mid-command while the stick is still pinned."* | **Inverted.** Without autorepeat the robot does not stop mid-command — it *keeps driving* on the latched command while the mux rung sits expired, and a lower-priority source (a demo, Nav2) can then take the floor under a pinned stick. That is a stronger argument for the same `20.0 Hz`, so the setting stays; only the reasoning changes. Rewrite the bullet accordingly and drop "watchdog." |
 | **D5** | `robot/beast/ros2_ws/src/ugv_main/ugv_bringup/package.xml:22-23` | *"`/ugv/watchdog_state` is a DiagnosticStatus: the cockpit's safety strip reads armed/fired from it (see ugv_cockpit/cockpit_status.py)."* | Topic deleted in #174; `cockpit_status.py` no longer reads it. This comment is the last `watchdog_state` reference in the whole subtree. Delete the comment. Then check whether `<depend>diagnostic_msgs</depend>` (line 24) is still needed by anything remaining in `ugv_bringup` (`odom_publisher.py` + launch/config only) — if not, drop it too. |
 | **D6** | `robot/beast/ros2_ws/src/ugv_main/ugv_cockpit/README.md:37-41` | *"`/imu/raw`, not `/imu/data`. … Nothing on this robot publishes `/imu/data`."* | False since #174. Live: `ros2 topic info /imu/data` → `sensor_msgs/msg/Imu`, **publisher count 2**. `rosbridge.launch.py:109` was already corrected (*"beast_base publishes Imu on `imu/data` (canonical …)"*) — this README contradicts the launch file next to it. Rewrite: `/imu/data` is canonical (EKF / rf2o consume it); `/imu/raw` is a same-payload alias `beast_base` also publishes. |
-| **D7** | `robot/beast/ros2_ws/src/ugv_main/ugv_cockpit/test/test_cockpit_bridge.py:65,270` | *"republishes it as imu/data, so /imu/data does not exist on this robot"* and the docstring *"/imu/data does not exist on BEAST-01; whitelisting it would be dead config."* | Same false premise, now **pinned by an assertion** — the test actively defends the wrong topic list. Fix the comments and re-derive the assertion from what `beast_base` actually publishes. |
-| **D8** | `docs/beast-ops.md:660` | *"Existing separate surfaces remain Vizanti `:5100`/`:5001`, `ugv_chat_ai` `:5000`, and MediaMTX …"* | Vizanti's launch files were neutralized 2026-08-07 and the package is parked (and deleted by §2.1); nothing serves `:5100` or `:5001`. Drop the Vizanti clause; keep `ugv_chat_ai` and MediaMTX with their "verify them live" caveat. |
+| **D7** | `robot/beast/ros2_ws/src/ugv_main/ugv_cockpit/test/test_cockpit_bridge.py:64-65,270` | *"republishes it as imu/data, so /imu/data does not exist on this robot"* and the docstring *"/imu/data does not exist on BEAST-01; whitelisting it would be dead config."* | Same false premise as D6 — `base_node.py:100-101` publishes **both** `imu/data` and `imu/raw`. **Fix the comments and nothing else.** Do **not** re-derive `EXPECTED_SUB_TOPICS` from what `beast_base` publishes: that list is not an inventory of robot topics, it is the **web client's subscribe contract restated independently** (its own header says so), and `test_subscribe_glob_is_exactly_the_client_contract:264-266` asserts `topics_sub_glob == EXPECTED_SUB_TOPICS` *exactly*. The client subscribes `/imu/raw` (`src/lib/ros/client.ts:25`) and `src/__tests__/ros-client.test.ts:270-274` asserts it never subscribes `/imu/data`; adding `/imu/data` to the Python list would break the equality assertion, widen the bridge past what the client uses, and contradict the web suite. Both assertions at `:276-277` are correct as written — keep them and restate their reason: `/imu/raw` is on the list **because that is the topic the client subscribes**, not because `/imu/data` is absent. The `create_publisher(Imu, "imu/raw"` guard at `:272` is still true and still the right check. The same false sentence is also rendered to the operator at `src/components/cockpit/HonestyRail.tsx:24` and repeated at `src/lib/ros/client.ts:19,24`, `src/components/cockpit/TelemetryRow.tsx:226`, and the test name at `src/__tests__/ros-client.test.ts:270` — correct the wording in all five; change no topic. |
+| **D8** | `docs/beast-ops.md:660` | *"Existing separate surfaces remain Vizanti `:5100`/`:5001`, `ugv_chat_ai` `:5000`, and MediaMTX …"* | Vizanti's launch files were neutralized 2026-08-07 and the package is parked (§2.1); nothing on a current build serves `:5100` or `:5001`, and §2.6's prune removes the stale robot artifact that could still start one. Drop the Vizanti clause; keep `ugv_chat_ai` and MediaMTX with their "verify them live" caveat. |
 | **D9** | `docs/beast-ops.md:663-664` | *"`beast-ros-base.service` runs `bringup_lidar.launch.py use_lidar:=false use_rviz:=false allow_motion:=false`"* | **Wrong on two of three flags, one of them the motion gate.** The deployed unit's `ExecStart` (`deploy/systemd/beast-ros-base.service:19`) is `use_lidar:=true use_rviz:=false allow_motion:=true`. The doc says the robot boots motion-locked with no LiDAR; it boots **motion-armed with LiDAR up**. Anyone reasoning "it's locked at boot, safe to power on near it" is reasoning from a false premise. Correct the flags and re-date the bullet; the surrounding claim (that `/scan` is empty on a stock boot) is also now false. |
 | **D10** | `docs/beast-ops.md:641-645` | *"**cmd_vel-timeout watchdog currently present but scheduled for removal:** … Normal startup is motion-enabled … The watchdog removal is a separate planned change; **do not treat this current branch as having removed it.**"* | Present tense, and the emphasised sentence instructs the reader to assume a safety net that is gone. Rewrite as a dated historical entry — *"2026-07-31 → 2026-08-07: a `cmd_vel_timeout` (0.5 s) briefly existed in `ugv_bringup`; removed in #174 and not carried into `beast_base`"* — and point forward to the Quick connect block. |
 | **D11** | `docs/beast-ops.md:415-418`, `:653-656`, `:669-671`, `:683-684` | `:415` *"the current `twist_mux` + `cmd_vel_timeout` stack does stop sending commands … the current ROS-side watchdogs prevent it from mattering"*; `:653` *"BEAST-01 does **not** currently have `beast-cockpit.service` installed/enabled"*; `:669` *"`/cockpit/status`, `/ugv/allow_motion` and `/ugv/watchdog_state` land with `ugv_ws` PR #10 and are **not on the robot yet**"*; `:683` *"The current branch still contains the stale-command watchdog."* | All four are false against live state: `beast-cockpit.service` is **enabled and active**; `/cockpit_status` is a running node and `/ugv/allow_motion` a live topic; `/ugv/watchdog_state` does not exist and never will. These sit in the dated-history section, which AGENTS.md permits — but they use the present tense ("current", "not yet"), which is what makes them read as status. **Convert each to past tense with its date, or delete.** History earns its keep only if a reader can tell it is history. |
@@ -442,9 +472,10 @@ spine test.
 |---|---|---|---|
 | **D17** | `.claude/skills/beast-paces/SKILL.md:61-62`, `:112` | The **fail-closed watchdog gate** — the check that decides whether it is safe to drive the robot — instructs: *"look for the timeout in `~/beast/ugv_ws/src`, confirm it is present in the installed workspace (`~/beast/ugv_ws/install`)"*, and `:112` runs `source /opt/ros/humble/setup.bash && source ~/beast/ugv_ws/install/setup.bash`. | **Worst instance of §4.0 in the repo: the safety gate itself cannot be run.** All three paths are absent (verified today). The `ls` on `~/beast/ugv_ws/src` errors — recoverable, an operator sees it. The `source` at `:112` does **not**: it fails silently, and the `ros2 param get` that follows then reports the watchdog absent *for the wrong reason*. The skill's fail-closed verdict ("stop: do not enable") is correct **by accident** here, which is the dangerous kind of correct — the same silent-source failure would equally hide a param that *did* exist. Repoint all three to `~/beast/RobotOverview/robot/beast/ros2_ws` (§1), and add the §4.0 warning inline: *"if `ros2 pkg`/`ros2 param` reports something missing, re-run `ros2 node list` first — it needs no overlay. If nodes list but packages don't, your overlay did not source and the result is meaningless."* Fix with D14 in the same edit. |
 | **D18** | `docs/beast-ops.md:545` (and `:540`) | The dated ground-truth copy-paste block: `ssh beast-01 'source /opt/ros/humble/setup.bash && source ~/beast/ugv_ws/install/setup.bash && … ros2 topic list …'`. | **The doc refutes itself.** `:423` says *"the legacy `~/beast/ugv_ws` checkout is gone and the monorepo cutover is deployed"* and `:1063` says *"monorepo cutover COMPLETE; legacy `~/beast/ugv_ws` is gone"* — while `:545` hands out a command that sources it. Two correct prose claims lost to one wrong command, because the command is the part people paste. Repoint to §1's path. Also switch both blocks from `ssh beast-01` to **`ssh beast-01-ts`**: AGENTS.md says prefer Tailscale because LAN IPs drift, and `:438` already records that `beast-01.local` currently resolves to the *Ethernet* address while `:22` calls Ethernet unplugged. Keep `ssh beast-01` only in the explicitly-labelled LAN-fallback rows (`:22`, `:456`, `:1010`). |
-| **D19** | `docs/beast-control-topology.md` — whole file, esp. `:10-41`, `:43-57`, and the two mermaid blocks | *"**`ugv_ws` is not inside RobotOverview** … Two sibling clones on the Windows PC, one GitHub fork, one checkout on the Jetson"*, mapping `D:\_projects\ugv_ws` → `Coldaine/ugv_ws` as the "main clone", `D:\_projects\.worktrees\ugv_ws-*` as feature worktrees, and `~/beast/ugv_ws` as *"**this** is what actually runs"*. `:38` gives a probe command against that path. `:48` credits the robot brain to `Coldaine/ugv_ws` and lists a *"safety monitor"* it owns. Both mermaid diagrams label the Jetson subgraph `Coldaine/ugv_ws` and show **Vizanti** as a `cmd_vel_ui` source (twice). | **Assessed whole, as asked — the file is half obsolete and half the best safety writing in the repo. Rewrite the repo half; keep the authority half.** Obsolete: the entire two-repo premise directly contradicts AGENTS.md (*"Do not recreate a `Coldaine/ugv_ws` fork or a second local clone"*) — this file is the most likely reason someone would. `ugv_safety_monitor` was deleted in #174. Vizanti is parked and is deleted by §2.1. Replace §"Where the repos live" and §"Dual-repo map" with the single-monorepo reality (`robot/beast/ros2_ws` is a vendored fork we own; robot checkout `~/beast/RobotOverview`, currently `main @ 98a11a1`), delete the worktree table and the `D:\_projects\ugv_ws\docs\BEAST.md` cross-link, drop the `:38` probe (it duplicates Quick connect anyway), and relabel both mermaid subgraphs. **Keep verbatim** the Authority-stack invariant at `:98-107` and `:109` — *"no automatic Ethernet/charging interlock and no Jetson-side `cmd_vel` silence watchdog… the ESP32 may retain its last command until another command or reboot"* and *"The current service default is motion-enabled"* — that is the clearest and most accurate statement of BEAST-01's safety reality anywhere in the tree, and D1/D2/D9 should be reworded to agree **with it**. Note the coupling to D16: `:5` calls `plans/2026-08-02-control-plane-architecture.md` "the master plan"; if D16 deletes that file, replace the link here in the same commit rather than leaving it dangling. |
+| **D19** | `docs/beast-control-topology.md` — whole file, esp. `:10-41`, `:43-57`, and the two mermaid blocks | *"**`ugv_ws` is not inside RobotOverview** … Two sibling clones on the Windows PC, one GitHub fork, one checkout on the Jetson"*, mapping `D:\_projects\ugv_ws` → `Coldaine/ugv_ws` as the "main clone", `D:\_projects\.worktrees\ugv_ws-*` as feature worktrees, and `~/beast/ugv_ws` as *"**this** is what actually runs"*. `:38` gives a probe command against that path. `:48` credits the robot brain to `Coldaine/ugv_ws` and lists a *"safety monitor"* it owns. Both mermaid diagrams label the Jetson subgraph `Coldaine/ugv_ws` and show **Vizanti** as a `cmd_vel_ui` source (twice). | **Assessed whole, as asked — the file is half obsolete and half the best safety writing in the repo. Rewrite the repo half; keep the authority half.** Obsolete: the entire two-repo premise directly contradicts AGENTS.md (*"Do not recreate a `Coldaine/ugv_ws` fork or a second local clone"*) — this file is the most likely reason someone would. `ugv_safety_monitor` was deleted in #174. Vizanti is parked (§2.1) and cannot publish anything, so it is not a `cmd_vel_ui` source. Replace §"Where the repos live" and §"Dual-repo map" with the single-monorepo reality (`robot/beast/ros2_ws` is a vendored fork we own; robot checkout `~/beast/RobotOverview`, currently `main @ 98a11a1`), delete the worktree table and the `D:\_projects\ugv_ws\docs\BEAST.md` cross-link, drop the `:38` probe (it duplicates Quick connect anyway), and relabel both mermaid subgraphs. **Keep verbatim** the Authority-stack invariant at `:98-107` and `:109` — *"no automatic Ethernet/charging interlock and no Jetson-side `cmd_vel` silence watchdog… the ESP32 may retain its last command until another command or reboot"* and *"The current service default is motion-enabled"* — that is the clearest and most accurate statement of BEAST-01's safety reality anywhere in the tree, and D1/D2/D9 should be reworded to agree **with it**. Note the coupling to D16: `:5` calls `plans/2026-08-02-control-plane-architecture.md` "the master plan"; if D16 deletes that file, replace the link here in the same commit rather than leaving it dangling. |
 | **D20** | `docs/beast-ops.md` Quick connect, "Deploy 2026-08-14 05:58Z" block | *"Robot checkout is `feat/cockpit-map-render` @ **`edae18d`**"*. | **False as of 2026-08-14, and this is the block AGENTS.md designates as the only "current state" surface.** Live: branch `main`, HEAD `98a11a1` (#210 merge). `edae18d` still exists as a commit object, so the entry was true when written and the branch was merged/moved afterward — which is precisely why a HEAD SHA in prose rots faster than anything else in the doc. Correct it, and add the re-probe command next to it so the next reader verifies instead of trusting: `ssh beast-01-ts 'cd ~/beast/RobotOverview && git branch --show-current && git rev-parse --short HEAD'`. Also note the three untracked `deploy/bin/beast-wifi-telemetry` + `deploy/systemd/beast-wifi-telemetry.{service,timer}` files present on the robot but not committed here. |
 | **D21** | `docs/plans/2026-08-14-cockpit-teleop-control-law-rewrite.md:471` | `source /opt/ros/humble/setup.bash; source ~/ugv_ws/install/setup.bash` | Same dead path, already propagating into plans written **today** — evidence that the stale command is reproducing faster than the prose. Sibling plan, not this plan's file to edit: **flag it to its owner** rather than editing across plans. Whoever executes this plan should grep `docs/plans/` for `ugv_ws/install` immediately before starting and again before closing, since new plans keep landing. |
+| **D22** | `.claude/skills/beast-paces/SKILL.md:106-107` | Phase 2 step 2 tells the operator to relaunch bringup *"in a foreground SSH session **so Ctrl+C is a kill switch**."* | **False, and the same file already says so.** `:167-168` reads *"Restarting `beast-ros-base.service` does not stop a moving robot — the ESP32 holds the last velocity"*, which is equally true of Ctrl+C on the foreground launch: killing the command source is not a stop. That step is also the one place a supervised session deliberately runs with `allow_motion:=true`. Replace "so Ctrl+C is a kill switch" with the real reason for foregrounding it (the launch stays visible and stoppable; `:118-120` already states what to do if it dies), and name the staged zero in step 1 plus the hardware cut as the actual stops. Fix in the same edit as D14/D17 — one skill, one pass. |
 
 **Do not touch:** `src/data/hangar.ts` and `src/data/datacore-corpus.ts` — CI fixtures, stale
 by design (AGENTS.md). Their `watchdog` insight rows describe a *design principle* ("a cheap
@@ -453,6 +484,10 @@ about deployed code. `db/hangar/seed.sql` likewise. If the live Datacore `watchd
 needs the correction, land it as a new `append_insight` (§5 step 5), never as a fixture edit.
 
 **Already correct — leave alone (recorded so the next sweep does not "fix" them):**
+`docs/beast-ops.md:90` ("do not treat Ctrl+C or unplugging the pad as a stop");
+`robot/beast/ros2_ws/docs/gazebo.md:19` (its "no further velocity reaches the model" claim is
+about the *simulated* model, which has no latching ESP32 behind it — leave it, and do not
+copy its phrasing into a hardware doc);
 `docs/beast-control-topology.md:100` ("no Jetson-side `cmd_vel` silence watchdog");
 `ugv_cockpit/launch/rosbridge.launch.py:109`; `beast_base/base_node.py:7-10`;
 `beast_base/test/test_base_node.py:392-393`; `ugv_tools/joy_ctrl.py:96` and
@@ -465,26 +500,30 @@ One PR. Robot-facing, so it deploys the same day via
 `robot/beast/ros2_ws/deploy/deploy-to-beast.sh` (Patrick runs it — it needs robot sudo) and
 the Quick connect block in `docs/beast-ops.md` is updated, dated, at the end (AGENTS.md rule).
 
-Order matters: **fix the build before deleting anything**, so that a mid-sequence rebuild
-cannot produce a workspace without `beast_base`.
+Order matters: **fix the build first**, so that a mid-sequence rebuild cannot produce a
+workspace without `beast_base`. **Nothing in this plan deletes a package** — §2.1 and §2.2
+are doc corrections over a park that is already correct.
 
 1. **§3 — allowlists + regression guard.** Add `beast_base` to `build_common.sh` and
    `build_first.sh`; add the CI test that diffs `package.xml` names against both lists in both
    directions. Green CI here gates everything after it.
-2. **§2.1 + §2.2 — deletes.** Confirm D6 with Patrick first (§2.1). Delete the vizanti tree
-   and `ugv_web_app`; trim the parked-comment blocks; delete `docs/web_app.md`; remove the
-   mkdocs nav entry; sweep every `web_app.md` link and ***(parked)*** marker listed in §2.1;
-   fix `ros2.sh:65-66`, `docs/installation.md:93`, `docs/command_arbitration.md:30`,
-   `docs/experimental.md:118,148`.
+2. **§2.1 + §2.2 — parked-surface docs.** Verify the park (`COLCON_IGNORE` present, no
+   allowlist entry) for vizanti and `ugv_web_app`; leave both trees, `docs/web_app.md`, the
+   mkdocs nav entry, and the ***(parked)*** markers alone; fix `ros2.sh:65-66`,
+   `docs/installation.md:93`, `docs/command_arbitration.md:30`,
+   `docs/experimental.md:118,148`; record the D6 reversal in the 2026-08-07 plan.
 3. **§4.1 — command drift first.** D17 (the beast-paces safety gate) before anything else in
    §4: until it is repointed, the one procedure that decides whether it is safe to drive
-   cannot be executed. Then D18, D20, D19, D21. Fix D14 in the same edit as D17.
+   cannot be executed. Then D18, D20, D19, D21. Fix D14 and D22 in the same edit as D17.
    **Every corrected command must be executed as written and its real output pasted into the
    PR** — a repointed command that was not run is the same defect with a newer path.
-4. **§4 — prose drift.** D1–D7 (in-tree code/config/test comments) and D8–D16 (repo docs and
-   plans) in that order. D1 first; it is the one a reader acts on. Reword D1/D2/D9 to agree
-   with the Authority-stack invariant kept at `beast-control-topology.md:98-107` (D19) rather
-   than inventing a fourth phrasing of the same fact.
+4. **§4 — prose drift.** D1–D7 including D3a–D3f (in-tree code/config/test comments and the
+   vendor operator docs) and D8–D16 (repo docs and plans) in that order. D1 first; it is the
+   one a reader acts on. D3a–D3f are the same two corrections applied six more times — settle
+   D2's and D3's wording, then reuse it verbatim, and note which of the two each site takes
+   (D3d takes D3's). Reword D1/D2/D9 to agree with the Authority-stack invariant kept at
+   `beast-control-topology.md:98-107` (D19) rather than inventing a fourth phrasing of the
+   same fact.
 5. **Deploy + prune.** `deploy-to-beast.sh`, then §2.6's stale-tree removal, then a supervised
    `beast-ros-base.service` restart. **No motion in this plan** — the restart re-sends the
    unconditional boot stop, which is the safe direction.
@@ -494,7 +533,8 @@ cannot produce a workspace without `beast_base`.
      tags `["safety","ros2","teleop"]`: nothing stops BEAST-01 on command silence; the three
      real halts; Ctrl+C on a demo node is not a stop.
    - `append_insight` `ins-beast-vizanti-rosbridge-exposure` — the fact the vizanti tombstone
-     was keeping (glob-less rosbridge on `0.0.0.0:5001`), so the deletion loses nothing.
+     was keeping (glob-less rosbridge on `0.0.0.0:5001`), so it survives outside a parked
+     tree nobody reads.
    - `append_insight` `ins-beast-ros-overlay-required` — confidence `high`, `units: ["beast"]`,
      tags `["ros2","ops","method"]`. **The highest-value insight in this plan.** The one true
      workspace path (§1); `~/ugv_ws`, `~/beast/ugv_ws`, `/home/ws/ugv_ws` are all absent;
@@ -514,10 +554,17 @@ cannot produce a workspace without `beast_base`.
 - `find robot/beast/ros2_ws/src -name package.xml` yields exactly the packages named in
   `build_common.sh`'s `PACKAGES` array plus the parked set, and the new CI test asserts it in
   both directions. `beast_base` is in both build scripts.
-- `grep -rni "vizanti\|ugv_web_app\|web_app\.md\|roarm_web_app" robot/beast/ros2_ws/ docs/`
-  returns nothing in the working tree.
+- `find robot/beast/ros2_ws/src -name COLCON_IGNORE` still lists all four parked directories,
+  and no parked package name appears in either allowlist. **Nothing was deleted.**
+- `grep -rni "roarm_web_app" robot/beast/ros2_ws/` returns nothing, and every surviving
+  `vizanti` / `ugv_web_app` / `web_app.md` hit in `robot/beast/ros2_ws/docs/` reads as parked
+  rather than as an available capability — in particular `command_arbitration.md:30` no longer
+  names Vizanti as a `cmd_vel_ui` source.
 - `grep -rni "cmd_vel_timeout\|watchdog_state\|_cmd_vel_watchdog" robot/beast/ros2_ws/src/`
   returns nothing.
+- `grep -rn "watchdog stops the robot" robot/beast/ros2_ws/ docs/ .claude/` returns nothing,
+  and `grep -rni "ctrl+c" robot/beast/ros2_ws/docs/ .claude/skills/` shows no remaining claim
+  that Ctrl+C, on its own, stops the robot.
 - Every remaining `watchdog` hit under `robot/beast/ros2_ws/` and `docs/` either denies the
   watchdog's existence, is a dated historical entry in past tense, or refers to
   `beast-link-watch` (an unrelated network unit).
@@ -551,9 +598,10 @@ cannot produce a workspace without `beast_base`.
 
 ## 7. Rollback
 
-Nothing here is destructive to running behavior: the build-script change is additive, and the
-deletes remove packages that are already `COLCON_IGNORE`'d and therefore already absent from
-every build. Rollback is `git revert` of the PR plus a `deploy-to-beast.sh` re-run. The
-deleted vizanti and `ugv_web_app` trees remain recoverable from git — the `beast-pre-strip`
-tag, the fork history (`037dfca..af1dedd`), and this PR's parent commit. §2.6's robot-side
-prune is regenerable by a rebuild, and nothing we run depends on it.
+Nothing here is destructive to running behavior: the build-script change is additive, no
+package is deleted, and every doc edit describes what the tree already does. Rollback is
+`git revert` of the PR plus a `deploy-to-beast.sh` re-run. §2.6's robot-side prune removes
+only stale build artifacts of packages that are already `COLCON_IGNORE`'d; it is regenerable
+by un-parking and rebuilding, and nothing we run depends on it. Re-enabling any parked
+package remains one file deletion plus two allowlist entries (§2.3 lists the exact steps),
+which is the property the park exists to preserve.

@@ -16,10 +16,12 @@ What this file does NOT do:
   * It does not touch `allow_motion`. That gate lives entirely in
     ugv_bringup and is still the thing that decides whether a non-zero
     command reaches the ESP32.
-  * It does not replace ugv_bringup's 0.5 s cmd_vel_timeout watchdog.
-    twist_mux never publishes a stop of its own — on source silence it
-    simply stops emitting. The watchdog is the only thing in the chain
-    guaranteed to notice silence and act on it.
+  * twist_mux never publishes a stop of its own — on source silence it
+    simply stops emitting, and NOTHING downstream turns that silence into a
+    zero. The cmd_vel silence watchdog was removed 2026-08-07 (owner
+    decision D8); `cmd_vel_timeout` and `_cmd_vel_watchdog_tick` no longer
+    exist. Stopping is the publisher's job, by command — every drive source
+    here ends with an explicit zero tail.
   * It does not open a network port. That is rosbridge.launch.py in this
     same package — a rosbridge websocket bound to loopback with an explicit
     topic whitelist — and it is deliberately NOT included by bringup. See
@@ -74,10 +76,21 @@ def generate_launch_description():
         remappings=[('cmd_vel_out', '/cmd_vel')],
         # DELIBERATELY NO `respawn=`. Every velocity source in the workspace
         # publishes to a mux input, so if twist_mux dies /cmd_vel simply has
-        # no publisher and the robot stops (ugv_bringup's 0.5 s cmd_vel
-        # watchdog sees the silence and sends a stop). That is the
-        # fail-closed direction, and it is the behaviour we want on a crash:
-        # a mux crash is a safety event, not a hiccup to paper over.
+        # no publisher.
+        #
+        # WARNING — this used to say that made the crash "fail-closed",
+        # because ugv_bringup's 0.5 s cmd_vel watchdog would see the silence
+        # and send a stop. That watchdog was removed 2026-08-07 (owner
+        # decision D8), so the reasoning is now INVERTED: with no publisher
+        # and no watchdog, the ESP32 keeps executing its last command. A mux
+        # crash mid-drive leaves the robot driving.
+        #
+        # Not respawning is still the right default — a fresh arbiter would
+        # come back without the e-stop lock, which is worse — but it is no
+        # longer a stop guarantee, and nothing in this file provides one.
+        # Whether a mux crash should trigger an explicit zero (a supervisor
+        # that publishes a stop on child exit) is an OPEN owner decision;
+        # do not paper over it by adding respawn.
         #
         # Auto-respawning would instead bring the arbiter back up in a fresh,
         # empty state — notably with the e-stop lock RELEASED, since lock

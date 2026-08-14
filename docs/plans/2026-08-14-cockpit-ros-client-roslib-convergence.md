@@ -22,15 +22,23 @@ disagree, the code is right and this document is stale.
 2. **Do not delete the `roslib` dependency.** It is not dead weight. It is loaded at
    runtime by `src/server/beast/ros-singleton.ts:294` via `await import('roslib')` — a
    dynamic import, which is why a plain grep for `from 'roslib'` finds nothing. Removing
-   it breaks the agent's `/scan` liveness, nav2 motion tools, and `stop()` at runtime, and
-   **no test would catch it** because `ros-singleton.test.ts` injects a mock `RosLibLike`.
+   it breaks the agent's `/scan` liveness, the nav2 motion-tool path, and `stop()` at
+   runtime, and **no test would catch it** because `ros-singleton.test.ts` injects a mock
+   `RosLibLike`. (That motion-tool path does not reach the robot today either — see item 4
+   — but that is the bridge's whitelist, not the dependency.)
 3. **Fix the server bridge instead.** roslib is broken on the live wire *today* for the
    same reason the browser client would break: rosbridge emits bare `NaN`. The fix is
    ~60 lines through roslib's own documented `transportFactory` extension point, reusing
    the browser client's existing repair function. §6 is that work order.
+4. **This repair is not web-only.** The cockpit rosbridge registers no action opcode at all
+   (`cockpit_rosbridge.py:67`) and sets `actions_glob` to a deny-all `'[]'`
+   (`rosbridge.launch.py:132`). The server's `sendGoal` and its `cancelAllGoals` are refused
+   **silently** today, before any of this, and stay refused after every web test passes.
+   §6 Step 6 is the robot-side half; it ships and deploys with the rest.
 
 Net dependency change: none. Net new code: one shared frame module, one transport
-subclass, three small correctness fixes, and guards so this is not re-litigated.
+subclass, four small correctness fixes, one robot-side whitelist change, and guards so this
+is not re-litigated.
 
 ## 1. Inputs
 
@@ -40,6 +48,8 @@ subclass, three small correctness fixes, and guards so this is not re-litigated.
 | Its contract tests | `src/__tests__/ros-client.test.ts` |
 | Server bridge (the actual roslib consumer) | `src/server/beast/ros-singleton.ts` (491 lines) |
 | Its tests (mock-injected, never load roslib) | `src/__tests__/ros-singleton.test.ts` |
+| The bridge both clients actually talk to | `robot/beast/ros2_ws/src/ugv_main/ugv_cockpit/launch/rosbridge.launch.py` and `ugv_cockpit/cockpit_rosbridge.py` |
+| Its contract tests (colcon, not vitest) | `robot/beast/ros2_ws/src/ugv_main/ugv_cockpit/test/test_cockpit_bridge.py` |
 | Dependency declaration | `package.json:30` — `"roslib": "^2.1.0"` |
 | roslib source read | `node_modules/roslib/dist/RosLib.js` + `dist/src/**/*.d.ts` |
 | Dep provenance | `git log -S'"roslib"' -- package.json` → `cb0ea75` (#162), added *for the agent surface*, not the cockpit |
@@ -146,17 +156,36 @@ Two smaller roslib-contract bugs found alongside:
 - `ros-singleton.ts:321` — `ros.connect(url)` is `async` in roslib 2.x. The surrounding
   `try/catch` cannot catch its rejection; a bad URL becomes an unhandled rejection (fatal
   under Node's default). `RosHandle.connect` is typed `void` at `:16`, which hid this.
-- `ros-singleton.ts:452` — `action.sendGoal(goal)` with no result callback. roslib calls
+- `ros-singleton.ts:454` — `action.sendGoal(goal)` with no result callback. roslib calls
   `resultCallback(values)` unconditionally on `STATUS_SUCCEEDED`; `undefined` is not a
   function, so a **successful** nav2 action throws inside the emitter and is laundered into
   another `'error'` event.
 
+And two gaps in the cancel path that have nothing to do with the parse defect:
+
+- `stop()` (`:269`) cancels `Object.values(this.actions)` — exactly the three behaviour
+  clients `ensureActions()` (`:376`) builds for `/drive_on_heading`, `/spin` and `/backup`.
+  No `NavigateToPose` client is ever constructed. The moment the autonomy phases start
+  issuing Nav2 goals (`docs/plans/2026-08-14-beast-autonomy-on-ramp.md`, Phase 3 — blocked
+  today on exactly this), `stop()` returns `ok: true, status: 'canceled'` while the goal
+  keeps running. Step 4 fixes it.
+- Nothing in the action path reaches the robot at all. `envBridgeUrl()` (`:78`) resolves to
+  the cockpit rosbridge — the same socket the browser cockpit uses. That bridge registers
+  five capabilities (`cockpit_rosbridge.py:67` — `Advertise, Publish, Subscribe,
+  Defragment, CallService`), so `send_action_goal` and `cancel_action_goal` are not opcodes
+  it knows, and `rosbridge.launch.py:132` sets `actions_glob` to `'[]'`, which parses to
+  `[]` — deny-all, not `None`/allow-all. Denials are silent to the client. Both are
+  asserted by `test/test_cockpit_bridge.py` (`test_actions_are_denied`,
+  `FORBIDDEN_CAPABILITIES`), so this is a deliberate boundary, not an oversight — and it is
+  why Step 6 exists.
+
 None of this is visible to CI: `ros-singleton.test.ts` injects `RosLibLike` mocks that
-never parse a wire frame.
+never parse a wire frame, and the web suite never reaches the robot's launch files.
 
 ## 6. Work order
 
-One PR. No dependency changes. Web test suite must stay green.
+One PR, spanning both surfaces — Steps 1–5 web, Step 6 robot. No dependency changes. Web
+test suite must stay green; so must `ugv_cockpit`'s colcon tests.
 
 ### Step 1 — extract the frame parser (mechanical, no behaviour change)
 
@@ -179,6 +208,11 @@ import { repairNonFiniteTokens } from '@/lib/ros/frame';
 
 class NanTolerantWsTransport extends AbstractTransport {
   constructor(private socket: WebSocket) { super(); this.registerEventListeners(); }
+  // Unconditional stringify is correct here, not a bug: `send` is declared
+  // `send(message: RosbridgeMessage): void` and its only call site is
+  // `Ros.callOnConnection`, which is typed the same. It never receives a
+  // pre-serialised string or a binary buffer. roslib's own
+  // NativeWebSocketTransport.send is this exact line.
   send(m: unknown) { this.socket.send(JSON.stringify(m)); }
   close() { this.socket.close(); }
   isConnecting() { return this.socket.readyState === WebSocket.CONNECTING; }
@@ -235,11 +269,28 @@ private onError = (err: unknown) => {
 };
 ```
 
-### Step 4 — the two contract bugs
+### Step 4 — the contract bugs
 
-- `:320-325` — `void ros.connect(this.url).catch((err) => { this.onError(err); this.scheduleReconnect(); })`,
-  and retype `RosHandle.connect` (`:16`) as `connect(url: string): Promise<void> | void`.
-- `:452` — `action.sendGoal(goal, () => {}, undefined, (e: string) => { this.lastError = e; })`.
+- `:320-325` — the `try/catch` catches a synchronous throw and nothing else. Do **not**
+  write a bare `.catch()`: roslib's real signature is `connect(url: string): Promise<void>`
+  (`dist/src/core/Ros.d.ts:45`), but the injected `MockRos.connect` in
+  `ros-singleton.test.ts` returns `undefined`, so `.catch` is a `TypeError` under test and a
+  type error against the widened handle. Wrap instead —
+  `void Promise.resolve(ros.connect(this.url)).catch((err) => { this.onError(err); this.scheduleReconnect(); })`
+  — keep the surrounding `try/catch`, and retype `RosHandle.connect` (`:16`) as
+  `connect(url: string): Promise<void> | void`.
+- `:454` — `ActionHandle` (`:27-35`) declares at most three parameters, so passing a fourth
+  is a compile error before it is a fix. Widen it to roslib's real signature first
+  (`dist/src/core/Action.d.ts:32`): add
+  `failedCb?: (error: string) => void` as the fourth parameter. Then call
+  `action.sendGoal(goal, () => {}, undefined, (e: string) => { this.lastError = e; })`.
+- `stop()` cannot cancel what it never constructed. Add `nav: '/navigate_to_pose'` to
+  `ACTION_NAMES` (`:72`), build it in `ensureActions()` with actionType
+  `nav2_msgs/action/NavigateToPose`, and widen the `actions` record key union (`:104`) to
+  include it. Leave `runAction`'s `which` parameter as the three dispatchable behaviours —
+  this client exists to be cancelled, not to be driven from the current tools, and nothing
+  should be able to dispatch a Nav2 goal by widening one type. `stop()` already iterates
+  `Object.values(this.actions)`, so it picks the new client up with no further change.
 
 ### Step 5 — guards, so this is not re-litigated
 
@@ -248,6 +299,50 @@ private onError = (err: unknown) => {
   it needs the NaN-tolerant transport because rosbridge 2.0.7 emits bare `NaN`.
 - Comment at the top of `client.ts` next to the message-type contract: why this file is
   hand-written and not roslib — one line per §3 row, pointing here.
+
+### Step 6 — open the action whitelist on the robot (robot-side; needs a deploy)
+
+Steps 1–5 make the server bridge parse frames and hold `'connected'`. They do not put a
+single goal on the wire. Two independent refusals sit in front of it, both deliberate, both
+test-asserted:
+
+| Refusal | Where | Test that pins it |
+|---|---|---|
+| No action opcode is registered | `ugv_cockpit/cockpit_rosbridge.py:67` — `COCKPIT_CAPABILITIES = (Advertise, Publish, Subscribe, Defragment, CallService)` | `test_cockpit_bridge.py` `FORBIDDEN_CAPABILITIES` |
+| `actions_glob` is deny-all | `launch/rosbridge.launch.py:132` — `ACTIONS_GLOB = '[]'` (parses to `[]`, **not** `None`) | `test_cockpit_bridge.py::test_actions_are_denied` |
+
+Do both or neither. A whitelist entry is dead while the opcode is unregistered, and
+registering the opcode with `actions_glob` unset is allow-all — `parse_glob_string` maps an
+unset parameter to `None`, and every capability reads `None` as "no restriction".
+
+1. `cockpit_rosbridge.py` — add `SendActionGoal` to `COCKPIT_CAPABILITIES`. It carries the
+   `cancel_action_goal` opcode as well as `send_action_goal`, which is what `stop()` needs.
+   Leave `AdvertiseAction` out: the cockpit and the agent are action *clients*, never
+   servers, and upstream does not glob-check `advertise_action` at all.
+2. `rosbridge.launch.py` —
+   `ACTIONS_GLOB = '[/drive_on_heading, /spin, /backup, /navigate_to_pose]'`. Bracketed
+   string, single quotes or none, never a list; every format trap in that file's docstring
+   applies unchanged. `/navigate_to_pose` is a name match against a server that is not up
+   yet (Nav2 bringup is a later phase) — listing it early costs nothing and keeps the
+   whitelist in one commit with `ACTION_NAMES`.
+3. `test_cockpit_bridge.py` — `test_actions_are_denied` becomes an exact-set assertion over
+   those four names, and `SendActionGoal` moves out of `FORBIDDEN_CAPABILITIES`. Rewrite the
+   reasoning in both; do not just relax them.
+4. Update the docstrings that still say actions are refused: the module docstrings in both
+   files, and the "Services and actions" section of `robot/beast/ros2_ws/docs/cockpit.md`
+   (`:118-129`), which records `actions_glob` is `[]` and that the wrapper removes the whole
+   action API.
+
+**This widens the browser-facing boundary, not only the agent's.** There is one socket:
+`envBridgeUrl()` (`ros-singleton.ts:78`) resolves to the same cockpit rosbridge a browser
+opens, so any page that can reach it gains these four actions, and three of them move the
+robot without a human command. What still holds: `behavior_server` and Nav2 publish onto
+`cmd_vel_nav`, the **lowest** mux rung at priority 10, so the UI rung (50), the remote
+operator (100), the gamepad at the robot (150) and the estop lock (255) all outrank them;
+and `/ugv/set_allow_motion` still gates the serial write below the mux. That is the trade.
+If it is not wanted, the alternative is a second rosbridge on a separate loopback port for
+the server client only — a bigger change than this plan, and a decision to take before
+writing any of Step 6.
 
 ## 7. Tests
 
@@ -263,7 +358,14 @@ private onError = (err: unknown) => {
    `stop()` able to dispatch a cancel.
 4. Source guard: no file under `src/lib/` or `src/components/` may reference `roslib`
    (static or dynamic). Cheap, and it is the thing that keeps the verdict.
-5. Extend the message-type contract test to cover `STATUS_TOPICS` in `ros-singleton.ts` —
+5. `ros-singleton.test.ts`: `stop()` must call `cancelAllGoals()` on **four** action
+   clients, `/navigate_to_pose` among them, by name. Assert on the names the mock recorded,
+   not on the count — a count passes when the fourth client is `/wait`.
+6. Robot-side, in the same PR: `test_cockpit_bridge.py::test_actions_are_denied` becomes the
+   exact-set assertion from Step 6, and `SendActionGoal` leaves `FORBIDDEN_CAPABILITIES`.
+   These run under colcon on the Jetson, not in the web suite — green CI is not evidence
+   that this half landed.
+7. Extend the message-type contract test to cover `STATUS_TOPICS` in `ros-singleton.ts` —
    it is a second, currently **unpinned** copy of the same DDS type strings
    (`/ugv/allow_motion`, `/ugv/voltage`, `/scan`). A wrong string there is silently dead
    in exactly the way `ros-client.test.ts:206` was written to prevent.
@@ -295,11 +397,19 @@ does not re-cost it. In `src/__tests__/ros-client.test.ts`, these fail against r
 - The server bridge constructs `Ros` with `nanTolerantTransportFactory`.
 - A raw `NaN`-bearing `/scan` frame through the server transport yields `scanAlive: true`
   and leaves the state `'connected'`.
-- `connect()` rejection is handled; `sendGoal` has a result callback.
+- `connect()` rejection is handled without assuming a thenable; `ActionHandle` carries a
+  fourth parameter and `sendGoal` passes a result callback.
+- `ensureActions()` builds a `/navigate_to_pose` client and `stop()` cancels it; nothing can
+  dispatch a Nav2 goal through `runAction`.
 - The no-lookbehind test scans both files; the source guard and the `STATUS_TOPICS` type
   pin are in place.
-- Web test suite green. No robot deploy — this is web-side only, so no
-  `docs/beast-ops.md` Quick connect update is owed.
+- `actions_glob` names exactly `/drive_on_heading`, `/spin`, `/backup`,
+  `/navigate_to_pose`; `SendActionGoal` is registered and `AdvertiseAction` is not; both
+  cockpit docstrings and `robot/beast/ros2_ws/docs/cockpit.md` match.
+- Web test suite green **and** `colcon test --packages-select ugv_cockpit` green on the
+  Jetson. This ships a robot change: deploy it, prove one `spin` goal is accepted over the
+  bridge and one `stop()` cancels it, and update the `docs/beast-ops.md` Quick connect block
+  with the date.
 - **Delete this plan.** Executed plans are not archived; git is the archive. Land the
   durable half as an `append_insight` first (see §9).
 
@@ -310,6 +420,15 @@ changes are additive and currently-broken paths can only get better — the wors
 failure is the custom transport mishandling a binary frame, which the server never
 negotiates (no `compression` is ever requested). Rollback is reverting one PR; the server
 bridge returns to today's behaviour, which is degraded but not new.
+
+**Risk of Step 6 (different in kind — read it before merging).** Steps 1–5 cannot make the
+robot move. Step 6 can: it is the first change that lets a websocket client command a Nav2
+behaviour, and the socket is shared with the browser. It is reversible in one commit
+(`ACTIONS_GLOB = '[]'` plus dropping `SendActionGoal`) and it does not touch the mux ladder
+or the motion authority, but it is a boundary change and should be reviewed as one, not as
+a follow-on to a parser fix. Deploying Steps 1–5 without Step 6 is safe and leaves the
+action path exactly as broken as it is today; deploying Step 6 without Steps 1–5 is not —
+the state flap in §5 would then be gating a cancel path that can actually reach the robot.
 
 **Risk of the rejected migration (high, and asymmetric).** It would have to re-prove, on
 hardware: LiDAR renders at all; a refused advertise still marks a control dead; an

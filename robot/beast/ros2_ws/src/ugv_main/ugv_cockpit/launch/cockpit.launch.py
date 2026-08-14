@@ -14,7 +14,9 @@ beast-ros-base.service:
 LiDAR (/scan), odom, voltage, IMU and diagnostics come from beast-ros-base and
 are simply exposed through the same bridge. The bridge is also an intentional
 remote command ingress, restricted to the existing mux, actuator, and e-stop
-topics; it adds no route around the mux, motion gate, or watchdog.
+topics; it adds no route around the mux or the motion gate. (There is no
+cmd_vel watchdog to route around — it was removed 2026-08-07, owner decision
+D8 — so a bridge client that stops publishing has not stopped the robot.)
 """
 import os
 
