@@ -102,30 +102,32 @@ too many.
 
 ---
 
-## 3. Arming Phase 1 — the one manual step
+## 3. Arming Phase 1 — done, with a credential that already existed
 
-`coldaine-homelab` is **private**, so the default `GITHUB_TOKEN` cannot reach it. Until the
-secret exists, `deploy-pin.yml` fails on its first step with an explicit message and nothing
-else changes — no partial state.
+`coldaine-homelab` is **private**, so the workflow's own `GITHUB_TOKEN` cannot reach it: an
+Actions token is issued for the one repository the workflow runs in, and no setting widens it.
+This plan originally asked Patrick to mint a fine-grained PAT. **That was unnecessary** — the
+org already had the right credential and nothing was using it for this.
 
-Patrick creates this; an agent must not:
+- `cold-claude-code` (app id `4545647`) is installed org-wide with **Contents: write**.
+  Verified 2026-08-14 by minting a token restricted to `repositories: [coldaine-homelab]`:
+  it came back with `{contents: write, metadata: read}` and read the pin file.
+- Its app id and private key already live in Doppler `homelab`/`dev` as `CLAUDE_GITHUB_APP_ID`
+  / `CLAUDE_GITHUB_PRIVATE_KEY`, mirrored into `RobotOverview` Actions secrets as
+  `HOMELAB_DEPLOY_APP_ID` / `HOMELAB_DEPLOY_APP_PRIVATE_KEY`.
+- `deploy-pin.yml` mints an installation token scoped to `coldaine-homelab` alone, which
+  expires with the job. No PAT to rotate, no standing credential on either side.
 
-1. GitHub → Settings → Developer settings → **Fine-grained personal access token**
-   - Resource owner: `MooseGooseConsulting`
-   - Repository access: **only** `MooseGooseConsulting/coldaine-homelab`
-   - Permissions: **Contents: Read and write** (nothing else)
-   - Expiry: whatever you will actually remember to rotate
-2. `MooseGooseConsulting/RobotOverview` → Settings → Secrets and variables → Actions →
-   New repository secret, named **`HOMELAB_DEPLOY_TOKEN`**.
+Deploy keys are **disabled** on `coldaine-homelab` (`422 Deploy keys are disabled for this
+repository`). That is a deliberate org control — do not turn it off to work around this.
 
 **Done when:** merge anything to `main`, then within ~15 minutes
 `https://hangar.moosegoose.xyz/api/hangar/preflight` is served by a pod whose image digest
 matches the newest commit. Check the run's job summary — it prints the digest, whether it
 pushed, and where to look.
 
-A GitHub App would be the better long-term credential (no expiry, scoped installation). It is
-strictly more setup for the same result today; take it when the PAT's first rotation annoys
-you enough.
+To revoke: remove `cold-claude-code`'s access to `coldaine-homelab`, or delete the two
+repository secrets. Either one makes the workflow fail loudly and changes nothing else.
 
 ---
 

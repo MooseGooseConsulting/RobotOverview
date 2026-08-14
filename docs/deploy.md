@@ -22,8 +22,10 @@ manifests, secrets (via Doppler/ESO), Gateway listeners, and Flux reconciliation
   `infra/k8s/apps/hangar/`, GitRepository 1 min + Kustomization 10 min, `prune: true`).
   Image is **digest-pinned** since 2026-07-31
   ([coldaine-homelab PR #285](https://github.com/MooseGooseConsulting/coldaine-homelab/pull/285)):
-  `ghcr.io/moosegooseconsulting/robot-overview@sha256:20a8fc82…` (main `7481575`, #199 —
-  read from the manifest 2026-08-14) with `imagePullPolicy: IfNotPresent`.
+  `ghcr.io/moosegooseconsulting/robot-overview@sha256:999186404f…` (main `5375738`, #218 —
+  verified in-cluster 2026-08-14) with `imagePullPolicy: IfNotPresent`.
+  Until 2026-08-14 this pin was hand-edited and had gone stale at `7481575` (#199),
+  **37 commits behind main**, because nothing wrote it. That is the gap `deploy-pin.yml` closes.
   `:latest` + `Always` is retired and must not come back: it does not auto-deploy either.
   `IfNotPresent` never re-pulls, and `Always` only re-pulls **when a pod starts** — nothing
   starts one on an image push. Only a spec change rolls a Deployment.
@@ -91,9 +93,14 @@ within ~11 minutes (GitRepository 1 min + Kustomization 10 min) and rolls the De
 - **Roll back:** revert the pin commit in `coldaine-homelab`. This is the property digest
   pinning bought and `:latest` gives away.
 - **Re-pin by hand:** `workflow_dispatch` on **Pin deployed image** with `surface: hangar` and
-  an explicit `sha` — the way to redeploy an older known-good commit.
-- **Requires:** the `HOMELAB_DEPLOY_TOKEN` secret (§Known gaps). Without it the workflow fails
-  on its first step and nothing else changes; deploy by hand-editing the digest until it exists.
+  an explicit `sha` — the way to redeploy an older known-good commit. An automatic pin only ever
+  moves production to whatever `main` is *now*, so re-running an old build cannot roll it back.
+- **Credential:** no PAT and no deploy key (deploy keys are disabled on `coldaine-homelab`).
+  The workflow mints a GitHub App installation token from the org's existing `cold-claude-code`
+  app, scoped to `coldaine-homelab` alone with Contents: write, expiring with the job. The app id
+  and private key are mirrored from Doppler `homelab`/`dev` (`CLAUDE_GITHUB_APP_ID`,
+  `CLAUDE_GITHUB_PRIVATE_KEY`) into the `HOMELAB_DEPLOY_APP_ID` /
+  `HOMELAB_DEPLOY_APP_PRIVATE_KEY` repository secrets.
 
 The writer is `tools/ci/pin_deploy_image.py`. It is deliberately strict: every edit is anchored
 on a pattern that must match exactly once, and it fails loudly rather than leaving the file
@@ -126,10 +133,6 @@ psql … -f db/hangar/seed.sql
 
 ## Known gaps
 
-- **`HOMELAB_DEPLOY_TOKEN` is not set yet, so auto-deploy is inert.** `coldaine-homelab` is
-  private and the default `GITHUB_TOKEN` cannot reach it. Needed: a fine-grained PAT scoped to
-  `MooseGooseConsulting/coldaine-homelab` alone, **Contents: read+write**, stored as that
-  secret on `RobotOverview`. Until then every merge still needs a hand-edited digest.
 - **The robot has no auto-deploy.** `deployments/beast-01/manifest.yaml` gets pinned by the
   same workflow, but the `beast-pull` agent that reads it is not installed on BEAST-01
   (`/usr/local/bin/beast-pull` absent, `beast-pull.timer` inactive, `beast-ros-base` running
