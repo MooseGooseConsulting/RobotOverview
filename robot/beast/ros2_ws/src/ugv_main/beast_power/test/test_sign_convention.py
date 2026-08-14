@@ -54,7 +54,7 @@ def test_build_telemetry_charging_vs_discharging():
     from beast_power.ina219 import Ina219Reading
 
     charge = build_telemetry(
-        Ina219Reading(0.01, 12.3, 0.5, 6.0),
+        Ina219Reading(0.01, 11.8, 0.5, 6.0),
         present=True,
         charging_current_threshold_a=0.05,
     )

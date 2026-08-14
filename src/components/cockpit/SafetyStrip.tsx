@@ -143,7 +143,7 @@ export function SafetyStrip() {
   const voltStale = volts.stale && volts.hasReceived;
   // Voltage-only pack alert (2026-08-13): the pack died twice on 2026-08-10
   // with nothing reaching the operator. Live /ugv/voltage has no honest SOC
-  // (HonestyRail — the OCV table is uncalibrated) so the banner keys off
+  // (HonestyRail — usable OCV endpoints are pinned; mid-curve is still generic; % is not shown) so the banner keys off
   // volts alone. Suppressed while CHARGING/FULL (bus reads high on charge)
   // and while stale/absent.
   //   warn:     ≤ 10.8 V

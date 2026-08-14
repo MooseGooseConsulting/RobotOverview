@@ -294,7 +294,7 @@ export function SpatialView() {
                       ? ' · STALE tf'
                       : ''
               }`
-            : 'map deferred — live grid too large for WSS'}
+            : 'MAP — no /map publisher'}
         </span>
       </div>
     </section>

@@ -16,7 +16,7 @@ const CHIPS: Array<{ tone: 'red' | 'amber'; text: string; title: string }> = [
     tone: 'amber',
     text: 'BATTERY % = NOT SHOWN, BY DESIGN',
     title:
-      'Pack volts are real (driver-board INA219, verified 2026-08-07). Signed current is real but logic-rail only — the INA219 shunt sits in the buck/5 V branch, so motor, servo, and IO loads never cross it (traced connectivity PWR-E003/E013–E020); treat it as the 5 V rail\'s draw, not whole-pack draw. No honest state-of-charge exists yet — the OCV table is a generic 3S curve awaiting calibration from logged data, and the old "percentage" was a fake V/12.6. A % appears here only once it is earned.',
+      'Pack volts are real (driver-board INA219, verified 2026-08-07). Signed current is real but logic-rail only — the INA219 shunt sits in the buck/5 V branch, so motor, servo, and IO loads never cross it (traced connectivity PWR-E003/E013–E020); treat it as the 5 V rail\'s draw, not whole-pack draw. /ugv/voltage.percentage is now usable-range OCV (8.332 V = 0 %, 12.232 V = 100 % on this charger) with a still-generic mid-curve; the old V/12.6 field is gone. A % still does not appear here — the banner stays voltage-only until mid-curve rest samples earn it.',
   },
   {
     tone: 'amber',

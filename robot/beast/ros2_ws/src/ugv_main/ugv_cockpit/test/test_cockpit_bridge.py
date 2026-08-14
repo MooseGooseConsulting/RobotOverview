@@ -74,6 +74,7 @@ EXPECTED_SUB_TOPICS = [
     '/ugv/allow_motion',
     '/oak/rgb/image_raw/compressed',
     '/cockpit/depth/compressed',
+    '/map',
     '/tf',
 ]
 

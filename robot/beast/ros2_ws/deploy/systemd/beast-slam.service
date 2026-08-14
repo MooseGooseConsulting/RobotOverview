@@ -1,0 +1,38 @@
+# BEAST-01 persistent 2D mapping (hardening roadmap Phase 4).
+# slam_toolbox online_async against the LIVE beast-ros-base stack - do NOT
+# stack this on ugv_slam/launch/slam_toolbox.launch.py (that includes bringup
+# and would double-start twist_mux; see its WARNING comment).
+#
+# Map store: /data/beast/maps/beast-map.{posegraph,data} (+ occupancy export).
+# The save MUST be ExecStop (runs while slam_toolbox is still alive) - the
+# first version used ExecStopPost, which runs after the process is dead and
+# its services are gone, so nothing ever saved.
+
+[Unit]
+Description=BEAST-01 slam_toolbox online_async (persistent 2D map)
+Documentation=file:///home/beast/beast/RobotOverview/robot/beast/ros2_ws/docs/cockpit.md
+After=beast-ros-base.service network-online.target
+Wants=beast-ros-base.service
+ConditionPathExists=/opt/ros/humble/share/slam_toolbox/launch/online_async_launch.py
+
+[Service]
+Type=simple
+# Runs as beast (like beast-ros-base): root has no usable HOME for rcutils'
+# logging dir and the node aborts with "Failed to get logging directory".
+User=beast
+Group=beast
+WorkingDirectory=/home/beast/beast/RobotOverview/robot/beast/ros2_ws
+EnvironmentFile=-/etc/beast/ugv.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/setup.bash && exec ros2 launch slam_toolbox online_async_launch.py slam_params_file:=/home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/config/slam_toolbox_beast.yaml'
+# Save the posegraph while the node is still up; failures must not mask the
+# stop. systemd terminates the main process with SIGTERM after this returns.
+# Workspace copy, not /usr/local/sbin, so a tree deploy updates the saver
+# without a root install of the script.
+ExecStop=/bin/sh -c 'exec /home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-slam-save || true'
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

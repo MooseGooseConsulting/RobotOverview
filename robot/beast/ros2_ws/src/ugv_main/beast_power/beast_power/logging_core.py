@@ -24,6 +24,7 @@ row building, and integration without ROS.
 
 from __future__ import annotations
 
+import csv
 import errno
 import logging
 import math
@@ -130,6 +131,51 @@ class ChargeIntegrator:
     @property
     def gaps_clamped(self) -> int:
         return self._gaps_clamped
+
+
+def _utc_year(utc: str) -> Optional[int]:
+    """Best-effort year from an ISO utc cell. None if unparseable."""
+    if len(utc) < 4:
+        return None
+    try:
+        year = int(utc[:4])
+    except ValueError:
+        return None
+    if year < 1000:
+        return None
+    return year
+
+
+def resume_integrator(path: str) -> tuple[float, float]:
+    """Seed charge/energy from the last durable CSV row.
+
+    The integrator lives in RAM and used to start at 0.0 on every
+    ``beast_power_logger`` start, so a ``beast-ros-base`` restart zeroed the
+    running total even though the file already stored it. Read the last row
+    with finite ``charge_mah`` / ``energy_wh`` and a real clock (year ≥ 2020).
+    Missing, empty, or unreadable files return ``(0.0, 0.0)``.
+    """
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return (0.0, 0.0)
+    try:
+        with open(path, encoding='utf-8', newline='') as handle:
+            reader = csv.DictReader(handle)
+            last: Optional[tuple[float, float]] = None
+            for row in reader:
+                year = _utc_year(row.get('utc') or '')
+                if year is None or year < 2020:
+                    continue
+                try:
+                    charge_mah = float(row['charge_mah'])
+                    energy_wh = float(row['energy_wh'])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if not math.isfinite(charge_mah) or not math.isfinite(energy_wh):
+                    continue
+                last = (charge_mah, energy_wh)
+    except OSError:
+        return (0.0, 0.0)
+    return last if last is not None else (0.0, 0.0)
 
 
 def build_row(

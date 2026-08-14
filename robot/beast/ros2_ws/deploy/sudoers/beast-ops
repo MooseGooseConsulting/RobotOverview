@@ -129,10 +129,15 @@ Cmnd_Alias BEAST_SYSTEMCTL = \
     /usr/bin/systemctl disable beast-wifi-watch.service, \
     /usr/bin/systemctl disable --now beast-wifi-watch, \
     /usr/bin/systemctl disable --now beast-wifi-watch.service, \
-    /usr/bin/systemctl daemon-reload
+    /usr/bin/systemctl daemon-reload, \
+    /usr/bin/systemctl reboot
 
 Cmnd_Alias BEAST_TAILSCALE = /usr/bin/tailscale serve *
 
 Cmnd_Alias BEAST_INSTALL_UNITS = /usr/local/sbin/beast-install-systemd-units
 
-beast ALL=(root) NOPASSWD: BEAST_SYSTEMCTL, BEAST_TAILSCALE, BEAST_INSTALL_UNITS
+Cmnd_Alias BEAST_LINGER = /usr/bin/loginctl enable-linger beast
+
+Cmnd_Alias BEAST_REBOOT = /usr/sbin/reboot, /sbin/reboot, /usr/bin/systemctl reboot
+
+beast ALL=(root) NOPASSWD: BEAST_SYSTEMCTL, BEAST_TAILSCALE, BEAST_INSTALL_UNITS, BEAST_LINGER, BEAST_REBOOT

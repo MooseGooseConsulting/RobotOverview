@@ -17,6 +17,7 @@ import {
   LIDAR_CROP_SECTOR_DEG,
   LIDAR_SCAN_TO_BODY_YAW_DEG,
   DEFERRED_WIRE_TOPICS,
+  MAP_MAX_CELLS,
 } from '@/lib/ros/client';
 import { renderHook, act } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
@@ -287,14 +288,15 @@ describe('rosClient and hooks', () => {
       expect(wireOps(ws).some((o) => o.op === 'set_level')).toBe(true);
     });
 
-    it('does not auto-subscribe /map — the live 4185×6765 grid starves /scan', () => {
+    it('auto-subscribes /map now that the live grid is room-scale', () => {
       const ws = openSocket();
       const topics = wireOps(ws)
         .filter((o) => o.op === 'subscribe')
         .map((o) => o.topic);
-      expect(topics).not.toContain('/map');
+      expect(topics).toContain('/map');
       expect(topics).toContain('/scan');
       expect(topics).toContain('/tf');
+      expect(DEFERRED_WIRE_TOPICS).not.toContain('/map');
     });
 
     it('unsubscribes /map when the bridge starts fragmenting an oversized dump', () => {
@@ -534,6 +536,30 @@ describe('rosClient and hooks', () => {
       expect(m.originY).toBeCloseTo(-2.0, 6);
       expect(m.data).toEqual([-1, 0, 50, 100, 0, -1]);
       expect(m.hasReceived).toBe(true);
+    });
+
+    it('unsubscribes /map when the grid exceeds MAP_MAX_CELLS', () => {
+      const ws = openSocket();
+      const mapHook = renderHook(() => useCockpitMap());
+      const bridgeHook = renderHook(() => useCockpitBridge());
+      const width = 600;
+      const height = 500;
+      expect(width * height).toBeGreaterThan(MAP_MAX_CELLS);
+      ws.send.mockClear();
+      act(() => {
+        MockWebSocket.latestInstance?.triggerMessage({
+          op: 'publish',
+          topic: '/map',
+          msg: {
+            info: { width, height, resolution: 0.05, origin: { position: { x: 0, y: 0 } } },
+            data: new Array(width * height).fill(0),
+          },
+        });
+      });
+      expect(mapHook.result.current.hasReceived).toBe(false);
+      const unsub = wireOps(ws).find((o) => o.op === 'unsubscribe' && o.topic === '/map');
+      expect(unsub).toBeTruthy();
+      expect(bridgeHook.result.current.faults[0]?.msg).toMatch(/exceeds/);
     });
 
     it('rejects a grid whose data does not match its dimensions', () => {

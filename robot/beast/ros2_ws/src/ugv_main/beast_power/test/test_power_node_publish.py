@@ -75,7 +75,7 @@ def test_publish_once_publishes_all_fields_for_discharge_sample():
 
 
 def test_publish_once_charging_sets_bool_and_status():
-    bus = FakeSMBus(bus_voltage_v=12.3, current_a=0.4)
+    bus = FakeSMBus(bus_voltage_v=11.8, current_a=0.4)
     node = _started_node(bus)
 
     node.timers[0].callback()

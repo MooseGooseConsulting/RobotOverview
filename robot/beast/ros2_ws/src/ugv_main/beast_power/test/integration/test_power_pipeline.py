@@ -72,6 +72,7 @@ from beast_power.ina219 import (  # noqa: E402
 )
 from beast_power.logger_node import PowerLogger  # noqa: E402
 from beast_power.logging_core import COLUMNS, build_row  # noqa: E402
+from beast_power.soc import voltage_to_soc  # noqa: E402
 from beast_power.power_node import PowerNode  # noqa: E402
 from beast_power.telemetry import (  # noqa: E402
     POWER_SUPPLY_HEALTH_GOOD,
@@ -396,7 +397,9 @@ def test_power_logger_writes_real_csv(tmp_path):
     for row in present:
         assert float(row[_CI['voltage_v']]) == pytest.approx(12.0, abs=0.05)
         assert float(row[_CI['current_a']]) == pytest.approx(-0.3, abs=0.05)
-        assert float(row[_CI['percentage']]) == pytest.approx(0.8, abs=0.02)
+        assert float(row[_CI['percentage']]) == pytest.approx(
+            voltage_to_soc(12.0), abs=0.02
+        )
         assert row[_CI['power_supply_status']] == '2'  # DISCHARGING
 
     # dt ≈ sample period (5 Hz → 0.2 s). The first row's dt is 0.0 by design

@@ -21,7 +21,10 @@ Type=oneshot
 RemainAfterExit=yes
 # /bin/sh so CI systemd-analyze verify does not require the host binary path
 # as ExecStart (tailscale is robot-only). ConditionPathExists still gates runtime.
-ExecStart=/bin/sh -c '/usr/bin/tailscale serve --bg --https=443 http://127.0.0.1:9090'
+# Retry loop: at cold boot tailscaled is up but not usable until NTP syncs
+# (no RTC battery — "unexpected state: NoState"); a oneshot never retries on
+# its own, so keep trying for ~5 min before declaring failure.
+ExecStart=/bin/sh -c 'for i in $(seq 1 60); do /usr/bin/tailscale serve --bg --https=443 http://127.0.0.1:9090 && exit 0; sleep 5; done; exit 1'
 ExecStartPost=/bin/sh -c '/usr/bin/tailscale serve status | grep -q 127.0.0.1:9090'
 
 [Install]

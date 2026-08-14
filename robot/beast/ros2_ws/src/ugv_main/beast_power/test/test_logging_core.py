@@ -18,6 +18,7 @@ from beast_power.logging_core import (
     LogAlreadyActive,
     build_row,
     fcntl,
+    resume_integrator,
 )
 
 
@@ -106,6 +107,12 @@ class TestChargeIntegrator:
         acc.add(-1.0, None, 3600.0)
         assert acc.charge_mah != 0.0
         assert acc.energy_wh == 0.0
+
+    def test_seeded_integrator_keeps_prior_total(self):
+        acc = ChargeIntegrator(charge_mah=-123.4, energy_wh=-1.5)
+        acc.add(-1.0, 12.0, 1.0)
+        assert acc.charge_mah == pytest.approx(-123.4 - 1000.0 / 3600.0)
+        assert acc.energy_wh == pytest.approx(-1.5 - 12.0 / 3600.0)
 
 
 class TestBuildRow:
@@ -479,3 +486,48 @@ class TestLockFailureModes:
         w2 = DurableCsvWriter(path)
         monkeypatch.undo()  # restore fsync before the clean close
         w2.close()
+
+
+class TestResumeIntegrator:
+    def test_missing_file_is_zero(self, tmp_path):
+        assert resume_integrator(str(tmp_path / 'nope.csv')) == (0.0, 0.0)
+
+    def test_empty_file_is_zero(self, tmp_path):
+        path = str(tmp_path / 'p.csv')
+        open(path, 'w', encoding='utf-8').close()
+        assert resume_integrator(path) == (0.0, 0.0)
+
+    def test_last_row_resumes(self, tmp_path):
+        path = str(tmp_path / 'p.csv')
+        w = DurableCsvWriter(path)
+        w.write_row(_row(charge_mah=-10.0, energy_wh=-0.1))
+        w.write_row(_row(charge_mah=-123.4, energy_wh=-1.5))
+        w.close()
+        assert resume_integrator(path) == pytest.approx((-123.4, -1.5))
+
+    def test_epoch0_and_unparseable_rows_are_skipped(self, tmp_path):
+        path = str(tmp_path / 'p.csv')
+        w = DurableCsvWriter(path)
+        w.write_row(_row(utc='2026-08-10T16:15:06.000Z', charge_mah=-50.0, energy_wh=-0.5))
+        w.close()
+        with open(path, 'a', encoding='utf-8', newline='') as handle:
+            handle.write(
+                ','.join(_row(
+                    utc='1970-01-01T00:00:01.000Z',
+                    charge_mah=12.404,
+                    energy_wh=0.1,
+                )) + '\n'
+            )
+            handle.write(
+                ','.join(_row(
+                    utc='not-a-date',
+                    charge_mah=99.0,
+                    energy_wh=9.0,
+                )) + '\n'
+            )
+        assert resume_integrator(path) == pytest.approx((-50.0, -0.5))
+
+    def test_header_only_is_zero(self, tmp_path):
+        path = str(tmp_path / 'p.csv')
+        DurableCsvWriter(path).close()
+        assert resume_integrator(path) == (0.0, 0.0)

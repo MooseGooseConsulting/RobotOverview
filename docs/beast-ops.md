@@ -24,16 +24,37 @@ LAN fallback: `ssh beast-01` / `ssh beast@192.168.0.187` (`wlP1p1s0`).
 - Wi‑Fi MAC `20:bd:1d:d4:91:35` → `192.168.0.187` (name `beast-01`)
 - Ethernet MAC `4c:bb:47:a6:4e:bd` → `192.168.0.166` (name `beast-01-eth`)
 
-**Cockpit /scan 2026-08-14 (live):** WSS connected but published no `/scan` while
-DDS `/scan` was 10 Hz because leftover cockpit clients subscribed `/map`. Live
-grid is still **4185×6765**, origin (−203, −335) — ~85 MB JSON; Humble
-rosbridge 2.0.7 fragments that into 8–9 × 10 MB parts and starves `/scan`.
-QoS is not the bug (LD19 RELIABLE, rosbridge BEST_EFFORT). Client now defers
-`/map`; robot whitelist dropped `/map` (one-file scp of `rosbridge.launch.py`).
-`/scan` then 119 frames / 12 s. SpatialView: front wall ~0.77 m up, rear-mast
-wedge down (`feat/cockpit-map-render` @ `ff87c3f`, +90° body yaw). **No
-pre-01:09 posegraph backup** under `/data/beast/maps` or siblings — do not
-treat the NVMe files as the 15:19 map.
+**Map + voice 2026-08-14 02:15Z (live):** Fresh slam (no posegraph) publishes
+**69×74** @ 5 cm, origin (−1.92, −1.34) — ~3.5×3.7 m. Saved to
+`/data/beast/maps/beast-map.*`. Prior 180×122 stem is in
+`bak-2026-08-14-pre-remap` / `bak-2026-08-14-stem-at-stop`. `beast-slam-save`
+refuses grids over 250k cells (the live exploded raster was 9629×7612).
+rosbridge `topics_sub_glob` admits `/map` again; client unsubscribes if
+`MAP_MAX_CELLS` is exceeded or the bridge fragments. Cockpit chip: **MAP 3.5×3.7 m**.
+Pulse default sink is the USB HAT (`SSS1629A5`); `spd-say` returned in <5 s
+(`hangar audio path` test). `beast-ros-base` gets `XDG_RUNTIME_DIR=/run/user/1000`.
+Do not treat the NVMe stem as the 15:19 map.
+
+**Power-log / charge ceiling 2026-08-14 ~02:40Z:** SSH **down**
+(`beast-01-ts` / LAN / Ethernet all timed out; Tailscale last-seen ~02:31Z).
+Last live CSV read **2026-08-14T02:26Z**: `/data/beast/power/power-log.csv`
+**26,658 rows** (2026-08-07→14), last sample **8.784 V / −1.63 A**. Raw file
+peak **12.404 V** is a **1970-01-01 epoch-0 boot row** — clock garbage, not a
+full charge; **not quarantined** (robot unreachable). Honest rest high-water
+**12.1–12.2 V** (13k+ `|I|<0.15 A` rows); dated live **12.232 V** (2026-08-10).
+Chemistry **12.6 V never seen**. Charger is a stiff CV float at **~12.08 V**
+(2026-08-07 probe) — pack tops ~80% on the generic 3S table and stops. Epoch-0
+GC (`power-log.csv.bak-2026-08-14-pre-gc` + `power-log-garbage-epoch0.csv`) is
+**owed** on next SSH. Barrel-jack multimeter still owed (Schottky vs 12 V brick).
+
+**Usable SOC + coulomb persist 2026-08-14 (repo, not yet on robot):**
+`/ugv/voltage.percentage` is usable-range OCV: **8.332 V = 0 %**,
+**12.232 V = 100 %** (Quick-connect pin; SSH was down so no new clean-log
+Vmax). Chemistry 12.6 V table is kept as `_3S_OCV_CHEM` only. Mid-curve
+knees still generic. `beast_power_logger` resumes `charge_mah` /
+`energy_wh` from the last real-clock CSV row (no more zero on
+`beast-ros-base` restart). Integral is still **logic-rail only**. Cockpit
+banner stays voltage-only. Deploy + epoch-0 GC owed when the pack is up.
 
 **Deploy 2026-08-14 01:35Z (live):** Robot checkout is
 `feat/cockpit-map-render` @ **`ace52b8`** (OLED-first `beast_audio` + deploy
@@ -546,7 +567,7 @@ publishing drive commands. Update this block, dated, whenever a session learns a
 | `/ugv/voltage` → `current`, `charge`, `capacity`, `temperature`, `power_supply_status` | **Cutover-dependent** | `beast_power` supplies signed current/status after deployment; charge/capacity/temperature remain NaN |
 | `/imu/raw`, `/imu/mag` scales | Assumed | Waveshare ICM-20948 LSB factors; not calibrated here; `frame_id` is `base_link` (wrong frame) |
 | `/odom/odom_raw` | Partial | `odl`/`odr` ÷100 assumed cm→m; `L`/`R` are ESP32 wheel speeds, not fused pose |
-| Charging / true SOC | **Provisional** | `beast_power` publishes current and a generic 3S voltage estimate; shunt and SOC curve remain uncalibrated, and charging is observability only |
+| Charging / true SOC | **Provisional** | `beast_power` publishes usable-range OCV % (8.332–12.232 V) and logic-rail current; mid-curve and pack shunt still open; charging is observability only |
 
 Source: module docstring + inline `FAKE` / `DUMMY` / `ASSUMED` / `HACK` in
 [`robot/beast/ros2_ws/src/ugv_main/beast_base/beast_base/base_node.py`](../robot/beast/ros2_ws/src/ugv_main/beast_base/beast_base/base_node.py)

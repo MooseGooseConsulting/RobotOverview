@@ -57,16 +57,17 @@ const TOPIC_THROTTLE_MS: Record<string, number> = {
 };
 
 /**
- * Occupancy render stays; these topics are NOT put on the wire at connect.
- * Humble rosbridge 2.0.7 JSON-serializes OccupancyGrid and fragments anything
- * over `max_message_size` (10 MB). Protocol 2.1.0 added subscribe `qos`; 2.0.7
- * ignores it. Live 2026-08-14: `/map` is 4185×6765, origin (−203, −335) —
- * ~85 MB JSON, 8–9 fragments of 10 MB. Four leftover cockpit clients each
- * blocked the bridge ~37 s sending those parts, so `/scan` (10 Hz, QoS-
- * compatible RELIABLE pub → BEST_EFFORT rosbridge sub) never reached the
- * browser. This client also does not reassemble `op: fragment`.
+ * Topics that must not be subscribed at connect. Empty as of 2026-08-14:
+ * `/map` is back on the wire after a fresh 69×74 desk grid replaced the
+ * exploded 4185×6765 / 9629×7612 rasters. Humble rosbridge 2.0.7 still
+ * fragments anything over `max_message_size` (10 MB) and this client does
+ * not reassemble `op: fragment` — MAP_MAX_CELLS plus the fragment handler
+ * are the backstop if slam blows up again.
  */
-export const DEFERRED_WIRE_TOPICS = ['/map'] as const;
+export const DEFERRED_WIRE_TOPICS = [] as const;
+
+/** Refuse occupancy ingest above this. 250k cells @ 5 cm ≈ 25 m × 25 m. */
+export const MAP_MAX_CELLS = 250_000;
 
 // ── LiDAR BLIND-SECTOR CROP ─────────────────────────────────────────────────
 // The single source of truth for scan orientation and the blind sector. The
@@ -199,8 +200,9 @@ export interface CockpitVoltage extends SliceMeta {
    * Signed pack amps (positive = charging), or null. Carried only when the
    * publisher fills power_supply_status — bringup's legacy dummy current
    * arrives as 0.0 with status UNKNOWN and is nulled at ingest so it can never
-   * render as a real 0.0 A draw. (SOC stays deliberately un-carried: no honest
-   * percentage exists yet — see beast_power/soc.py.)
+   * render as a real 0.0 A draw. (SOC stays deliberately un-carried: usable
+   * OCV endpoints are pinned in beast_power/soc.py, but the cockpit banner
+   * stays voltage-only until mid-curve rest samples earn a %.)
    */
   current: number | null;
   /** sensor_msgs/BatteryState power_supply_status (1=CHARGING … 4=FULL), null if unreported/UNKNOWN-0. */
@@ -1226,6 +1228,15 @@ export const rosClient = {
         // A grid whose payload doesn't match its own dimensions is corrupt —
         // reject at ingest so it can never half-render downstream.
         if (!w || !h || !res || !Array.isArray(cells) || cells.length !== w * h) break;
+        if (w * h > MAP_MAX_CELLS) {
+          this.unsubscribeTopic('/map');
+          recordBridgeFault(
+            'warning',
+            `occupancy grid ${w}×${h} exceeds ${MAP_MAX_CELLS} cells; unsubscribed /map`,
+            'sub:/map',
+          );
+          break;
+        }
         mapData = {
           width: w,
           height: h,

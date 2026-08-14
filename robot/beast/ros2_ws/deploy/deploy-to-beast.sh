@@ -484,6 +484,7 @@ install_bin_if_needed() {
 }
 install_bin_if_needed "\$ws/deploy/bin/beast-wifi-watch" /usr/local/sbin/beast-wifi-watch
 install_bin_if_needed "\$ws/deploy/bin/beast-link-watch" /usr/local/sbin/beast-link-watch
+install_bin_if_needed "\$ws/deploy/bin/beast-slam-save" /usr/local/sbin/beast-slam-save
 sudo -n /usr/bin/systemctl daemon-reload
 # wifi-watch binary already matched the tree above; do not restart it
 # (older sudoers copies may lack try-restart beast-wifi-watch).
