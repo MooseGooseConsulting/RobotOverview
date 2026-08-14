@@ -133,12 +133,15 @@ psql … -f db/hangar/seed.sql
 
 ## Known gaps
 
-- **The robot has no auto-deploy.** `deployments/beast-01/manifest.yaml` gets pinned by the
-  same workflow, but the `beast-pull` agent that reads it is not installed on BEAST-01
-  (`/usr/local/bin/beast-pull` absent, `beast-pull.timer` inactive, `beast-ros-base` running
-  the host colcon build — verified 2026-08-14). Deploy the robot with
-  `robot/beast/ros2_ws/deploy/deploy-to-beast.sh` until Phase 2 of the plan lands. That
-  script's header calling itself "the manual override" is stale: it is the only path.
+- **The robot's auto-deploy is built but not yet armed.** The source-mode agent
+  (`robot/beast/ros2_ws/deploy/bin/beast-pull` + hourly timer, following
+  `refs/deploy/beast-01`, advanced by `deploy-pin.yml`'s `deploy-ref` job after the
+  test gate) ships in-tree as of 2026-08-14; the timer stays **masked** until the
+  supervised rollout (watched first swap, forced-rollback proof, parked-gate proof)
+  passes and the owner reinstalls `/etc/sudoers.d/beast-ops` from the tree. Until
+  then, deploy the robot with `robot/beast/ros2_ws/deploy/deploy-to-beast.sh`.
+  The homelab `deployments/beast-01/manifest.yaml` pin is provenance only — the
+  robot deploys from source and reads neither the manifest nor the GHCR image.
 - Wiki catalog objects are fresh 2026-08-10 HTML captures (hashes unset in the upload source
   map); the 2026-07-01 `.md` snapshots from UGV-Beast-Archive are gone.
 - Shipwright `Build` for Hangar is optional future work; not required for production today.

@@ -1,0 +1,32 @@
+[Unit]
+Description=BEAST-01 unattended source-mode deploy (fetch gated ref, rebuild, verify)
+Wants=network-online.target
+After=network-online.target beast-ros-base.service
+# The agent rebuilds the workspace it is checked out in; without it there is
+# nothing to deploy into.
+ConditionPathExists=/home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-pull
+
+[Service]
+Type=oneshot
+# Runs as `beast`, NOT root: it owns the checkout and the colcon workspace, and
+# every systemctl verb the agent uses is already allowlisted for this user in
+# /etc/sudoers.d/beast-ops. Running as root would need no sudoers but would
+# leave root-owned build artefacts in a user workspace.
+User=beast
+Group=beast
+SupplementaryGroups=dialout video render i2c audio
+WorkingDirectory=/home/beast/beast/RobotOverview/robot/beast/ros2_ws
+EnvironmentFile=/etc/beast/ugv.env
+Environment=PYTHONUNBUFFERED=1
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+# Wrapped in /bin/sh -c so `systemd-analyze verify` (beast-storage-tests.yml)
+# resolves the command on a CI runner that has no robot filesystem. Same shape
+# as beast-wifi-telemetry.service; ConditionPathExists above is the real check.
+ExecStart=/bin/sh -c 'exec /home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-pull'
+# Must outlast a WORST-CASE run: two bounded colcon builds (the agent caps
+# each at BEAST_BUILD_TIMEOUT, default 1200 s) plus two restarts, settles, and
+# verify sweeps. A systemd kill here lands inside the marker window — the
+# exact half-deploy state the agent exists to prevent — so the agent bounds
+# its own longest step and this ceiling stays comfortably above the sum.
+TimeoutStartSec=3600
+UMask=0027

@@ -36,6 +36,11 @@ PACKAGES=(
   teb_local_planner
   ugv_msgs
   beast_power
+  # beast_base is the ESP32 bridge — the drive path, and the node that sends the
+  # unconditional startup stop (beast_base/base_node.py). bringup_lidar.launch.py
+  # launches it by name, so a workspace built without it cannot boot the stack or
+  # fire the boot stop. It was missing from this list until 2026-08-14.
+  beast_base
   ugv_bringup
   ugv_cockpit
   ugv_chat_ai

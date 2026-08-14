@@ -1,0 +1,36 @@
+#!/bin/bash
+# Refuse to start the ROS stack while the workspace is mid-rebuild.
+#
+# install/ is a --symlink-install tree, so between "checkout moved" and "colcon
+# build finished" the workspace is inconsistent: new Python and launch files,
+# old compiled artefacts. Starting into that window yields a running robot on a
+# half-built stack — the worst outcome, because it looks fine.
+#
+# beast-pull creates the marker before it moves the checkout and removes it
+# when the build completes, so the marker's lifetime IS the inconsistency
+# window. If it exists at start time, the last deploy was interrupted and the
+# workspace cannot be trusted: FAIL CLOSED.
+#
+# There is deliberately no staleness TTL. An age bound would eventually start a
+# half-built stack anyway, which is the exact outcome this guard exists to
+# prevent, and marker age says nothing about whether the build finished.
+# Recovery is not this script's job and does not need root: beast-pull's next
+# timer tick (<= ~1h, 5 min after a reboot) detects the surviving marker,
+# rebuilds, and clears it. Manual override: remove the marker file.
+set -u
+
+MARKER="${BEAST_DEPLOY_MARKER:-/data/beast/deploy/in-progress}"
+SELF_HOLD="${BEAST_SELF_HOLD:-/data/beast/deploy/pull-hold}"
+OPERATOR_HOLD="/etc/beast/pull-hold"
+
+[ -e "$MARKER" ] || exit 0
+
+echo "beast-deploy-guard: deploy marker present ($MARKER) — a deploy was interrupted mid-build; refusing to start a possibly half-built workspace." >&2
+if [ -e "$SELF_HOLD" ] || [ -e "$OPERATOR_HOLD" ]; then
+  # Promising automatic recovery here would be a lie: beast-pull exits on its
+  # holds before it ever looks at the marker.
+  echo "beast-deploy-guard: a pull hold is ALSO set, so beast-pull will NOT recover this automatically. Investigate, then remove the hold(s) AND the marker." >&2
+else
+  echo "beast-deploy-guard: beast-pull's next tick will rebuild and recover automatically; or remove the marker to force a start." >&2
+fi
+exit 1

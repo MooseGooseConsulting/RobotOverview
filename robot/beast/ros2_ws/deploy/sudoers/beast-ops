@@ -125,6 +125,25 @@ Cmnd_Alias BEAST_SYSTEMCTL = \
     /usr/bin/systemctl disable --now beast-wifi-telemetry.timer, \
     /usr/bin/systemctl list-timers beast-wifi-telemetry.timer, \
     /usr/bin/systemctl list-timers beast-wifi-telemetry.timer --no-pager, \
+    /usr/bin/systemctl start beast-pull, \
+    /usr/bin/systemctl start beast-pull.service, \
+    /usr/bin/systemctl status beast-pull, \
+    /usr/bin/systemctl status beast-pull.service, \
+    /usr/bin/systemctl is-active beast-pull, \
+    /usr/bin/systemctl is-active beast-pull.service, \
+    /usr/bin/systemctl start beast-pull.timer, \
+    /usr/bin/systemctl stop beast-pull.timer, \
+    /usr/bin/systemctl status beast-pull.timer, \
+    /usr/bin/systemctl is-active beast-pull.timer, \
+    /usr/bin/systemctl is-enabled beast-pull.timer, \
+    /usr/bin/systemctl enable beast-pull.timer, \
+    /usr/bin/systemctl enable --now beast-pull.timer, \
+    /usr/bin/systemctl disable beast-pull.timer, \
+    /usr/bin/systemctl disable --now beast-pull.timer, \
+    /usr/bin/systemctl mask beast-pull.timer, \
+    /usr/bin/systemctl unmask beast-pull.timer, \
+    /usr/bin/systemctl list-timers beast-pull.timer, \
+    /usr/bin/systemctl list-timers beast-pull.timer --no-pager, \
     /usr/bin/systemctl start beast-wifi-watch, \
     /usr/bin/systemctl start beast-wifi-watch.service, \
     /usr/bin/systemctl stop beast-wifi-watch, \

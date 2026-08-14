@@ -1,0 +1,19 @@
+[Unit]
+Description=Check for a new BEAST-01 deploy ref hourly
+
+[Timer]
+# Not at boot-minus-nothing: let the stack come up and settle before the agent
+# is allowed to consider restarting it.
+OnBootSec=5min
+OnUnitActiveSec=1h
+# Jitter so a fleet (or a reboot loop) does not hit GitHub in lockstep.
+RandomizedDelaySec=5min
+# No Persistent=true: it only applies to OnCalendar= timers, so on a monotonic
+# timer like this one it would be a silent no-op. Catch-up after downtime is
+# OnBootSec's job — a robot that was off for a day checks the deploy ref five
+# minutes after it comes back, which is the behaviour Persistent= would have
+# promised and not delivered.
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

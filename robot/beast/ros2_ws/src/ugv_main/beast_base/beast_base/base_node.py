@@ -22,8 +22,9 @@ Calibration: do not "tune" ASSUMED fields. Vendor IMU scales are fine to start
 using compass.
 
 Deploy to beast-01: edit RobotOverview/robot/beast/ros2_ws → merge the
-RobotOverview PR → pull ~/beast/RobotOverview → build the ROS subtree → restart
-beast-ros-base.service. The Hangar web app never deploys to the robot.
+RobotOverview PR → the merge advances refs/deploy/beast-01 and the robot's
+hourly beast-pull agent rebuilds, restarts, and verifies on its own (see
+deploy/README.md). The Hangar web app never deploys to the robot.
 """
 
 import rclpy

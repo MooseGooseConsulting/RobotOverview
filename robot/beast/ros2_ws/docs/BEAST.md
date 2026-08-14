@@ -39,16 +39,14 @@ git commit
 git push -u origin beast/<change>
 ```
 
-After review and merge, update BEAST-01 from its sparse RobotOverview checkout:
-
-```bash
-cd ~/beast/RobotOverview
-git pull --ff-only origin main
-cd robot/beast/ros2_ws
-source /opt/ros/humble/setup.bash
-colcon build --symlink-install
-sudo systemctl restart beast-ros-base.service
-```
+After review and merge, BEAST-01 updates itself: the merge advances
+`refs/deploy/beast-01` (test-gated, via `deploy-pin.yml`), and the robot's
+hourly `beast-pull.timer` fetches, rebuilds what changed, restarts, verifies,
+and rolls back on failure — see `deploy/README.md`. (Until the supervised
+rollout unmasks that timer, or for a forced deploy without waiting for the
+tick, run `deploy/deploy-to-beast.sh` from any checkout.) Never hand-run
+`git pull` + `colcon build` on the robot: an unverified half-deploy that
+looks fine is exactly the failure mode the agent exists to prevent.
 
 ## Upstream
 

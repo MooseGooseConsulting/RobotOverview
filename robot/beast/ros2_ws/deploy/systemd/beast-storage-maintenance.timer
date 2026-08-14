@@ -5,7 +5,8 @@ Description=Run BEAST storage maintenance every five minutes
 OnBootSec=2min
 OnUnitActiveSec=5min
 RandomizedDelaySec=30s
-Persistent=true
+# (No Persistent= here: it only applies to OnCalendar= timers, and at a 5 min
+# cadence OnBootSec is the only catch-up that matters anyway.)
 Unit=beast-storage-maintenance.service
 
 [Install]
