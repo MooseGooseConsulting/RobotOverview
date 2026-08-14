@@ -206,6 +206,16 @@ case "$mode" in
         *) log "aborted; nothing removed"; exit 1 ;;
       esac
     fi
+    # Re-checked, not just checked once above: beast-pull.timer fires hourly
+    # (+jitter) and the confirmation prompt can sit open for as long as the
+    # operator takes to answer it. A deploy that starts DURING that wait
+    # writes $IN_PROGRESS and checks out a new commit while this report is
+    # already stale — proceeding to rm -rf here could delete build/install
+    # trees a concurrent `colcon build` is actively writing into, which is
+    # exactly the corruption the marker exists to prevent. --yes shortens the
+    # window but does not close it, so this check is unconditional.
+    [ -e "$IN_PROGRESS" ] \
+      && die "deploy in progress ($IN_PROGRESS present); a deploy started while this prune was waiting for confirmation — refusing to remove anything, nothing was touched"
     printf '%s\n' "$report" | while IFS=' ' read -r name _loc; do
       for tree_dir in "$BUILD_DIR" "$INSTALL_DIR"; do
         d="$tree_dir/$name"

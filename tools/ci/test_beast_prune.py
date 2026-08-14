@@ -30,9 +30,18 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
+
+try:
+    import pty
+    import select
+
+    HAVE_PTY = True
+except ImportError:  # pty is POSIX-only; skip the one test that needs it
+    HAVE_PTY = False
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BEAST_PRUNE = REPO_ROOT / "robot" / "beast" / "ros2_ws" / "deploy" / "bin" / "beast-prune"
@@ -257,6 +266,68 @@ def test_broken_colcon_list_is_a_hard_error_not_an_empty_report(ws: Path) -> Non
     result = run_prune(ws, available)
     assert result.returncode == 1
     assert (ws / "install" / "beast_base").is_dir()
+
+
+def _read_until(fd: int, needle: bytes, timeout: float = 5.0) -> bytes:
+    buf = b""
+    deadline = time.monotonic() + timeout
+    while needle not in buf:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"timed out waiting for {needle!r}; got so far: {buf!r}")
+        ready, _, _ = select.select([fd], [], [], remaining)
+        if not ready:
+            continue
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError:
+            break
+        if not chunk:
+            break
+        buf += chunk
+    return buf
+
+
+@pytest.mark.skipif(not HAVE_PTY, reason="pty is POSIX-only")
+def test_prune_rechecks_the_deploy_guard_after_the_confirmation_prompt(ws: Path) -> None:
+    """A deploy can start WHILE the operator is answering the [y/N] prompt —
+    beast-pull.timer fires hourly (+jitter), independent of how long a human
+    takes to type. The in-progress guard must be re-checked immediately
+    before the rm -rf, not only before the prompt was printed; this is a
+    regression test for exactly that race."""
+    target = ws / "install" / "vizanti"
+    _make_pkg_dir(ws, "install", "vizanti")
+    available = _write_available(ws.parent, "beast_base")
+    state_dir = ws.parent / "state"
+    state_dir.mkdir()
+    marker = state_dir / "in-progress"
+
+    env = {
+        **os.environ,
+        "BEAST_REPO_DIR": str(ws.parent.parent.parent),
+        "BEAST_PRUNE_COLCON_LIST": str(available),
+        "BEAST_STATE_DIR": str(state_dir),
+    }
+
+    pid, fd = pty.fork()
+    if pid == 0:  # child: exec beast-prune with the pty as its controlling tty
+        os.environ.clear()
+        os.environ.update(env)
+        os.execvp(BASH, [BASH, str(BEAST_PRUNE), "--prune"])
+        os._exit(127)  # pragma: no cover - execvp never returns on success
+
+    try:
+        _read_until(fd, b"[y/N]")
+        # A deploy starts here — AFTER the report was computed and the
+        # prompt was printed, BEFORE the operator (this test) answers it.
+        marker.write_text("deadbeef beast_base\n")
+        os.write(fd, b"y\n")
+        output = _read_until(fd, b"nothing was touched", timeout=10.0)
+    finally:
+        os.waitpid(pid, 0)
+
+    assert b"deploy in progress" in output
+    assert target.is_dir()
 
 
 def test_beast_prune_is_not_wired_into_beast_pull() -> None:
