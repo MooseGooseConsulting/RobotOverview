@@ -33,7 +33,7 @@ Default map file: **`src/ugv_main/ugv_nav/maps/map.yaml`**.
 |----|--------------------------------------|
 | Run **`nav.launch.py`** only | [LiDAR Interaction](lidar.md), [Vision](vision.md) motion tracking, or keyboard/gamepad teleop **at the same time** |
 | **Saved-map path:** use a map that matches the room | Navigate without **2D Pose Estimate** when AMCL has not converged |
-| **`use_slam:=true` path:** clear space; optional **`explore_lite`** in **T1** | Run teleop, LiDAR/vision demos, or Web Teleop alongside **`explore_lite`** |
+| **`use_slam:=true` path:** clear space; optional **`explore_lite`** in **T1** *(parked — [see below](#autonomous-exploration-explore_lite))* | Run teleop, LiDAR/vision demos, or Web Teleop alongside **`explore_lite`** |
 | Pick **one** localization + **one** local planner per session | Two Nav2 launches at once |
 | Stop other **`/cmd_vel`** sources before Nav2 | Teleop, LiDAR/vision demos, Web Teleop, Web AI — see [One motion source at a time](teleoperation.md#one-motion-source-at-a-time) |
 
@@ -158,7 +158,7 @@ Argument: **`use_localization`**. Pick **one** option below. Default local plann
 | Value | Map assets |
 |-------|------------|
 | **`amcl`** | `map.yaml` |
-| **`emcl`** | `map.yaml` |
+| **`emcl`** | `map.yaml` — **parked**, see [EMCL](#emcl) |
 | **`cartographer`** | `map.yaml` + **`map.pbstream`** |
 | **`slam_toolbox`** | `map.yaml` + **`map.posegraph`** |
 | **`rtabmap`** | RTAB-Map / 3D workflow |
@@ -176,6 +176,9 @@ ros2 launch ugv_nav nav.launch.py use_rviz:=true
 ### EMCL
 
 Alternative 2D Monte Carlo localization on **`map.yaml`**.
+
+!!! warning "Parked — this launch argument fails"
+    **`emcl2`** (directory `src/ugv_else/emcl2_ros2/`) carries a `COLCON_IGNORE` and is off the `build_common.sh` / `build_first.sh` allowlists, so **`use_localization:=emcl`** cannot start. Use [AMCL](#amcl) instead. To bring it back: delete its `COLCON_IGNORE` and re-add **`emcl2`** to both allowlists.
 
 **T0:**
 
@@ -287,10 +290,13 @@ Clear the area — Nav2 and **`explore_lite`** both drive via Nav2 on **T0**. St
 | **1** | **T0** — `nav.launch.py use_slam:=true` (command below) |
 | **2** | [Verify](#verify-before-navigating) **`/scan`** |
 | **3** | Wait for **`/map`** — `ros2 topic hz /map` (a few seconds after start or short manual drive) |
-| **4** | **T1** optional **`explore_lite`**, or RViz **2D Goal Pose** on the **growing** map |
+| **4** | **T1** optional **`explore_lite`** *(parked — [see below](#autonomous-exploration-explore_lite))*, or RViz **2D Goal Pose** on the **growing** map |
 | **5** | **T2** — **`save_map.sh`** option **`3`** when done |
 
 ### Autonomous exploration (`explore_lite`) {#autonomous-exploration-explore_lite}
+
+!!! warning "Parked — this launch fails"
+    **`explore_lite`** carries a `COLCON_IGNORE` and is off the `build_common.sh` / `build_first.sh` allowlists, so the **T1** command below cannot start — no service we run launches it. Send **2D Goal Pose** in RViz instead. To bring it back: delete its `COLCON_IGNORE` and re-add **`explore_lite`** to both allowlists.
 
 Optional **T1** — **`explore_lite`** sends frontier goals to Nav2’s **`navigate_to_pose`** action on **T0**; it does **not** publish **`/cmd_vel`** itself. Subscribes to live **`/map`** from SLAM (see `explore_lite/config/params.yaml`).
 
@@ -337,7 +343,7 @@ ros2 launch ugv_nav nav.launch.py use_keepout_zones:=true use_rviz:=true
 | Jerky or no motion | A higher **`twist_mux`** rung is driving (teleop), or another autonomy node shares Nav2's **`/cmd_vel_nav`** rung | Stop teleop; stop LiDAR / vision demos |
 | Cartographer / slam_toolbox nav fails | Missing sidecar file | Save **`map.pbstream`** or **`map.posegraph`** when mapping |
 | `explore_lite` idle / no goals | **`use_slam:=false`**, Nav2 not ready, or no **`/map`** yet | **`use_slam:=true`** on **T0**; wait for **`/map`**; in Gazebo match **`use_sim_time`** on **T0** and **T1** |
-| Map not growing with **`use_slam:=true`** | Wrong workflow | Confirm **`use_slam:=true`**; drive manually or run **`explore_lite`** — see [SLAM while navigating](#slam-while-navigating) |
+| Map not growing with **`use_slam:=true`** | Wrong workflow | Confirm **`use_slam:=true`**; drive manually (**`explore_lite`** is [parked](#autonomous-exploration-explore_lite)) — see [SLAM while navigating](#slam-while-navigating) |
 
 ---
 
@@ -352,6 +358,6 @@ ros2 launch ugv_nav nav.launch.py use_keepout_zones:=true use_rviz:=true
 | [Vision](vision.md) | Stop before Nav2 |
 | [Gazebo](gazebo.md) | Nav2 in simulation |
 | [Experimental](experimental.md) | Optional voice / Web AI |
-| [Web App](web_app.md) | Browser teleop, viz, Nav2 goals |
+| [Web App](web_app.md) | Browser teleop, viz, Nav2 goals — ***parked*** |
 
 **Next:** [Experimental](experimental.md).

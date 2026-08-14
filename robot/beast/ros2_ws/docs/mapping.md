@@ -71,7 +71,7 @@ Source launches: `src/ugv_main/ugv_slam/launch/`.
 | **T1** | **`ros2 run ugv_tools keyboard_ctrl`** — or gamepad: [Teleoperation](teleoperation.md) |
 | **T2** *(2D only, when done)* | **`save_map.sh`** while **T0** is still running |
 
-Optional browser UI while mapping: [Web App](web_app.md) (`ugv_web_app`).
+Optional browser UI while mapping: [Web App](web_app.md) (`ugv_web_app`) — **parked**, does not build; use the Hangar cockpit ([Web Cockpit Bridge](cockpit.md)) instead.
 
 If the program no longer needs to run, press **`Ctrl+C`** in each terminal.
 
@@ -240,7 +240,7 @@ Nav2 localization: **`use_localization:=rtabmap`** — see [Navigation — RTAB-
 | [LiDAR Interaction](lidar.md) | Laser demos (stop before SLAM) |
 | [Vision](vision.md) | Camera demos (stop before SLAM) |
 | [Gazebo](gazebo.md) | Mapping in simulation |
-| [Web App](web_app.md) | Optional browser teleop / map view while mapping |
+| [Web App](web_app.md) | Optional browser teleop / map view while mapping — ***parked*** |
 | [Hardware Driver](bringup.md) | What SLAM launches include |
 
 **Next:** [Navigation](navigation.md).

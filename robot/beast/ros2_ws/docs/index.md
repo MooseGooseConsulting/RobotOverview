@@ -75,7 +75,7 @@ On a **physical robot**, SSH twice: port **22** is the **host** (run `ros2.sh` t
 | SSH — **host** (Jetson) | `<robot-ip>` port **22**, user `jetson`, password `jetson` |
 | SSH — **container** (`ugv_ws`, ROS) | `<robot-ip>` port **23**, user `root`, password `ws` |
 | Camera WebRTC | `http://<robot-ip>:8889/cam/` |
-| Web App | `http://<robot-ip>:5100` (with **T0** robot stack running) |
+| Web App *(parked)* | `http://<robot-ip>:5100` (with **T0** robot stack running) |
 | Web AI (experimental) | `http://<robot-ip>:5000` |
 
 ---
@@ -84,7 +84,10 @@ On a **physical robot**, SSH twice: port **22** is the **host** (run `ros2.sh` t
 
 Short map of what each tutorial chapter covers. Step-by-step guides are in the sidebar.
 
-Most real-robot workflows use **T0** for the robot stack (bringup, SLAM, Nav2, or a demo launch) and **T1** for teleop or the [Web App](web_app.md). Optional **`explore_lite`** also runs in **T1** but only sends Nav2 goals while **T0** runs `nav.launch.py use_slam:=true` — see [Navigation — SLAM while navigating](navigation.md#slam-while-navigating). Only **one** **`/cmd_vel`** source at a time — see [Teleoperation — One motion source at a time](teleoperation.md#one-motion-source-at-a-time).
+!!! warning "Parked packages — some commands below will not run"
+    **`ugv_web_app`** and **`vizanti`** ([Web App](web_app.md)), **`explore_lite`**, and **`emcl2`** (**`use_localization:=emcl`**) carry a `COLCON_IGNORE` and are off the allowlists in `build_common.sh` / `build_first.sh`, so launching them fails with *package not found*. They are tagged ***(parked)*** below. To bring one back: delete its `COLCON_IGNORE` and re-add its name to both allowlists — see [Package Reference](packages.md).
+
+Most real-robot workflows use **T0** for the robot stack (bringup, SLAM, Nav2, or a demo launch) and **T1** for teleop or the [Web App](web_app.md) *(parked)*. Optional **`explore_lite`** *(parked)* also runs in **T1** but only sends Nav2 goals while **T0** runs `nav.launch.py use_slam:=true` — see [Navigation — SLAM while navigating](navigation.md#slam-while-navigating). Only **one** **`/cmd_vel`** source at a time — see [Teleoperation — One motion source at a time](teleoperation.md#one-motion-source-at-a-time).
 
 ### [1. Robot Description](description.md)
 
@@ -100,7 +103,7 @@ URDF/xacro models, RViz configs, LiDAR and camera frames, TF diagrams.
 - **`ugv_bringup`** node — UART **`/dev/ttyAMA0`** (115200); subscribes **`/cmd_vel`**, pan-tilt, LED topics.
 - **`bringup_lidar.launch.py`** — `ldlidar` (**`/dev/ttyACM0`**) + RF2O + EKF → **`/scan`**, fused **`/odom`**.
 
-SLAM, Nav2, and demo launches **include** this stack (or **`bringup_gazebo.launch.py`** in sim). Run **`bringup_lidar.launch.py`** alone for teleop-only, [Web App](web_app.md) teleop, or [Experimental](experimental.md) voice / Web AI.
+SLAM, Nav2, and demo launches **include** this stack (or **`bringup_gazebo.launch.py`** in sim). Run **`bringup_lidar.launch.py`** alone for teleop-only, [Web App](web_app.md) teleop *(parked)*, or [Experimental](experimental.md) voice / Web AI.
 
 ### [3. Keyboard & Gamepad Control](teleoperation.md)
 
@@ -131,7 +134,9 @@ USB camera and OAK-D Lite tracking in **`ugv_vision`**. **One camera type per se
 - **RTAB-Map** — 3D + OAK-D (Gazebo **`/oak/*`** in sim); no **`save_map.sh`**; Nav2: **`use_localization:=rtabmap`**.
 - 2D backends include **`robot_pose_publisher`** → **`/robot_pose`**.
 
-### [7. Web App](web_app.md)
+### [7. Web App](web_app.md) — *parked*
+
+**Parked** — `ugv_web_app` and `vizanti` do not build; superseded by the Hangar cockpit ([Web Cockpit Bridge](cockpit.md)). See [Web App](web_app.md) for the re-enable steps.
 
 Optional Vizanti browser UI in **`ugv_web_app`** — does **not** start the robot stack; needs **T0** (bringup / SLAM / Nav) + **T1** `ros2 launch ugv_web_app bringup.launch.py`.
 
@@ -142,9 +147,9 @@ Optional Vizanti browser UI in **`ugv_web_app`** — does **not** start the robo
 
 [Nav2](https://navigation.ros.org/) — **`nav.launch.py`** includes bringup + Nav2 + **`robot_pose_publisher`**. Default: navigate on a **saved map**; optional **`use_slam:=true`** for map-while-navigating (not the same flag as Mapping’s `use_slam:=sync`).
 
-- Localization — **`amcl`** *(default)*, **`emcl`**, **`cartographer`**, **`slam_toolbox`**, **`rtabmap`** (OAK-D).
+- Localization — **`amcl`** *(default)*, **`emcl`** *(parked)*, **`cartographer`**, **`slam_toolbox`**, **`rtabmap`** (OAK-D).
 - Local planners — **`teb`** *(default)*, **`dwa`**, **`rpp`**, **`mppi`**.
-- Optional **`use_slam:=true`** on **`nav.launch.py`** — map while navigating (not **`use_localization:=slam_toolbox`** on a saved map — see [SLAM Toolbox: which path?](navigation.md#slam-toolbox-paths)); optional **`explore_lite`** in **T1**.
+- Optional **`use_slam:=true`** on **`nav.launch.py`** — map while navigating (not **`use_localization:=slam_toolbox`** on a saved map — see [SLAM Toolbox: which path?](navigation.md#slam-toolbox-paths)); optional **`explore_lite`** in **T1** *(parked)*.
 - Optional **`use_keepout_zones`**. Stop teleop and motion demos before Nav2.
 
 ### [9. Experimental](experimental.md)
@@ -183,9 +188,9 @@ Use separate terminals for real-robot workflows. Factory images: SSH into the co
 | Map (Gmapping) | **T0:** `ros2 launch ugv_slam gmapping.launch.py use_rviz:=true` · **T1:** `keyboard_ctrl` · **T2:** `./save_map.sh` → **`1`** |
 | Map (Cartographer) | **T0:** `ros2 launch ugv_slam cartographer.launch.py use_rviz:=true` · **T1:** `keyboard_ctrl` · **T2:** `./save_map.sh` → **`2`** |
 | Map (RTAB-Map) | **T0:** `ros2 launch ugv_slam rtabmap.launch.py use_rviz:=true` · **T1:** `keyboard_ctrl` — no **`save_map.sh`** |
-| Web App (teleop / viz) | **T0:** bringup (or SLAM / Nav) · **T1:** `ros2 launch ugv_web_app bringup.launch.py` · browser `http://<ip>:5100` |
+| Web App (teleop / viz) ***(parked)*** | **T0:** bringup (or SLAM / Nav) · **T1:** `ros2 launch ugv_web_app bringup.launch.py` · browser `http://<ip>:5100` |
 | Nav (AMCL + TEB) | **T0:** `ros2 launch ugv_nav nav.launch.py use_rviz:=true` (after **`save_map.sh`**) |
-| Nav (SLAM + Nav) | **T0:** `ros2 launch ugv_nav nav.launch.py use_rviz:=true use_slam:=true` · **T1** *(optional)*: `ros2 launch explore_lite explore.launch.py` · **T2:** `./save_map.sh` → **`3`** |
+| Nav (SLAM + Nav) | **T0:** `ros2 launch ugv_nav nav.launch.py use_rviz:=true use_slam:=true` · **T1** *(optional, **parked**)*: `ros2 launch explore_lite explore.launch.py` · **T2:** `./save_map.sh` → **`3`** |
 | Nav (RTAB-Map) | **T0:** `ros2 launch ugv_nav nav.launch.py use_rviz:=true use_localization:=rtabmap` |
 | Web AI | **T0:** bringup · **T1:** `ros2 run ugv_tools behavior_ctrl` · **T2:** `ros2 run ugv_chat_ai app --ros-args -p server_url:=http://<ollama-ip>:11434/api/chat` · browser `http://<ip>:5000` |
 | Simulation only *(VM / desktop)* | **T0:** `ros2 launch ugv_gazebo bringup_gazebo.launch.py use_rviz:=true`; SLAM/Nav add `use_sim_time:=true` — not on the physical robot |
@@ -205,7 +210,7 @@ Use separate terminals for real-robot workflows. Factory images: SSH into the co
 | 7 | [LiDAR Interaction](lidar.md) | Laser follow / guard / avoid |
 | 8 | [Vision](vision.md) | USB and OAK-D tracking via `demo.launch.py` |
 | 9 | [Mapping](mapping.md) | SLAM + save map |
-| 10 | [Web App](web_app.md) | Browser teleop / viz (optional) |
+| 10 | [Web App](web_app.md) | Browser teleop / viz (optional — ***parked***, does not build) |
 | 11 | [Navigation](navigation.md) | Nav2 on saved map |
 | 12 | [Experimental](experimental.md) | Voice, Ollama, Web AI (optional) |
 | 13 | [Gazebo](gazebo.md) | Simulation without hardware |
