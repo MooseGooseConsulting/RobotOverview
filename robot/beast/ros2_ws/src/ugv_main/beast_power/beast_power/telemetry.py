@@ -13,7 +13,12 @@ from dataclasses import dataclass
 from typing import Optional
 
 from beast_power.ina219 import Ina219Reading
-from beast_power.soc import voltage_to_soc
+from beast_power.soc import (
+    STATE_UNKNOWN,
+    estimate_ocv,
+    pack_state,
+    voltage_to_soc,
+)
 
 # sensor_msgs/BatteryState power_supply_status constants
 POWER_SUPPLY_STATUS_UNKNOWN = 0
@@ -48,6 +53,12 @@ class BatteryTelemetry:
     temperature: float
     location: str
     serial_number: str
+    # Load-compensated extras. Not BatteryState fields — that message has
+    # nowhere to put them — so `to_battery_fields` deliberately drops them.
+    # They exist so the node can warn on the band and so tests can assert the
+    # compensation actually happened rather than inferring it from a percent.
+    open_circuit_voltage: float = float('nan')
+    pack_state: str = STATE_UNKNOWN
 
 
 def is_charging(current_a: float, threshold_a: float) -> bool:
@@ -95,7 +106,12 @@ def build_telemetry(
             serial_number='',
         )
 
-    soc = voltage_to_soc(reading.bus_voltage_v)
+    # Pass the current, not just the volts: the table is a RESTING OCV table,
+    # and a loaded terminal reading looked up in it under-reports SOC in
+    # proportion to load. Dropping `current_a` here is the 2026-08-14 bug.
+    ocv = estimate_ocv(reading.bus_voltage_v, reading.current_a)
+    soc = voltage_to_soc(reading.bus_voltage_v, reading.current_a)
+    state = pack_state(reading.bus_voltage_v, reading.current_a)
     charging = is_charging(reading.current_a, charging_current_threshold_a)
 
     if charging:
@@ -122,6 +138,8 @@ def build_telemetry(
         temperature=float('nan'),
         location='driver_board_ina219',
         serial_number='',
+        open_circuit_voltage=float(ocv),
+        pack_state=state,
     )
 
 

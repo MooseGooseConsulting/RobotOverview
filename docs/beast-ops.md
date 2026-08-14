@@ -307,9 +307,20 @@ since been recharged and is online again as of 2026-08-10):
   fsynced file goes ~0.036 V lower. True trip is at or just below **8.332 V**.
 - **The inherited 9.0 V "0 %" is wrong as a hard floor — pessimistically so.**
   The robot ran a further **6 minutes and 0.7 V** below it. `soc.py`'s
-  `PACK_EMPTY_V = 9.0` is a generic 3S table value, not this pack. (It remains
-  a fine *conservative* empty for casual use — the recommendation below is a
-  deliberate two-threshold split, not a license to drain to 8.3 V.)
+  `PACK_EMPTY_V = 9.0` was a generic 3S table value, not this pack; the
+  constant has since been **deleted** (nothing read it — `PACK_HARD_EMPTY_V`
+  = 8.332 V is the live floor). The recommendation below is a deliberate
+  two-threshold split, not a license to drain to 8.3 V.
+- **SOC is load-compensated as of 2026-08-14.** `soc.py` holds a *resting*
+  OCV table, and the node had been looking up the *loaded* terminal voltage
+  in it, under-reporting SOC in proportion to draw. It now estimates
+  `OCV = V − I × 0.14 Ω` first (`PACK_INTERNAL_R_OHM`, regressed from
+  `power-log.csv`) and reports `pack_state` — `nominal` / `low` / `reserve` /
+  `critical`, band edges from measured time-to-cutoff. Gate decisions on the
+  **state**, not on the percentage: the percentage still rides a generic
+  NMC-shaped table with no rested samples behind it. **Not yet deployed to
+  the robot** — the running stack still reports the uncompensated number.
+  Background and the full arithmetic: issue #235.
 - **The shutdown was probably the pack's own protection doing its job**
   (`[inference-not-verified]`). Two reasons: the MP8759GD is a *step-down* to
   5 V and would keep regulating far below 8.3 V input, so the converter did not

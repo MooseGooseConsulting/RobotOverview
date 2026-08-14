@@ -74,7 +74,11 @@ def test_every_battery_state_field_by_name():
     assert math.isnan(msg.charge)
     assert math.isnan(msg.capacity)
     assert math.isnan(msg.design_capacity)
-    assert msg.percentage == pytest.approx(voltage_to_soc(11.4))
+    # Load-compensated against the -0.8 A in the reading above. Asserting the
+    # bare `voltage_to_soc(11.4)` would re-pin the loaded-volts-into-a-resting
+    # -table bug that ended a nav session on 2026-08-14.
+    assert msg.percentage == pytest.approx(voltage_to_soc(11.4, -0.8))
+    assert msg.percentage > voltage_to_soc(11.4)
     assert msg.power_supply_status == POWER_SUPPLY_STATUS_DISCHARGING
     assert msg.power_supply_health == POWER_SUPPLY_HEALTH_GOOD
     assert msg.power_supply_technology == POWER_SUPPLY_TECHNOLOGY_LION
@@ -95,9 +99,15 @@ def test_percentage_and_charge_are_not_swapped():
     tel = build_telemetry(Ina219Reading(0.005, 12.3, 0.4, 4.92), present=True)
     msg = BatteryState(**to_battery_fields(tel))
 
-    assert msg.percentage == pytest.approx(voltage_to_soc(12.3))
-    # 12.3 V under the 12.364 V clean-log full pin: high but honestly not 100 %.
-    assert msg.percentage == pytest.approx(0.976845, abs=1e-5)
+    # +0.4 A is CHARGING, so compensation pulls the estimate DOWN: the
+    # terminal is being held above open circuit by the charger.
+    assert msg.percentage == pytest.approx(voltage_to_soc(12.3, 0.4))
+    assert msg.percentage < voltage_to_soc(12.3)
+    # 12.3 V under the 12.364 V clean-log full pin: high but honestly not
+    # 100 %. Compensated for the +0.4 A charge current (OCV ~12.244 V) it is
+    # 95.7 %, where the raw terminal lookup claimed 97.7 % — the charger was
+    # paying for those two points, not the cells.
+    assert msg.percentage == pytest.approx(0.956585, abs=1e-5)
     assert math.isnan(msg.charge)
 
 

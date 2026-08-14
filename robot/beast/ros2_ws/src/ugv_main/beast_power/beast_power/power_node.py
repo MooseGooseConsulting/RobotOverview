@@ -19,6 +19,12 @@ from sensor_msgs.msg import BatteryState
 from std_msgs.msg import Bool
 
 from beast_power.ina219 import Ina219, SMBusLike
+from beast_power.soc import (
+    STATE_CRITICAL,
+    STATE_MINUTES_TO_CUTOFF,
+    STATE_RESERVE,
+    STATE_UNKNOWN,
+)
 from beast_power.telemetry import (
     BatteryTelemetry,
     build_telemetry,
@@ -122,6 +128,7 @@ class PowerNode(Node):
         self._charging_pub = self.create_publisher(Bool, charging_topic, 10)
 
         self._timer = None
+        self._last_pack_state = STATE_UNKNOWN
 
     def start(self) -> None:
         self._try_open_sensor()
@@ -159,10 +166,38 @@ class PowerNode(Node):
 
     def _publish_once(self) -> None:
         telemetry = self._sample()
+        self._log_pack_state(telemetry)
         self._voltage_pub.publish(self._to_battery_msg(telemetry))
         charging = Bool()
         charging.data = telemetry.charging_active
         self._charging_pub.publish(charging)
+
+    def _log_pack_state(self, telemetry: BatteryTelemetry) -> None:
+        """Announce band changes once, with the measured minutes behind them.
+
+        Edge-triggered, not throttled: at 1 Hz a level-triggered warning would
+        emit 3600 identical lines an hour and get filtered out by the reader,
+        which is how a real low-pack warning goes unseen. The percentage is
+        deliberately NOT the thing reported here — the band is measured, the
+        percentage still rides a borrowed chemistry table.
+        """
+        state = telemetry.pack_state
+        if state == self._last_pack_state:
+            return
+        self._last_pack_state = state
+        if state not in (STATE_RESERVE, STATE_CRITICAL):
+            return
+        low, high = STATE_MINUTES_TO_CUTOFF[state]
+        log = (
+            self.get_logger().error
+            if state == STATE_CRITICAL
+            else self.get_logger().warning
+        )
+        log(
+            f'pack state {state}: {telemetry.voltage:.3f} V terminal at '
+            f'{telemetry.current:+.2f} A -> OCV ~{telemetry.open_circuit_voltage:.3f} V; '
+            f'~{low:.0f}-{high:.0f} min to cutoff at this load (measured)'
+        )
 
     def _absent_telemetry(self) -> BatteryTelemetry:
         return build_telemetry(
