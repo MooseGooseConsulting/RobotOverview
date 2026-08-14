@@ -9,13 +9,20 @@
 # nobody is watching is exactly what the safety spine exists to prevent
 # (autonomy on-ramp plan Phase 3: do not enable). There is deliberately no
 # [Install] section, so `systemctl enable beast-nav` fails loudly instead of
-# quietly arming autonomy at boot.
+# quietly arming autonomy at boot. Restart=no for the same reason: a crashed
+# or guard-blocked nav session stays DOWN until a human starts it again —
+# that is the contract, not a regression (Restart=on-failure would retry a
+# deploy-guard refusal every few seconds and auto-launch Nav2 the moment the
+# marker cleared, possibly long after the owner walked away).
 #
 # Manual start (owner present, hand on cockpit DISARM/WASD):
 #     sudo systemctl start beast-nav
 #     sudo systemctl stop beast-nav      # before walking away
 #
-# Requires a live map->odom source, which this unit does NOT provide:
+# Requires a live map->odom source, which this unit does NOT provide and
+# does NOT check — it will come up "green" with no localization at all and
+# the costmaps simply sit TF-starved. Verify `ros2 run tf2_ros tf2_echo map
+# odom` before the first goal. The two supported sources:
 #   - live-SLAM mode (first light): start beast-slam.service first — its
 #     slam_toolbox online_async publishes /map and the map->odom TF;
 #   - saved-map mode (later): stop beast-slam and run the map_server+amcl
@@ -42,17 +49,29 @@
 # robot with a 104° blind wedge astern: turn to face where you are going,
 # never reverse into unsensed space. Effective speed cap is the velocity
 # smoother's max_velocity [0.26, 0.0, 1.0], not RPP's desired_linear_vel.
+#
+# KNOWN GAP, deliberate (same as beast-slam.service): `ros2 launch` does not
+# propagate child node death, so a crashed Nav2 node can leave this unit
+# looking healthy while the stack is partial — or exit 0 into "inactive
+# (dead), success". With Restart=no nothing relaunches either way, which is
+# what the supervised contract wants. The operator-visible check is the
+# Phase 3 runbook's lifecycle sweep (`ros2 lifecycle get /controller_server`
+# etc.) before every goal; fixing it properly means a launch wrapper that
+# propagates node death, not unit tricks.
 
 [Unit]
 Description=BEAST-01 Nav2 navigation layer (owner-supervised, never enabled)
-Documentation=file:///home/beast/beast/RobotOverview/robot/beast/ros2_ws/docs/navigation.md
+Documentation=file:///home/beast/beast/RobotOverview/docs/plans/2026-08-14-beast-autonomy-on-ramp.md
 # Same clock ordering as beast-slam.service: a cold boot starts at epoch 0
 # (no RTC battery) and an NTP jump mid-bringup is exactly the failure the
 # time-sync ordering exists to prevent.
 After=beast-ros-base.service network-online.target time-sync.target systemd-timesyncd.service
 Wants=beast-ros-base.service time-sync.target
-# Fails fast if ugv_nav is not built into the workspace install tree.
-ConditionPathExists=/home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/ugv_nav/share/ugv_nav/params/rpp.yaml
+# Assert, not Condition: a Condition just SKIPS the unit and reports the
+# start as a success, which on a hand-started supervised unit is a silent
+# no-op the operator would misread as "nav is up". Assert fails the start
+# job loudly if ugv_nav is not built into the workspace install tree.
+AssertPathExists=/home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/ugv_nav/share/ugv_nav/params/rpp.yaml
 
 [Service]
 Type=simple
@@ -70,8 +89,10 @@ Environment=PYTHONUNBUFFERED=1
 # marker clears. (sh has no login-shell baggage; the guard needs no ROS env.)
 ExecStartPre=/bin/sh -c 'exec /home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-deploy-guard'
 ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/setup.bash && exec ros2 launch ugv_nav navigation_launch.py params_file:=/home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/ugv_nav/share/ugv_nav/params/rpp.yaml use_composition:=False autostart:=true'
-Restart=on-failure
-RestartSec=10
+# NO automatic restart, deliberately — see header. A dead nav session stays
+# dead until a human decides otherwise; on-failure would also retry a
+# deploy-guard refusal into an unattended auto-launch once the marker clears.
+Restart=no
 
 # No [Install] section, deliberately — see header. `systemctl start` works;
 # `systemctl enable` has nothing to hook.

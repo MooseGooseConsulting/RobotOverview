@@ -5,6 +5,13 @@
 #
 # Unit names listed both bare and with .service — systemctl accepts either.
 # Wildcards cover enable --now / disable --now variants.
+#
+# beast-nav is deliberately start/stop/status/is-active ONLY (no comment can
+# sit inside the alias without breaking the line continuation, so it is said
+# here): no enable/disable — the unit has no [Install] section and the
+# never-enable contract (owner-supervised sessions only) is enforced in this
+# file too; no restart — a nav session that died stays down until a human
+# starts it again.
 
 Cmnd_Alias BEAST_SYSTEMCTL = \
     /usr/bin/systemctl start beast-ros-base, \
@@ -166,6 +173,14 @@ Cmnd_Alias BEAST_SYSTEMCTL = \
     /usr/bin/systemctl disable beast-slam.service, \
     /usr/bin/systemctl disable --now beast-slam, \
     /usr/bin/systemctl disable --now beast-slam.service, \
+    /usr/bin/systemctl start beast-nav, \
+    /usr/bin/systemctl start beast-nav.service, \
+    /usr/bin/systemctl stop beast-nav, \
+    /usr/bin/systemctl stop beast-nav.service, \
+    /usr/bin/systemctl status beast-nav, \
+    /usr/bin/systemctl status beast-nav.service, \
+    /usr/bin/systemctl is-active beast-nav, \
+    /usr/bin/systemctl is-active beast-nav.service, \
     /usr/bin/systemctl start beast-wifi-watch, \
     /usr/bin/systemctl start beast-wifi-watch.service, \
     /usr/bin/systemctl stop beast-wifi-watch, \
