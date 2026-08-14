@@ -192,6 +192,48 @@ describe('board & iso place every terminal', () => {
   });
 });
 
+describe('terminals with no authored edge', () => {
+  // A terminal ingested into Postgres after these layouts were hand-drawn has
+  // no BOARD_EDGES entry. It used to land on 'top' whatever module carried it,
+  // so its wires left the wrong side of the box.
+  const strays = [
+    // orin-nano sits right of the driver-board hub -> should exit left
+    { id: 'zz-orin-stray', unitId: 'orin-nano', name: 'Ingested Orin port' },
+    // stock-ups sits above-left of the hub -> should exit right or bottom
+    { id: 'zz-ups-stray', unitId: 'stock-ups', name: 'Ingested UPS port' },
+  ];
+
+  it.each([
+    ['board', buildBoardLayout],
+    ['iso', buildIsoLayout],
+  ] as const)('%s reports them instead of hiding them', (_mode, build) => {
+    const layout = build(units, [...terminals, ...strays], nets);
+    expect(layout.unmappedTerminalIds).toEqual(strays.map((s) => s.id));
+    // Everything hand-authored stays authored.
+    for (const t of terminals) expect(layout.unmappedTerminalIds).not.toContain(t.id);
+  });
+
+  it('board places them facing the hub, not always on top', () => {
+    const layout = buildBoardLayout(units, [...terminals, ...strays], nets);
+    const orin = layout.ports.find((p) => p.terminalId === 'zz-orin-stray');
+    // orin-nano is right of the hub, so its stray port must exit leftward.
+    expect(orin?.nx).toBe(-1);
+    expect(orin?.ny).toBe(0);
+
+    const ups = layout.ports.find((p) => p.terminalId === 'zz-ups-stray');
+    // stock-ups is up and to the left; either inward edge is correct, but the
+    // old 'top' fallback (ny === -1) points away from the hub and is not.
+    expect(ups?.ny).not.toBe(-1);
+  });
+
+  it('reports nothing when every terminal is authored', () => {
+    expect(buildBoardLayout(units, terminals, nets).unmappedTerminalIds).toEqual([]);
+    expect(buildIsoLayout(units, terminals, nets).unmappedTerminalIds).toEqual([]);
+    // Bus mode never edge-places, so it has nothing to report either.
+    expect(buildBusLayout(units, [...terminals, ...strays], nets).unmappedTerminalIds).toEqual([]);
+  });
+});
+
 describe('bus taps each net terminal on its row', () => {
   it('gives every net at least two tap nodes', () => {
     const layout = buildBusLayout(units, terminals, nets);

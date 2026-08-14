@@ -72,6 +72,13 @@ export interface TwinLayout {
   modules: ModuleBox[];
   ports: PortNode[];
   wires: WirePath[];
+  /**
+   * Terminals placed by geometry because no hand-authored edge names them —
+   * i.e. wiring ingested into Postgres since this layout was drawn. Their
+   * anchors are a reasonable guess, not authored truth; surface them rather
+   * than let the drift stay invisible.
+   */
+  unmappedTerminalIds: string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -300,12 +307,57 @@ const BOARD_EDGES: Record<string, Edge> = {
 
 const BOARD_MODULE_ORDER = ['stock-ups', 'oak-d-lite', 'd500-lidar', 'driver-board', 'pi5', 'orin-nano', 'beast'];
 
+/** The unit every satellite cables back to; its box anchors the fallback. */
+const HUB_UNIT_ID = 'driver-board';
+
+/**
+ * Centre of the hub, in whatever space the caller's modules live in (board or
+ * iso). Falls back to the centroid of the placed modules when the driver-board
+ * itself is unwired, so the result is always inside the drawing.
+ */
+function hubCenter(modules: Iterable<ModuleBox>): { x: number; y: number } {
+  const all = [...modules];
+  const hub = all.find((m) => m.unitId === HUB_UNIT_ID);
+  const boxes = hub ? [hub] : all;
+  if (!boxes.length) return { x: 0, y: 0 };
+  return {
+    x: boxes.reduce((s, m) => s + m.x + m.w / 2, 0) / boxes.length,
+    y: boxes.reduce((s, m) => s + m.y + m.h / 2, 0) / boxes.length,
+  };
+}
+
+/**
+ * Which edge a terminal exits when BOARD_EDGES doesn't name it.
+ *
+ * BOARD_EDGES only covers the terminals that existed when these layouts were
+ * drawn by hand. Anything ingested into Postgres since then used to land on
+ * 'top' regardless of where its module sits, so a newly wired unit rendered
+ * its wires leaving the wrong side of the box — geometry that looks
+ * authoritative and isn't. Face the hub instead: deterministic, right for most
+ * real connectors (they point at whatever they cable to), and it degrades
+ * toward the truth rather than toward a fixed lie.
+ */
+function hubFacingEdge(m: ModuleBox, hub: { x: number; y: number }): Edge {
+  const dx = hub.x - (m.x + m.w / 2);
+  const dy = hub.y - (m.y + m.h / 2);
+  if (dx === 0 && dy === 0) return 'top'; // the hub's own box
+  if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 'right' : 'left';
+  return dy > 0 ? 'bottom' : 'top';
+}
+
 function buildEdgeGroupedPorts(terminals: Terminal[], moduleById: Map<string, ModuleBox>) {
   // Group each unit's terminals by the edge they exit, preserving spine order.
+  const hub = hubCenter(moduleById.values());
+  const unmappedTerminalIds: string[] = [];
   const byUnitEdge = new Map<string, Terminal[]>();
   for (const t of terminals) {
-    if (!moduleById.has(t.unitId)) continue;
-    const edge = BOARD_EDGES[t.id] ?? 'top';
+    const m = moduleById.get(t.unitId);
+    if (!m) continue;
+    let edge = BOARD_EDGES[t.id];
+    if (!edge) {
+      edge = hubFacingEdge(m, hub);
+      unmappedTerminalIds.push(t.id);
+    }
     const key = `${t.unitId}|${edge}`;
     const list = byUnitEdge.get(key);
     if (list) list.push(t);
@@ -324,7 +376,7 @@ function buildEdgeGroupedPorts(terminals: Terminal[], moduleById: Map<string, Mo
     });
   }
 
-  return { ports, positions };
+  return { ports, positions, unmappedTerminalIds };
 }
 
 export function buildBoardLayout(units: Unit[], terminals: Terminal[], nets: Net[]): TwinLayout {
@@ -333,13 +385,13 @@ export function buildBoardLayout(units: Unit[], terminals: Terminal[], nets: Net
     (id) => wired.has(id) && BOARD_MODULES[id],
   ).map((id) => ({ unitId: id, ...BOARD_MODULES[id] }));
   const moduleById = new Map(modules.map((m) => [m.unitId, m]));
-  const { ports, positions } = buildEdgeGroupedPorts(terminals, moduleById);
+  const { ports, positions, unmappedTerminalIds } = buildEdgeGroupedPorts(terminals, moduleById);
 
   const wires = nets
     .map((n) => routeWire(n, positions, BOARD_WIRE_BOW))
     .filter((w): w is WirePath => Boolean(w));
 
-  return { width: BOARD_W, height: BOARD_H, modules, ports, wires };
+  return { width: BOARD_W, height: BOARD_H, modules, ports, wires, unmappedTerminalIds };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -390,13 +442,13 @@ export function buildIsoLayout(units: Unit[], terminals: Terminal[], nets: Net[]
     return { unitId: id, x: round(c.x - ISO_MODULE_W / 2), y: round(c.y - ISO_MODULE_H / 2), w: ISO_MODULE_W, h: ISO_MODULE_H };
   });
   const moduleById = new Map(modules.map((m) => [m.unitId, m]));
-  const { ports, positions } = buildEdgeGroupedPorts(terminals, moduleById);
+  const { ports, positions, unmappedTerminalIds } = buildEdgeGroupedPorts(terminals, moduleById);
 
   const wires = nets
     .map((n) => routeWire(n, positions, ISO_WIRE_BOW))
     .filter((w): w is WirePath => Boolean(w));
 
-  return { width: ISO_W, height: ISO_H, modules, ports, wires };
+  return { width: ISO_W, height: ISO_H, modules, ports, wires, unmappedTerminalIds };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -480,7 +532,9 @@ export function buildBusLayout(units: Unit[], terminals: Terminal[], nets: Net[]
     });
   });
 
-  return { width: BUS_W, height: BUS_H, modules, ports, wires };
+  // Bus mode lays terminals on net rows, not module edges, so no terminal is
+  // ever edge-placed by guesswork here.
+  return { width: BUS_W, height: BUS_H, modules, ports, wires, unmappedTerminalIds: [] };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
