@@ -12,6 +12,7 @@ on:
       - '.github/workflows/ci-tools-tests.yml'
       - '.github/workflows/deploy-pin.yml'
       - '.github/workflows/cold-review.yml'
+      - '.github/actionlint.yaml'
       - '.agents/skills/custom-codereview-guide.md'
   push:
     branches: [main]
@@ -20,6 +21,7 @@ on:
       - '.github/workflows/ci-tools-tests.yml'
       - '.github/workflows/deploy-pin.yml'
       - '.github/workflows/cold-review.yml'
+      - '.github/actionlint.yaml'
       - '.agents/skills/custom-codereview-guide.md'
 
 permissions:

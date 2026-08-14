@@ -84,6 +84,7 @@ def test_setup_node_user_space_gh_and_auth_lifecycle():
 
     restore = next(s for s in steps if s.get("name") == "Restore Codex auth")
     assert "CODEX_AUTH_JSON_B64 missing" in restore["run"]
+    assert "Rotate:" in restore["run"]
     assert "$HOME/.codex/auth.json" in restore["run"]
     assert "chmod 600" in restore["run"]
 

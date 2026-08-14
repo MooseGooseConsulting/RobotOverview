@@ -71,7 +71,10 @@ jobs:
         env:
           CODEX_AUTH_JSON_B64: ${{ secrets.CODEX_AUTH_JSON_B64 }}
         run: |
-          [ -n "$CODEX_AUTH_JSON_B64" ] || { echo "CODEX_AUTH_JSON_B64 missing"; exit 1; }
+          [ -n "$CODEX_AUTH_JSON_B64" ] || {
+            echo "CODEX_AUTH_JSON_B64 missing or empty. Rotate: codex login --device-auth, enable xhigh, base64 the auth.json, paste into environment openhands-review. Do not debug the workflow."
+            exit 1
+          }
           mkdir -p "$HOME/.codex"
           printf '%s' "$CODEX_AUTH_JSON_B64" | base64 -d > "$HOME/.codex/auth.json"
           chmod 600 "$HOME/.codex/auth.json"
