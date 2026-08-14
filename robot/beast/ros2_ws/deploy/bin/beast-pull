@@ -458,6 +458,16 @@ checkout_build_restart() {
   if [ "$cockpit_active" = 1 ]; then
     sudo -n /usr/bin/systemctl stop beast-cockpit || return 1
   fi
+  # beast-nav shares this workspace but is a hand-started supervised unit: a
+  # nav session momentarily stationary passes the motion gate, and a live
+  # bt_navigator surviving the swap would resume commanding motion into a
+  # freshly rebuilt stack the moment base returns. Stop it unconditionally,
+  # tolerate absence/failure (the unit may not be installed yet), and NEVER
+  # restart it below — deploys leave nav DOWN by design; the owner starts it
+  # again by hand.
+  log "stopping beast-nav (never survives a workspace swap; deploys leave nav down)"
+  sudo -n /usr/bin/systemctl stop beast-nav \
+    || log "beast-nav stop failed or unit absent; continuing"
 
   # The marker's lifetime IS the inconsistency window: created just before the
   # checkout moves, removed only after the build finishes. While it exists,
@@ -541,6 +551,7 @@ checkout_build_restart() {
   rm -f "$IN_PROGRESS"
 
   # These verbs are already in /etc/sudoers.d/beast-ops; no new grant needed.
+  # beast-nav is deliberately NOT restarted here — see the stop above.
   sudo -n /usr/bin/systemctl restart beast-ros-base || return 1
   if [ "$cockpit_active" = 1 ]; then
     # restart, not try-restart: WE stopped it above, so try-restart on the now
