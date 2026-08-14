@@ -16,7 +16,7 @@
 #    secret. Do not debug.
 #
 # 2. GitHub App "OpenHands Cold Review" (slug openhands-cold-review):
-#    - Permissions: contents:read, pull-requests:write, issues:write, metadata:read
+#    - Permissions: near-blanket (cold-claude-code shape; 38/39 repo perms)
 #    - No webhook (Actions delivers events)
 #    - Install ONLY on MooseGooseConsulting/RobotOverview
 #    - App ID → environment variable OPENHANDS_COLD_REVIEW_APP_ID
@@ -25,6 +25,7 @@
 # 3. Label `review-this` already exists. Apply it to re-run a review.
 #
 # Full operator note: docs/openhands-cold-review.md
+# Wet-run: public repo must be selected on moosegoose-arc-private.
 name: OpenHands Cold Review
 on:
   pull_request:
@@ -71,7 +72,10 @@ jobs:
         env:
           CODEX_AUTH_JSON_B64: ${{ secrets.CODEX_AUTH_JSON_B64 }}
         run: |
-          [ -n "$CODEX_AUTH_JSON_B64" ] || { echo "CODEX_AUTH_JSON_B64 missing"; exit 1; }
+          [ -n "$CODEX_AUTH_JSON_B64" ] || {
+            echo "CODEX_AUTH_JSON_B64 missing or empty. Rotate: codex login --device-auth, enable xhigh, base64 the auth.json, paste into environment openhands-review. Do not debug the workflow."
+            exit 1
+          }
           mkdir -p "$HOME/.codex"
           printf '%s' "$CODEX_AUTH_JSON_B64" | base64 -d > "$HOME/.codex/auth.json"
           chmod 600 "$HOME/.codex/auth.json"

@@ -1,0 +1,7 @@
+# Context7 checked: rhysd/actionlint config.md — self-hosted-runner.labels
+# and config-variables for vars.* used by cold-review.yml.
+self-hosted-runner:
+  labels:
+    - moosegoose-general
+config-variables:
+  - OPENHANDS_COLD_REVIEW_APP_ID
