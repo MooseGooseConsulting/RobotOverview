@@ -28,7 +28,7 @@ export const ACTIVE_HOST_LABELS: Record<ActiveHost, string> = {
   orin: 'Jetson Orin',
 };
 
-export type Edge = 'top' | 'right' | 'bottom' | 'left';
+type Edge = 'top' | 'right' | 'bottom' | 'left';
 
 /** Semantic color key per net kind; the UI maps this to CSS vars. */
 export type NetColorKey = 'amber' | 'cyan' | 'mixed' | 'idle';
@@ -93,10 +93,6 @@ export function netKindColor(kind: NetKind): NetColorKey {
       return _exhaustive;
     }
   }
-}
-
-export function terminalById(terminals: Terminal[], id: string): Terminal | undefined {
-  return terminals.find((t) => t.id === id);
 }
 
 /** Every net that includes the given terminal. */
@@ -252,12 +248,12 @@ function routeWire(net: Net, positions: Map<string, Anchor>, bow: number): WireP
 // ─────────────────────────────────────────────────────────────────────────────
 // Board layout — driver-board (ESP32) as the central hub, satellites around it.
 // ─────────────────────────────────────────────────────────────────────────────
-export const BOARD_W = 1040;
-export const BOARD_H = 680;
-export const BOARD_WIRE_BOW = 48;
+const BOARD_W = 1040;
+const BOARD_H = 680;
+const BOARD_WIRE_BOW = 48;
 
 /** Fixed hub-and-satellite anchors, in board space. */
-export const BOARD_MODULES: Record<string, Omit<ModuleBox, 'unitId'>> = {
+const BOARD_MODULES: Record<string, Omit<ModuleBox, 'unitId'>> = {
   'driver-board': { x: 390, y: 250, w: 260, h: 190 },
   'stock-ups': { x: 60, y: 70, w: 210, h: 130 },
   'oak-d-lite': { x: 70, y: 280, w: 210, h: 120 },
@@ -268,7 +264,7 @@ export const BOARD_MODULES: Record<string, Omit<ModuleBox, 'unitId'>> = {
 };
 
 /** Which edge each terminal exits, chosen so wires flow toward their partners. */
-export const BOARD_EDGES: Record<string, Edge> = {
+const BOARD_EDGES: Record<string, Edge> = {
   // driver-board hub
   'gdb-power-in': 'left',
   'gdb-12v-switched': 'left',
@@ -349,11 +345,11 @@ export function buildBoardLayout(units: Unit[], terminals: Terminal[], nets: Net
 // ─────────────────────────────────────────────────────────────────────────────
 // Iso layout — units stacked on decks, projected to a 2.5D cutaway.
 // ─────────────────────────────────────────────────────────────────────────────
-export const ISO_W = 1040;
-export const ISO_H = 680;
-export const ISO_WIRE_BOW = 90;
-export const ISO_MODULE_W = 210;
-export const ISO_MODULE_H = 120;
+const ISO_W = 1040;
+const ISO_H = 680;
+const ISO_WIRE_BOW = 90;
+const ISO_MODULE_W = 210;
+const ISO_MODULE_H = 120;
 
 const ISO_ORIGIN_X = 250;
 const ISO_ORIGIN_Y = 250;
@@ -363,7 +359,7 @@ const ISO_SCALE_Y = 0.5;
 const ISO_DECK_H = 150;
 
 /** Ground grid cell (col,row) + vertical deck for each unit. */
-export const ISO_PLACEMENT: Record<string, { col: number; row: number; deck: number }> = {
+const ISO_PLACEMENT: Record<string, { col: number; row: number; deck: number }> = {
   'stock-ups': { col: 0, row: 0, deck: 0 },
   beast: { col: 1, row: 1, deck: 0 },
   'driver-board': { col: 1, row: 0, deck: 1 },
@@ -407,9 +403,9 @@ export function buildIsoLayout(units: Unit[], terminals: Terminal[], nets: Net[]
 // Bus layout — nets become horizontal spines; units are columns that tap in.
 // A terminal on N nets taps N rows in its column (the metro-map read).
 // ─────────────────────────────────────────────────────────────────────────────
-export const BUS_W = 1040;
-export const BUS_H = 680;
-export const BUS_MODULE_W = 150;
+const BUS_W = 1040;
+const BUS_H = 680;
+const BUS_MODULE_W = 150;
 
 const BUS_X0 = 150;
 const BUS_COL_GAP = 165;
@@ -418,8 +414,8 @@ const BUS_ROW_GAP = 52;
 const BUS_TOP = 70;
 const BUS_BOTTOM = 630;
 
-export const BUS_COLUMN_ORDER = ['stock-ups', 'driver-board', 'pi5', 'orin-nano', 'oak-d-lite', 'd500-lidar', 'beast'];
-export const BUS_ROW_ORDER = [
+const BUS_COLUMN_ORDER = ['stock-ups', 'driver-board', 'pi5', 'orin-nano', 'oak-d-lite', 'd500-lidar', 'beast'];
+const BUS_ROW_ORDER = [
   'net-battery-rail',
   'net-5v-host',
   'net-host-uart',

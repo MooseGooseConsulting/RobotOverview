@@ -10,22 +10,9 @@ $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "refresh-windows-path.ps1")
 Update-BootstrapPath
+. (Join-Path $PSScriptRoot "ToolProfiles.ps1")
 
-$profileCommands = @{
-    core = @("git", "node", "npm", "pwsh", "task")
-    dev = @("gh", "gitleaks")
-    deploy = @("kubectl")
-}
-
-function Get-ProfileCommands([string]$SelectedProfile) {
-    if ($SelectedProfile -eq "all") {
-        return @($profileCommands.core + $profileCommands.dev + $profileCommands.deploy)
-    }
-
-    return @($profileCommands[$SelectedProfile])
-}
-
-$requiredCommands = Get-ProfileCommands -SelectedProfile $Profile
+$requiredCommands = Get-ToolProfileCommands -SelectedProfile $Profile
 Write-Host "Verifying Hangar tooling profile '$Profile'..." -ForegroundColor Cyan
 
 $missingCommands = @()

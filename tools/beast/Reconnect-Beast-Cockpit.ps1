@@ -25,6 +25,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/BeastEndpoints.ps1"
 # Prefer Tailscale SSH — mDNS Host beast-01 often fails from this workstation.
 $candidates = @(
     $(if ($HostName) { $HostName } else { $null })
@@ -137,5 +138,5 @@ if (-not $SkipVerify) {
 }
 
 Write-Host "OK    cockpit path reconnected via $sshHost"
-Write-Host 'Open: https://hangar.moosegoose.xyz/cockpit'
+Write-Host "Open: $HangarCockpitUrl"
 exit 0

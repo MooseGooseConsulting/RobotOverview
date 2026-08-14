@@ -25,6 +25,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/BeastEndpoints.ps1"
 $script:fail = 0
 
 function Write-Pass([string]$Message) { Write-Host "PASS  $Message" }
@@ -32,11 +33,7 @@ function Write-Fail([string]$Message) { Write-Host "FAIL  $Message"; $script:fai
 function Write-Warn([string]$Message) { Write-Host "WARN  $Message" }
 
 if ([string]::IsNullOrWhiteSpace($WsUrl)) {
-    $WsUrl = if (-not [string]::IsNullOrWhiteSpace($env:BEAST_COCKPIT_WS_URL)) {
-        $env:BEAST_COCKPIT_WS_URL.Trim()
-    } else {
-        'wss://beast-01.tyrannosaurus-magellanic.ts.net/'
-    }
+    $WsUrl = Get-BeastCockpitWsUrl
 }
 
 $uri = [Uri]$WsUrl

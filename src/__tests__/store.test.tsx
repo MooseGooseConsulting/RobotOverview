@@ -255,8 +255,8 @@ describe('item() accessor', () => {
     };
     const customWrapper = ({ children }: { children: React.ReactNode }) => (
       <HangarProvider
-        initialItems={[dbItem]}
-        initialInventoryRead={{ source: 'postgres' }}
+        initialData={{ ...hangarData, items: [dbItem] }}
+        initialSpineRead={{ source: 'postgres' }}
       >
         {children}
       </HangarProvider>
@@ -271,9 +271,14 @@ describe('item() accessor', () => {
     expect(result.current.item(hangarData.items[0].id)).toBeUndefined();
   });
 
-  it('does not report Postgres inventory when no server items were provided', () => {
+  it('trusts the caller-supplied read status even when initialData is not overridden', () => {
+    // initialData / initialSpineRead are supplied atomically by the caller (see
+    // src/app/layout.tsx, which derives both from a single getHangarSpine() read) —
+    // unlike the removed deprecated initialItems/initialInventoryRead pair, the
+    // supported props are never reconciled against each other; the provider takes
+    // initialSpineRead at face value regardless of whether initialData was given.
     const customWrapper = ({ children }: { children: React.ReactNode }) => (
-      <HangarProvider initialInventoryRead={{ source: 'postgres' }}>
+      <HangarProvider initialSpineRead={{ source: 'postgres' }}>
         {children}
       </HangarProvider>
     );
@@ -281,10 +286,7 @@ describe('item() accessor', () => {
     const { result } = renderHook(() => useHangar(), { wrapper: customWrapper });
 
     expect(result.current.items).toBe(hangarData.items);
-    expect(result.current.inventoryRead).toEqual({
-      source: 'static',
-      fallbackReason: 'not-configured',
-    });
+    expect(result.current.inventoryRead).toEqual({ source: 'postgres' });
   });
 
   it('exposes static inventory fallback status when no server read status is supplied', () => {

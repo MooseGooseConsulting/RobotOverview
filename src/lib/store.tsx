@@ -181,22 +181,6 @@ function isWishlistItem(item: WishlistItem | undefined): item is WishlistItem {
   return Boolean(item);
 }
 
-function inventoryReadStatusFor(
-  initialItems: InventoryItem[] | undefined,
-  initialInventoryRead: InventoryReadStatus | undefined,
-): InventoryReadStatus {
-  if (!initialInventoryRead) {
-    if (initialItems) return { source: 'postgres' };
-    return { source: 'static', fallbackReason: 'not-configured' };
-  }
-
-  if (initialInventoryRead.source === 'postgres' && !initialItems) {
-    return { source: 'static', fallbackReason: 'not-configured' };
-  }
-
-  return initialInventoryRead;
-}
-
 export function selectedMissionWishes(wishes: WishlistItem[]): WishlistItem[] {
   const selected = new Map<string, WishlistItem>();
 
@@ -276,18 +260,12 @@ export function HangarProvider({
   children,
   initialData,
   initialSpineRead,
-  initialItems,
-  initialInventoryRead,
   initialLibraryBaseUrl,
 }: {
   children: ReactNode;
   /** Postgres-first HangarData spine (falls back to hangar.ts when omitted). */
   initialData?: HangarData;
   initialSpineRead?: InventoryReadStatus;
-  /** @deprecated Prefer initialData.items from the spine snapshot. */
-  initialItems?: InventoryItem[];
-  /** @deprecated Prefer initialSpineRead. */
-  initialInventoryRead?: InventoryReadStatus;
   initialLibraryBaseUrl?: string | null;
 }) {
   const spine = initialData ?? hangarData;
@@ -410,11 +388,9 @@ export function HangarProvider({
   };
 
   const value = useMemo<HangarStore>(() => {
-    const inventoryRead =
-      initialSpineRead ?? inventoryReadStatusFor(initialItems, initialInventoryRead);
+    const inventoryRead = initialSpineRead ?? { source: 'static' as const, fallbackReason: 'not-configured' as const };
     const data = {
       ...spine,
-      items: initialItems ?? spine.items,
       units,
     };
     const byId = <T extends { id: string }>(arr: T[]) => {
@@ -479,7 +455,7 @@ export function HangarProvider({
       openDrawer,
       closeDrawer,
     };
-  }, [theme, lensMissionId, source, spotlightId, units, spine, initialItems, initialInventoryRead, initialSpineRead, initialLibraryBaseUrl, objectiveOverrides, wishStatusOverrides, localInsights, drawerOpen, drawerSlotContext]);
+  }, [theme, lensMissionId, source, spotlightId, units, spine, initialSpineRead, initialLibraryBaseUrl, objectiveOverrides, wishStatusOverrides, localInsights, drawerOpen, drawerSlotContext]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

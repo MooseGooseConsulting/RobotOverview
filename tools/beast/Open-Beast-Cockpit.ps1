@@ -10,14 +10,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$url = 'https://hangar.moosegoose.xyz/cockpit'
-$bridge = if (-not [string]::IsNullOrWhiteSpace($env:BEAST_COCKPIT_WS_URL)) {
-    $env:BEAST_COCKPIT_WS_URL.Trim()
-} else {
-    'wss://beast-01.tyrannosaurus-magellanic.ts.net/'
-}
+. "$PSScriptRoot/BeastEndpoints.ps1"
+$url = $HangarCockpitUrl
+$bridge = Get-BeastCockpitWsUrl
 
-$hangarDefaultBridge = 'wss://beast-01.tyrannosaurus-magellanic.ts.net/'
+$hangarDefaultBridge = $BeastCockpitWsUrlDefault
 $verifyScript = Join-Path $PSScriptRoot 'Verify-Beast-Cockpit.ps1'
 if ($Verify) {
     # Hangar /cockpit uses the *deployed* server env, not this workstation.

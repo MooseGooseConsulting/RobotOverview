@@ -6,9 +6,9 @@ import { ITEM_STATUS_META } from '@/lib/format';
 import Items from '@/app/items/page';
 import type { InventoryItem } from '@/data/types';
 
-function renderItems(initialItems?: InventoryItem[]) {
+function renderItems(items?: InventoryItem[]) {
   return render(
-    <HangarProvider initialItems={initialItems}>
+    <HangarProvider initialData={items ? { ...hangarData, items } : undefined}>
       <Items />
     </HangarProvider>,
   );
