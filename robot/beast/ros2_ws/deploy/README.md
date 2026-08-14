@@ -1,30 +1,46 @@
 # Deploying to BEAST-01
 
-## Canonical deploy (pull model)
+## Canonical deploy — source-mode pull agent (this repo)
 
-**Canonical deploy manifests live in the private
-[Coldaine/coldaine-homelab](https://github.com/Coldaine/coldaine-homelab)
-`deployments/beast-01/` tree**
-— install scripts, systemd/container run units, `manifest.yaml` (image
-digest), `beast-pull`, and `verify-beast`. Merging robot code to
-`RobotOverview` `main` builds
-`ghcr.io/moosegooseconsulting/beast-ros:sha-<SHA>` (see
-`.github/workflows/beast-ros-image.yml`); the homelab bump + on-robot pull
-agent land it when the robot is next online.
+**Everything lives HERE.** BEAST-01 deploys from source, with zero
+credentials on the robot, because this repo is public:
 
-First-time / host install: run `install-beast.sh` from that homelab tree.
-Ongoing updates: `beast-pull` (service + timer) — no same-day human deploy
-required once cut over.
+1. A merge to `main` touching `robot/beast/ros2_ws/**` runs the test gate;
+   `.github/workflows/deploy-pin.yml`'s `deploy-ref` job then force-updates
+   **`refs/deploy/beast-01`** to the gated commit. The robot never tracks
+   `main` directly — that would deploy red commits to a machine that moves.
+2. On the robot, `bin/beast-pull` (hourly via `systemd/beast-pull.timer`)
+   fetches that ref, skips if the robot is in motion (`/cmd_vel` **and**
+   measured `/odom_wheel`) or a mission recording is active, stops the
+   stack, checks out detached, rebuilds only the changed packages (union of
+   the four base packages), reinstalls unit files if they changed, restarts,
+   and runs `bin/beast-verify`. A failed verify rolls back to the previous
+   sha and re-verifies; a failed rollback sets a self-hold and stops trying.
+3. `bin/beast-verify` is the single landed contract for "is it deployed" —
+   the same file is piped over ssh by `deploy-to-beast.sh --verify-only`, so
+   the manual and unattended paths cannot drift.
 
-Live verify of the running graph (drive path, power CSV, …) is owned by
-homelab `verify-beast`, not this repo.
+Rollback for the fleet is one command:
+`git push --force origin <previous-sha>:refs/deploy/beast-01`.
 
-## Manual override — `deploy-to-beast.sh` (Phase 0 / recovery)
+Kill switches: `/etc/beast/pull-hold` (operator, root-owned) and
+`/data/beast/deploy/pull-hold` (self-hold after a failed rollback). While
+`/data/beast/deploy/in-progress` exists, `bin/beast-deploy-guard` keeps
+`beast-ros-base` from booting into a mid-rebuild workspace; the next pull
+tick rebuilds and recovers.
 
-This directory still holds `deploy-to-beast.sh`: the **manual override** and
-Phase 0 source-sync path (SSH → git ff → colcon on the Jetson → restart host
-systemd). Use it when the pull agent is not yet cut over, or when you need a
-forced recovery deploy without waiting for a GHCR image.
+**Rollout state:** the units ship in this tree but the timer stays
+**masked** until the supervised rollout (install → watched first swap →
+forced-rollback proof → parked-gate proof) has passed. The container image
+(`beast-ros-image.yml`) still builds and the homelab manifest still pins it,
+but both are provenance only — the robot reads neither.
+
+## Manual override — `deploy-to-beast.sh` (recovery)
+
+This directory also holds `deploy-to-beast.sh`: the **manual override**
+(SSH → git ff → colcon on the Jetson → restart host systemd). Use it when
+the pull agent is held, masked, or broken, or when you need a forced deploy
+without waiting for the hourly tick.
 
 From any clone of this repo (Windows Git Bash, Linux, macOS):
 
@@ -105,9 +121,11 @@ check. Run it *before* assuming any doc claim about the robot is current.
 
 ## Other units here
 
-`deploy/systemd/` also carries the cockpit, storage, and blackbox/mission
-record units — still the Phase 0 / override copies. Canonical copies move to
-`coldaine-homelab/deployments/beast-01/systemd/` as that tree lands.
+`deploy/systemd/` carries the cockpit, storage, blackbox/mission record,
+slam, and pull-agent units. These ARE the canonical copies:
+`bin/beast-install-systemd-units` installs every `*.service`/`*.timer` from
+this directory wholesale, and an unattended deploy whose span touches
+`deploy/systemd/**` reinstalls them automatically.
 
 Power logging is **not** a separate process to remember any more. The
 `beast_power_logger` node runs inside `bringup_lidar.launch.py` under

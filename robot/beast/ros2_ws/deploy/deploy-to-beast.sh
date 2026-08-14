@@ -2,8 +2,11 @@
 # Copyright 2026 Coldaine
 # SPDX-License-Identifier: Apache-2.0
 #
-# deploy-to-beast.sh — manual override / Phase 0 source-sync path for BEAST-01.
-# Canonical pull deploy lives in coldaine-homelab/deployments/beast-01/.
+# deploy-to-beast.sh — manual override / recovery deploy for BEAST-01.
+# Canonical deploy is the in-tree source-mode pull agent (bin/beast-pull,
+# hourly timer, follows refs/deploy/beast-01) — see deploy/README.md. Use
+# this script when the agent is held, masked, or broken, or for a forced
+# deploy without waiting for the hourly tick.
 #
 # Run from any checkout of this repo (Windows Git Bash / Linux / macOS):
 #
@@ -26,9 +29,9 @@
 #   4. verify the live graph (see --verify-only below) and print a dated
 #      evidence block to paste into docs/beast-ops.md "Quick connect".
 #
-# Canonical pull deploy lives in coldaine-homelab/deployments/beast-01/
-# (install-beast.sh + beast-pull). This script is the manual override / Phase 0
-# source-sync path.
+# Verification is shared, not duplicated: step 4 pipes bin/beast-verify over
+# ssh — the same file beast-pull runs after an unattended deploy — so the
+# manual and unattended paths cannot drift apart on what "deployed" means.
 #
 # --verify-only runs only step 4 (no sudo, read-only). Use it any time to
 # detect drift between the repo and the robot — the checks below encode the
