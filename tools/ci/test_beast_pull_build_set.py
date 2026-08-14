@@ -178,6 +178,21 @@ def test_deleted_package_resolves_to_nothing(repo: Path) -> None:
     assert build_set(repo, base, head) == ALWAYS
 
 
+def test_unparking_a_subtree_builds_its_packages(repo: Path) -> None:
+    """Removing a COLCON_IGNORE re-scopes the whole subtree below it.
+
+    The diff names only the marker file; the packages it was parking must be
+    enumerated from the target tree or an un-park deploys nothing.
+    """
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "rm", "-q", f"{WS_REL}/src/ugv_else/vizanti/COLCON_IGNORE")
+    _git(repo, "commit", "-qm", "un-park vizanti")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    got = build_set(repo, base, head)
+    assert "vizanti" in got
+    assert "vizanti_cpp" in got
+
+
 def test_cross_package_rename_rebuilds_both_packages(repo: Path) -> None:
     """A file moved between packages must rebuild BOTH sides.
 

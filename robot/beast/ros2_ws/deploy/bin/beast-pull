@@ -92,15 +92,28 @@ die() { log "FAIL $*"; exit 1; }
 # Rebuilding only the four default packages is what lets a stale compiled
 # artefact sit beside a newly symlinked source file and still look deployed.
 changed_packages() {
-  local from="$1" to="$2" dir name
+  local from="$1" to="$2" dir name paths
   # --no-renames: with rename detection on, a file moved between packages
   # emits only its DESTINATION path, so the source package silently keeps its
   # stale artefacts — exactly how beast_base was once extracted from
   # ugv_bringup. quotePath off so a non-ASCII path is not C-quoted into a
   # string the prefix match below would drop.
-  git -c core.quotePath=false -C "$REPO_DIR" diff --no-renames --name-only "$from" "$to" \
-      -- "robot/beast/ros2_ws/src" \
-    | sed 's|/[^/]*$||' | sort -u \
+  paths="$(git -c core.quotePath=false -C "$REPO_DIR" diff --no-renames --name-only "$from" "$to" \
+      -- "robot/beast/ros2_ws/src")"
+  [ -n "$paths" ] || return 0
+  {
+    printf '%s\n' "$paths" | sed 's|/[^/]*$||'
+    # An added or removed COLCON_IGNORE re-scopes a whole SUBTREE, but the
+    # diff names only the marker file — un-parking vizanti would otherwise
+    # build none of its five nested packages. Enumerate the subtree's package
+    # dirs from the target tree; the per-dir walk below still drops any that
+    # remain parked at some level.
+    printf '%s\n' "$paths" | grep '/COLCON_IGNORE$' | sed 's|/[^/]*$||' \
+      | while IFS= read -r dir; do
+          git -C "$REPO_DIR" ls-tree -r --name-only "$to" "$dir" 2>/dev/null \
+            | grep '/package.xml$' | sed 's|/[^/]*$||'
+        done
+  } | sort -u \
     | while IFS= read -r dir; do
         name=""
         while case "$dir" in robot/beast/ros2_ws/src/?*) true ;; *) false ;; esac; do
@@ -179,10 +192,12 @@ source "$WS_DIR/install/setup.bash" 2>/dev/null || true
 # noticing a headless runaway for up to an hour; beast_base sends its
 # unconditional stop the moment the stack comes back up.
 MOTION_SOURCE=""
+MOTION_SAMPLES_SEEN=0
 is_moving() {
   local sample
   sample="$(timeout "$MOTION_SAMPLE_SECONDS" ros2 topic echo /cmd_vel 2>/dev/null)"
   if [ -n "$sample" ]; then
+    MOTION_SAMPLES_SEEN=1
     printf '%s\n' "$sample" \
       | awk -v eps="$MOTION_EPS" '
           /^[[:space:]]*x:/ || /^[[:space:]]*z:/ {
@@ -195,6 +210,7 @@ is_moving() {
   # twist section counts, and the flag resets at each `---` message boundary.
   sample="$(timeout "$MOTION_SAMPLE_SECONDS" ros2 topic echo /odom_wheel 2>/dev/null)"
   if [ -n "$sample" ]; then
+    MOTION_SAMPLES_SEEN=1
     printf '%s\n' "$sample" \
       | awk -v eps="$MOTION_EPS" '
           /^---/    { in_twist = 0 }
@@ -210,6 +226,16 @@ is_moving() {
 
 if is_moving; then
   log "robot is moving: non-zero $MOTION_SOURCE within ${MOTION_SAMPLE_SECONDS}s; skipping, will retry next tick"
+  exit 0
+fi
+# Zero samples with a RUNNING base is a sampling failure, not stillness —
+# odom_publisher publishes continuously, so silence there means our echo lost
+# the DDS discovery race (or worse). Fail closed and retry next tick. A base
+# that is DOWN is different: no topics can exist, nothing new can command the
+# motors, and the deploy itself is what restores the stack and fires
+# beast_base's unconditional boot stop — skipping would help nothing.
+if [ "$MOTION_SAMPLES_SEEN" = 0 ] && systemctl is-active --quiet beast-ros-base; then
+  log "beast-ros-base is active but neither /cmd_vel nor /odom_wheel produced a sample; cannot rule out motion — skipping, will retry next tick"
   exit 0
 fi
 if systemctl list-units --state=active --no-legend 'beast-mission-record@*' 2>/dev/null | grep -q .; then
@@ -255,10 +281,23 @@ target="$(git -C "$REPO_DIR" rev-parse --verify "$DEPLOY_REF^{commit}" 2>/dev/nu
 current="$(git -C "$REPO_DIR" rev-parse HEAD)"
 
 if [ "$target" = "$current" ] && [ "$recovering" = 0 ]; then
-  log "already at ${target:0:12}; nothing to do"
-  exit 0
+  # "Already at target" is only a no-op if the stack is actually UP. A kill
+  # between "marker removed" (build done) and "restart issued" leaves
+  # HEAD == target with no marker and beast-ros-base stopped — and without
+  # this check every subsequent tick would shrug "nothing to do" at a robot
+  # that is down. An operator-disabled base (inactive AND disabled, the
+  # beast-cockpit convention) is respected and left alone.
+  if systemctl is-active --quiet beast-ros-base; then
+    log "already at ${target:0:12}; nothing to do"
+    exit 0
+  fi
+  if [ "$(systemctl is-enabled beast-ros-base 2>/dev/null)" = "disabled" ]; then
+    log "already at ${target:0:12}; beast-ros-base is operator-disabled — leaving it alone"
+    exit 0
+  fi
+  log "at ${target:0:12} but beast-ros-base is not running (deploy interrupted between build and restart?); redeploying to restore it"
 fi
-[ "$recovering" = 0 ] && log "deploy ref moved: ${current:0:12} -> ${target:0:12}"
+[ "$recovering" = 0 ] && [ "$target" != "$current" ] && log "deploy ref moved: ${current:0:12} -> ${target:0:12}"
 
 # A target that failed on-robot once will fail again until something changes,
 # and CI cannot see on-robot failures (i2c, serial, live-graph checks). Without
@@ -348,8 +387,15 @@ checkout_build_restart() {
 
   # Stop the stack before moving a --symlink-install workspace under it. The
   # motion gate proved the robot is parked, so a stopped base is a safe state,
-  # and a stopped process cannot lazily import half-rebuilt code.
+  # and a stopped process cannot lazily import half-rebuilt code. The cockpit
+  # shares the same workspace, so it gets the same treatment — but only if it
+  # was running: an operator-disabled cockpit stays down, per its convention.
   sudo -n /usr/bin/systemctl stop beast-ros-base || return 1
+  cockpit_active=0
+  systemctl is-active --quiet beast-cockpit && cockpit_active=1
+  if [ "$cockpit_active" = 1 ]; then
+    sudo -n /usr/bin/systemctl stop beast-cockpit || return 1
+  fi
 
   # The marker's lifetime IS the inconsistency window: created just before the
   # checkout moves, removed only after the build finishes. While it exists,
@@ -403,7 +449,11 @@ checkout_build_restart() {
 
   # These verbs are already in /etc/sudoers.d/beast-ops; no new grant needed.
   sudo -n /usr/bin/systemctl restart beast-ros-base || return 1
-  sudo -n /usr/bin/systemctl try-restart beast-cockpit || return 1
+  if [ "$cockpit_active" = 1 ]; then
+    # restart, not try-restart: WE stopped it above, so try-restart on the now
+    # stopped unit would silently never bring the cockpit back.
+    sudo -n /usr/bin/systemctl restart beast-cockpit || return 1
+  fi
   sleep 20
 }
 
