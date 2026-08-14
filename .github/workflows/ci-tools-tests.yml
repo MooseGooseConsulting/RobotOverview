@@ -14,6 +14,11 @@ on:
       # skip its own test suite — and deploy-pin treats "no run" as "nothing
       # required", so the untested agent would ship straight to the robot.
       - 'robot/beast/ros2_ws/deploy/**'
+      # test_beast_soc_load_compensation.py loads beast_power/soc.py straight
+      # off the path. Without this trigger a change to the SOC curve would
+      # skip its own regression gate — which is how a loaded voltage got
+      # looked up in a resting OCV table and aborted a nav session.
+      - 'robot/beast/ros2_ws/src/ugv_main/beast_power/beast_power/soc.py'
       - '.github/workflows/ci-tools-tests.yml'
       - '.github/workflows/deploy-pin.yml'
       - '.github/workflows/cold-review.yml'
@@ -28,6 +33,11 @@ on:
       # skip its own test suite — and deploy-pin treats "no run" as "nothing
       # required", so the untested agent would ship straight to the robot.
       - 'robot/beast/ros2_ws/deploy/**'
+      # test_beast_soc_load_compensation.py loads beast_power/soc.py straight
+      # off the path. Without this trigger a change to the SOC curve would
+      # skip its own regression gate — which is how a loaded voltage got
+      # looked up in a resting OCV table and aborted a nav session.
+      - 'robot/beast/ros2_ws/src/ugv_main/beast_power/beast_power/soc.py'
       - '.github/workflows/ci-tools-tests.yml'
       - '.github/workflows/deploy-pin.yml'
       - '.github/workflows/cold-review.yml'

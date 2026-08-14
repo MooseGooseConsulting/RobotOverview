@@ -14,7 +14,7 @@ from beast_power.ina219 import (
     REG_CALIBRATION,
     REG_CONFIG,
 )
-from beast_power.soc import voltage_to_soc
+from beast_power.soc import estimate_ocv, voltage_to_soc
 from beast_power.telemetry import (
     POWER_SUPPLY_STATUS_CHARGING,
     build_telemetry,
@@ -43,7 +43,17 @@ def test_read_round_trip_voltage_and_soc():
     )
     assert tel.present is True
     assert tel.charging_active is False
-    assert tel.percentage == pytest.approx(voltage_to_soc(11.4), abs=1e-6)
+    # Load-compensated: the published percentage is the SOC of the ESTIMATED
+    # OCV, not of the sagging terminal reading. Passing the current here is
+    # the contract — asserting `voltage_to_soc(11.4)` alone would re-pin the
+    # 2026-08-14 under-reporting bug.
+    assert tel.percentage == pytest.approx(
+        voltage_to_soc(11.4, reading.current_a), abs=1e-6
+    )
+    assert tel.percentage > voltage_to_soc(11.4)
+    assert tel.open_circuit_voltage == pytest.approx(
+        estimate_ocv(11.4, reading.current_a), abs=1e-6
+    )
 
 
 def test_charging_sample_sets_bool_and_status():
