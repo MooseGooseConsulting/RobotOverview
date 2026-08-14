@@ -133,20 +133,33 @@ psql … -f db/hangar/seed.sql
 
 ## Known gaps
 
-- **The robot's auto-deploy is proven but awaits one owner action to arm.** The
-  source-mode agent (`robot/beast/ros2_ws/deploy/bin/beast-pull` + hourly timer,
-  following `refs/deploy/beast-01`, advanced by `deploy-pin.yml`'s `deploy-ref`
-  job after the test gate) passed its full supervised rollout on 2026-08-14:
-  watched first swap (verify 15/15), forced-rollback proof (broken commit →
-  rollback → verified → failed-target remembered), and parked-gate proof
-  (commanded `/cmd_vel` while disarmed → deploy skipped, journal-verified
-  motion-free). Remaining step **R5, owner-only**: reinstall
-  `/etc/sudoers.d/beast-ops` from the tree (`deploy/bin/install-beast-sudoers.sh`),
-  `systemctl enable --now beast-pull.timer`, and remove
-  `/data/beast/deploy/pull-hold` — details in `docs/beast-ops.md` Quick connect.
-  Until then a merge reaches the robot only via a supervised manual tick.
-  The homelab `deployments/beast-01/manifest.yaml` pin is provenance only — the
-  robot deploys from source and reads neither the manifest nor the GHCR image.
+- ~~**The robot's auto-deploy awaits one owner action to arm.**~~ **CLOSED
+  2026-08-14.** The source-mode agent
+  (`robot/beast/ros2_ws/deploy/bin/beast-pull` + hourly timer, following
+  `refs/deploy/beast-01`, advanced by `deploy-pin.yml`'s `deploy-ref` job after
+  the test gate) passed its full supervised rollout on 2026-08-14: watched
+  first swap (verify 15/15), forced-rollback proof (broken commit → rollback →
+  verified → failed-target remembered), and parked-gate proof (commanded
+  `/cmd_vel` while disarmed → deploy skipped, journal-verified motion-free).
+  **R5 is done**: `/etc/sudoers.d/beast-ops` reinstalled from the tree,
+  `beast-pull.timer` enabled + active, `/data/beast/deploy/pull-hold` removed.
+  A merge now reaches the robot on the next hourly tick with no human in the
+  loop. The homelab `deployments/beast-01/manifest.yaml` pin is provenance
+  only — the robot deploys from source and reads neither the manifest nor the
+  GHCR image.
+- **Root unit operations go through `beast-ctl`, not `systemctl` (2026-08-14).**
+  `sudo -n /usr/bin/systemctl <verb> <unit>` is refused on BEAST-01; only
+  `daemon-reload` and `reboot` remain direct. Anything touching a unit calls
+  `sudo -n /usr/local/sbin/beast-ctl <verb> <unit>`, whose per-unit policy table
+  lives in `robot/beast/ros2_ws/deploy/bin/beast-ctl` (dump it with `beast-ctl
+  policy`) and is unit-tested by `tools/ci/test_beast_ctl.py`. sudoers matches a
+  command line literally, so the previous per-unit allowlist cost 193 lines and
+  still had holes — `is-enabled beast-wifi-telemetry.timer` was refused while
+  `enable` on the same unit was allowed. polkit, the standard mechanism for
+  this, is 0.105 on the Jetson with no JS rule support, so per-unit policy is
+  not expressible there; that is why sudoers stays and the policy moved into a
+  wrapper. **New deploy code must not add a `sudo -n systemctl` call with a unit
+  argument** — CI fails on it.
 - Wiki catalog objects are fresh 2026-08-10 HTML captures (hashes unset in the upload source
   map); the 2026-07-01 `.md` snapshots from UGV-Beast-Archive are gone.
 - Shipwright `Build` for Hangar is optional future work; not required for production today.
