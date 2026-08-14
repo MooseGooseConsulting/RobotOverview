@@ -147,30 +147,40 @@ class PowerLogger(Node):
         utc = datetime.now(timezone.utc).isoformat(
             timespec='milliseconds'
         ).replace('+00:00', 'Z')
-        # No RTC battery: a cold boot writes epoch-1970 timestamps until NTP
-        # steps the clock (~100 s). Those rows poisoned every Vmax analysis
-        # and needed manual GC — suppress them at the source. Integration
-        # runs on time.monotonic above, so the totals stay correct across
-        # the gap; only the unusable CSV rows are skipped.
-        if not utc_is_real_clock(utc):
-            self._pre_clock_rows += 1
-            if self._pre_clock_rows == 1:
-                self.get_logger().warning(
-                    'System clock is pre-NTP (epoch); suppressing CSV rows '
-                    'until it syncs. Charge integration continues.'
-                )
-            return
-        if self._pre_clock_rows:
-            self.get_logger().info(
-                f'Clock synced; suppressed {self._pre_clock_rows} '
-                'pre-NTP row(s)'
-            )
-            self._pre_clock_rows = 0
-
-        legacy = legacy_fake_percentage(voltage) if voltage is not None else None
 
         note = self._start_note
         self._start_note = ''
+
+        # No RTC battery: a cold boot stamps epoch-1970 until NTP steps the
+        # clock (~100 s). Those timestamps poisoned every Vmax analysis and
+        # needed a hand GC — but the *sample* is real. Voltage, current, and
+        # the monotonic integral above are all valid; only the wall clock is
+        # not. So drop the bad cell, not the row: write an empty utc (this
+        # file's "not measured" convention, see _num) and mark the row so
+        # analysis can filter it. A session whose clock never syncs — fresh
+        # flash, wiped /var, timesyncd off — therefore still lands its
+        # evidence instead of logging nothing at all for the whole run.
+        if not utc_is_real_clock(utc):
+            utc = ''
+            note = f'{note} pre_ntp_clock'.strip()
+            self._pre_clock_rows += 1
+            if self._pre_clock_rows == 1:
+                self.get_logger().warning(
+                    'System clock is pre-NTP (epoch); logging rows with an '
+                    'empty utc and note=pre_ntp_clock until it syncs.'
+                )
+        elif self._pre_clock_rows:
+            # Mark the transition in the CSV itself. Without it the first
+            # post-sync row shows a charge_mah jump against a small dt_s with
+            # nothing in the file explaining the discontinuity.
+            self.get_logger().info(
+                f'Clock synced; {self._pre_clock_rows} row(s) carry '
+                'note=pre_ntp_clock'
+            )
+            note = f'{note} clock_synced'.strip()
+            self._pre_clock_rows = 0
+
+        legacy = legacy_fake_percentage(voltage) if voltage is not None else None
 
         try:
             self._writer.write_row(

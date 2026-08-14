@@ -158,7 +158,17 @@ def utc_is_real_clock(utc: str) -> bool:
 
 
 def _last_durable_row(path: str) -> Optional[tuple[float, float]]:
-    """Last row in one CSV with finite totals and a real clock, else None."""
+    """Last row in one CSV with finite totals, else None.
+
+    Deliberately clock-agnostic. ``charge_mah`` / ``energy_wh`` come from
+    ``ChargeIntegrator``, which runs on ``time.monotonic`` — their validity has
+    nothing to do with whether the wall clock had reached NTP when the row was
+    written. Filtering on the clock here used to discard a whole boot's
+    integral whenever that boot never synced (fresh flash, wiped ``/var``,
+    timesyncd off), which is exactly the offline capacity run the integral
+    exists to measure. Rows written before sync carry ``note=pre_ntp_clock``
+    and an empty ``utc``; that is the analysis filter, not this one.
+    """
     if not os.path.exists(path) or os.path.getsize(path) == 0:
         return None
     try:
@@ -166,8 +176,6 @@ def _last_durable_row(path: str) -> Optional[tuple[float, float]]:
             reader = csv.DictReader(handle)
             last: Optional[tuple[float, float]] = None
             for row in reader:
-                if not utc_is_real_clock(row.get('utc') or ''):
-                    continue
                 try:
                     charge_mah = float(row['charge_mah'])
                     energy_wh = float(row['energy_wh'])
@@ -187,7 +195,7 @@ def resume_integrator(path: str) -> tuple[float, float]:
     The integrator lives in RAM and used to start at 0.0 on every
     ``beast_power_logger`` start, so a ``beast-ros-base`` restart zeroed the
     running total even though the file already stored it. Read the last row
-    with finite ``charge_mah`` / ``energy_wh`` and a real clock (year ≥ 2020).
+    with finite ``charge_mah`` / ``energy_wh``.
 
     ``DurableCsvWriter`` rotation moves the active file to ``<path>.1`` and
     starts a header-only file, so a restart right after rotation must look in

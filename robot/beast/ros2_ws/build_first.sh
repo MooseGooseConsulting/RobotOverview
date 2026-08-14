@@ -200,6 +200,7 @@ cd "$WS" || exit 1
 
 colcon build \
   --packages-select \
+    cartographer \
     costmap_converter_msgs costmap_converter \
     gz_ros2_control \
     openslam_gmapping slam_gmapping \

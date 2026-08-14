@@ -521,26 +521,32 @@ class TestResumeIntegrator:
         w.close()
         assert resume_integrator(path) == pytest.approx((-123.4, -1.5))
 
-    def test_epoch0_and_unparseable_rows_are_skipped(self, tmp_path):
+    def test_pre_ntp_rows_still_carry_their_totals(self, tmp_path):
+        """A boot that never reaches NTP must not lose its integral.
+
+        Rows written before the clock syncs carry an empty utc and
+        note=pre_ntp_clock, but charge_mah/energy_wh come from the monotonic
+        integrator and are valid regardless of the wall clock. Skipping them
+        here used to discard the whole session's accumulated charge — exactly
+        the offline capacity run the integral exists to measure.
+        """
         path = str(tmp_path / 'p.csv')
         w = DurableCsvWriter(path)
         w.write_row(_row(utc='2026-08-10T16:15:06.000Z', charge_mah=-50.0, energy_wh=-0.5))
+        w.write_row(_row(utc='', note='pre_ntp_clock', charge_mah=-77.5, energy_wh=-0.9))
+        w.close()
+        assert resume_integrator(path) == pytest.approx((-77.5, -0.9))
+
+    def test_rows_with_unusable_totals_are_skipped(self, tmp_path):
+        """Empty/non-finite charge cells carry nothing to resume from."""
+        path = str(tmp_path / 'p.csv')
+        w = DurableCsvWriter(path)
+        w.write_row(_row(utc='2026-08-10T16:15:06.000Z', charge_mah=-50.0, energy_wh=-0.5))
+        # _num renders NaN as an empty cell — "not measured".
+        w.write_row(_row(charge_mah=float('nan'), energy_wh=float('nan')))
         w.close()
         with open(path, 'a', encoding='utf-8', newline='') as handle:
-            handle.write(
-                ','.join(_row(
-                    utc='1970-01-01T00:00:01.000Z',
-                    charge_mah=12.404,
-                    energy_wh=0.1,
-                )) + '\n'
-            )
-            handle.write(
-                ','.join(_row(
-                    utc='not-a-date',
-                    charge_mah=99.0,
-                    energy_wh=9.0,
-                )) + '\n'
-            )
+            handle.write('2026-08-10T16:17:06.000Z,junk\n')
         assert resume_integrator(path) == pytest.approx((-50.0, -0.5))
 
     def test_header_only_is_zero(self, tmp_path):

@@ -3,6 +3,10 @@ name: Hangar web tests
 # The web app previously had NO test gate: 41 vitest files and eslint ran
 # only on developer machines, while CI's sole web check was the Docker image
 # build (incidental typechecking via `next build`). This closes that gap.
+#
+# Keep both path lists below in sync, and keep them covering every input the
+# three commands actually read — a filter that misses a file silently turns
+# this gate off for the PR that edits it.
 on:
   pull_request:
     paths:
@@ -12,8 +16,12 @@ on:
       - 'package-lock.json'
       - 'tsconfig.json'
       - 'next.config.ts'
+      - 'next-env.d.ts'
+      - 'postcss.config.mjs'
       - 'vitest.config.ts'
+      - 'vitest.setup.ts'
       - 'eslint.config.mjs'
+      - 'tools/postinstall-bootstrap.mjs'
       - '.github/workflows/web-tests.yml'
   push:
     branches: [main]
@@ -24,8 +32,12 @@ on:
       - 'package-lock.json'
       - 'tsconfig.json'
       - 'next.config.ts'
+      - 'next-env.d.ts'
+      - 'postcss.config.mjs'
       - 'vitest.config.ts'
+      - 'vitest.setup.ts'
       - 'eslint.config.mjs'
+      - 'tools/postinstall-bootstrap.mjs'
       - '.github/workflows/web-tests.yml'
 
 jobs:
@@ -35,8 +47,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          # Node 25 breaks vitest's localStorage stub (`localStorage.clear is
-          # not a function`); 22 is the supported LTS for this suite.
+          # Pinned to the active LTS for a reproducible gate, not because
+          # newer majors fail: the suite passes on Node 25 too. The Web
+          # Storage gap that older notes blamed on Node is handled in
+          # vitest.setup.ts, which polyfills Storage wholesale.
           node-version: '22'
           cache: npm
       - run: npm ci

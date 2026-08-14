@@ -114,7 +114,7 @@ function staticPacksFallback(
   };
 }
 
-/** DB-injectable: load all briefings from a Hangar Drizzle client. */
+/** Load all briefings from a Hangar Drizzle client. */
 async function loadBriefingsFromDb(db: HangarDrizzle): Promise<DatacoreBriefingRow[]> {
   const rows = await db.select().from(briefings);
   const mapped: DatacoreBriefingRow[] = [];
@@ -125,7 +125,7 @@ async function loadBriefingsFromDb(db: HangarDrizzle): Promise<DatacoreBriefingR
   return mapped;
 }
 
-/** DB-injectable: load all packs from a Hangar Drizzle client. */
+/** Load all packs from a Hangar Drizzle client. */
 async function loadPacksFromDb(db: HangarDrizzle): Promise<DatacorePack[]> {
   const rows = await db.select().from(briefingPacks);
   const mapped: DatacorePack[] = [];
@@ -136,7 +136,7 @@ async function loadPacksFromDb(db: HangarDrizzle): Promise<DatacorePack[]> {
   return mapped;
 }
 
-/** DB-injectable: load one briefing by id. */
+/** Load one briefing by id. */
 async function loadBriefingFromDb(
   db: HangarDrizzle,
   id: string,

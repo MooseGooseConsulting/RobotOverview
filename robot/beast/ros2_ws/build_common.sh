@@ -10,11 +10,20 @@ cd $WS || exit 1
 #     — the vizanti launch files opened an unauthenticated rosbridge on
 #       0.0.0.0:5001; neutralized 2026-08-07, not run since.
 #   ugv_web_app  — superseded by the Hangar cockpit (ugv_cockpit).
-#   explore_lite, emcl2  — never referenced by anything we run.
+#   explore_lite — standalone frontier-exploration workflow (docs/navigation.md);
+#                  no service we run launches it.
+#   emcl2        — alternative localizer. ugv_nav instantiates it only under
+#                  use_localization:=emcl (localization_launch.py), a mode we
+#                  do not use; that arg will fail while this is parked.
 # To bring one back: delete its COLCON_IGNORE and re-add the name below.
-# cartographer is vendored but was already absent from this list; the robot
-# maps with slam_toolbox (from apt), see deploy/systemd/beast-slam.service.
+#
+# cartographer stays built even though the robot maps with slam_toolbox (from
+# apt, see deploy/systemd/beast-slam.service): ugv_nav's localization_launch.py
+# calls get_package_share_directory('cartographer') unconditionally, so dropping
+# it breaks `ros2 launch ugv_nav nav.launch.py` for EVERY localization mode,
+# amcl included. Park it only together with a guard on that call.
 PACKAGES=(
+  cartographer
   costmap_converter_msgs
   costmap_converter
   gz_ros2_control
