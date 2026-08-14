@@ -395,11 +395,14 @@ fi
 
 say "1/4 sync robot checkout to $REF"
 if [ -n "$LOCAL_SHA" ]; then
-  say "push $LOCAL_SHA -> $HOST:$REPO_DIR ($ROBOT_BRANCH)"
+  say "push $LOCAL_SHA -> $HOST:$REPO_DIR (staging ref, checkout as $ROBOT_BRANCH)"
   # ssh:// so Windows Git does not treat host:path as a drive-letter path.
   # The robot is not an LFS remote (no git-lfs-authenticate); skip blob push.
+  # Push to a staging ref, never refs/heads/<branch>: if the robot is already
+  # checked out on that branch, receive.denyCurrentBranch rejects the push.
+  # The remote checkout -B below only needs the object to exist.
   GIT_LFS_SKIP_PUSH=1 git -C "$LOCAL_REPO_ROOT" push --no-thin \
-    "ssh://$HOST$REPO_DIR" "$LOCAL_SHA:refs/heads/$ROBOT_BRANCH"
+    "ssh://$HOST$REPO_DIR" "+$LOCAL_SHA:refs/deploy/incoming"
   ssh "${ssh_opts[@]}" "$HOST" bash -s -- "$REPO_DIR" "$LOCAL_SHA" "$ROBOT_BRANCH" <<'REMOTE'
 set -euo pipefail
 repo_dir="$1"
