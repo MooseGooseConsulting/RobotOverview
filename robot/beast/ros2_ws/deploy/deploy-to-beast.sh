@@ -396,8 +396,9 @@ fi
 say "1/4 sync robot checkout to $REF"
 if [ -n "$LOCAL_SHA" ]; then
   say "push $LOCAL_SHA -> $HOST:$REPO_DIR ($ROBOT_BRANCH)"
+  # ssh:// so Windows Git does not treat host:path as a drive-letter path.
   git -C "$LOCAL_REPO_ROOT" push --no-thin \
-    "$HOST:$REPO_DIR" "$LOCAL_SHA:refs/heads/$ROBOT_BRANCH"
+    "ssh://$HOST$REPO_DIR" "$LOCAL_SHA:refs/heads/$ROBOT_BRANCH"
   ssh "${ssh_opts[@]}" "$HOST" bash -s -- "$REPO_DIR" "$LOCAL_SHA" "$ROBOT_BRANCH" <<'REMOTE'
 set -euo pipefail
 repo_dir="$1"
