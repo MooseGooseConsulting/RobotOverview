@@ -125,19 +125,23 @@ MAX_COMPENSATED_CURRENT_A = 3.0
 # at (2026-08-14 01:35Z→02:29Z and 2026-08-10 22:25Z→22:38Z). Minutes below
 # each edge, run A / run B:
 #
-#     OCV 10.30 V → 26.5 / >12.7 min      <- STATE_LOW_MIN_OCV_V
-#     OCV  9.90 V → 17.0 /  12.2 min      <- STATE_RESERVE_MIN_OCV_V
+#     OCV 10.30 V → 26.5 / >12.7 min      <- STATE_LOW_MAX_OCV_V
+#     OCV  9.90 V → 17.0 /  12.2 min      <- STATE_RESERVE_MAX_OCV_V
 #     OCV  9.84 V → 16.4 /  12.0 min      (the 2026-08-14 abort sample)
 #     OCV  9.40 V →  7.6 /   7.6 min
 #     OCV  9.20 V →  4.7 /   5.0 min      <- STATE_CRITICAL_MAX_OCV_V
 #     OCV  9.00 V →  2.5 /   3.0 min
 #
 # The two runs agree within a minute below OCV 9.9 V, which is the evidence
-# that OCV — not terminal voltage — is the thing that predicts runtime.
+# that OCV — not terminal voltage — is the thing that predicts runtime: at the
+# same TERMINAL voltage those runs sat about 4 minutes apart.
 # These minutes are at ~1.4 A; a heavier load empties the pack sooner.
-STATE_LOW_MIN_OCV_V = 10.30
-STATE_RESERVE_MIN_OCV_V = 9.90
+#
+# Each name is the INCLUSIVE UPPER edge of the band it names, so the bands are
+# `ocv <= EDGE` in ascending order and no gap can open between them.
 STATE_CRITICAL_MAX_OCV_V = 9.20
+STATE_RESERVE_MAX_OCV_V = 9.90
+STATE_LOW_MAX_OCV_V = 10.30
 
 STATE_NOMINAL = 'nominal'
 STATE_LOW = 'low'
@@ -259,9 +263,9 @@ def pack_state(voltage_v: float, current_a: float | None = None) -> str:
         return STATE_UNKNOWN
     if ocv <= STATE_CRITICAL_MAX_OCV_V:
         return STATE_CRITICAL
-    if ocv <= STATE_RESERVE_MIN_OCV_V:
+    if ocv <= STATE_RESERVE_MAX_OCV_V:
         return STATE_RESERVE
-    if ocv <= STATE_LOW_MIN_OCV_V:
+    if ocv <= STATE_LOW_MAX_OCV_V:
         return STATE_LOW
     return STATE_NOMINAL
 

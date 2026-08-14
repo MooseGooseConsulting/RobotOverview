@@ -180,6 +180,25 @@ def test_pack_state_bands_are_ordered_and_cover_the_range():
     assert seen == order
 
 
+def test_band_edges_are_the_named_constants_and_are_inclusive_upper():
+    """Each constant is the top of the band it names, and the flip is there.
+
+    Exercised at 0 A so OCV equals the terminal reading and the edge under
+    test is the only variable. Pinning the flip point catches a renamed or
+    reordered constant, which would otherwise silently move `critical`.
+    """
+    edges = [
+        (soc.STATE_CRITICAL_MAX_OCV_V, soc.STATE_CRITICAL, soc.STATE_RESERVE),
+        (soc.STATE_RESERVE_MAX_OCV_V, soc.STATE_RESERVE, soc.STATE_LOW),
+        (soc.STATE_LOW_MAX_OCV_V, soc.STATE_LOW, soc.STATE_NOMINAL),
+    ]
+    values = [edge for edge, _, _ in edges]
+    assert values == sorted(values), "band edges must ascend critical -> low"
+    for edge, at_edge, above_edge in edges:
+        assert soc.pack_state(edge, 0.0) == at_edge
+        assert soc.pack_state(edge + 0.001, 0.0) == above_edge
+
+
 def test_every_band_has_a_measured_minutes_range():
     """A band with no measured runtime behind it is a guess wearing a name."""
     for state in (soc.STATE_CRITICAL, soc.STATE_RESERVE, soc.STATE_LOW, soc.STATE_NOMINAL):
