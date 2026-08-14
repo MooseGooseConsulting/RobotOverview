@@ -30,7 +30,9 @@ What this launch deliberately does NOT do
 ---------------------------------------------------------------------------
   * Does not set ``allow_motion`` / arm the robot.
   * Does not include itself from bringup or cockpit.launch — opt-in only.
-  * Does not replace ugv_bringup's cmd_vel watchdog or the mux e-stop lock.
+  * Does not replace the mux e-stop lock. (It does not replace a cmd_vel
+    watchdog either — there is none; it was removed 2026-08-07, owner
+    decision D8. Anything driving here must stop by command.)
 
 On-robot verify (motion locked — allow_motion false / default):
 
