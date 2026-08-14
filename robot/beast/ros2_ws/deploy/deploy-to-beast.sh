@@ -402,12 +402,14 @@ say "3/4 install storage/systemd/sudoers + restart"
 remote_privileged="sudo install -m 0644 '$WS_DIR'/deploy/systemd/*.service /etc/systemd/system/ \
   && sudo install -m 0644 '$WS_DIR'/deploy/systemd/*.timer /etc/systemd/system/ \
   && sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-link-watch /usr/local/sbin/beast-link-watch \
+  && sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-wifi-watch /usr/local/sbin/beast-wifi-watch \
   && sudo install -d -m 0755 /etc/systemd/system/tailscaled.service.d \
   && sudo install -m 0644 '$WS_DIR'/deploy/systemd/tailscaled.service.d/time-sync.conf /etc/systemd/system/tailscaled.service.d/ \
   && sudo bash '$WS_DIR'/deploy/bin/install-beast-sudoers.sh \
   && sudo '$WS_DIR'/deploy/storage/install.sh --apply \
   && sudo systemctl daemon-reload \
   && sudo systemctl enable --now beast-link-watch.timer \
+  && sudo systemctl enable --now beast-wifi-watch \
   && sudo systemctl restart beast-ros-base \
   && sudo systemctl try-restart beast-cockpit \
   && sleep 20"

@@ -30,8 +30,8 @@ every way of getting one wrong fails **silently**.
 | `cockpit_status` | `/cockpit/status` (`DiagnosticArray`) | Active mux source and command age, `/cmd_vel` publisher count, arming state, disk free, Jetson temps, Wi-Fi RSSI. |
 
 `/scan`, `/odom`, `/ugv/voltage`, `/imu/raw`, `/diagnostics`,
-`/ugv/allow_motion`, and
-`/oak/rgb/image_raw/compressed` come from `beast-ros-base` + the OAK launch and
+`/ugv/allow_motion`, `/oak/rgb/image_raw/compressed`, `/map`, and `/tf`
+come from `beast-ros-base` + slam_toolbox + the OAK launch and
 are simply carried on the same bridge.
 
 > **`/imu/raw`, not `/imu/data`.** `ugv_bringup` publishes `sensor_msgs/Imu` on

@@ -32,6 +32,10 @@ export const ROS_SUBSCRIPTIONS = [
   { topic: '/ugv/allow_motion', type: 'std_msgs/msg/Bool' },
   { topic: '/oak/rgb/image_raw/compressed', type: 'sensor_msgs/msg/CompressedImage' },
   { topic: '/cockpit/depth/compressed', type: 'sensor_msgs/msg/CompressedImage' },
+  // Phase E (2026-08-13): slam_toolbox occupancy grid + the map→odom TF the
+  // client composes with the /odom pose to place the robot on the map.
+  { topic: '/map', type: 'nav_msgs/msg/OccupancyGrid' },
+  { topic: '/tf', type: 'tf2_msgs/msg/TFMessage' },
 ] as const;
 
 export const ROS_PUBLICATIONS = [
@@ -45,6 +49,12 @@ export const IMAGE_TOPICS = [
   '/oak/rgb/image_raw/compressed',
   '/cockpit/depth/compressed',
 ] as const;
+
+/** Per-topic subscribe throttles; anything absent gets the 50 ms default. */
+const TOPIC_THROTTLE_MS: Record<string, number> = {
+  '/tf': 250,
+  '/map': 1000,
+};
 
 // ── LiDAR BLIND-SECTOR CROP ─────────────────────────────────────────────────
 // The single source of truth for the cropped sector. The scan parser deletes
@@ -117,6 +127,22 @@ export interface InboundMsg {
   angle_increment?: number;
   range_min?: number;
   range_max?: number;
+  // OccupancyGrid (/map)
+  info?: {
+    width?: number;
+    height?: number;
+    resolution?: number;
+    origin?: { position?: { x?: number; y?: number } };
+  };
+  // TFMessage (/tf)
+  transforms?: Array<{
+    header?: { frame_id?: string };
+    child_frame_id?: string;
+    transform?: {
+      translation?: { x?: number; y?: number };
+      rotation?: { z?: number; w?: number };
+    };
+  }>;
 }
 
 // ── STALENESS ───────────────────────────────────────────────────────────────
@@ -145,6 +171,9 @@ const FRESHNESS_MS = {
   status: 2000,
   diagnostics: 2000,
   scan: 2000,
+  // slam_toolbox republishes /map on its 5 s update timer; give it room.
+  map: 15000,
+  mapOdom: 2000,
 } as const;
 
 type SliceKey = keyof typeof FRESHNESS_MS;
@@ -226,6 +255,26 @@ export interface CockpitScan extends SliceMeta {
   rangeMax: number;
   /** Mean interval between the last few scans, ms — null until measurable. */
   intervalMs: number | null;
+}
+
+/** slam_toolbox occupancy grid (/map), downcast to plain numbers at ingest. */
+export interface CockpitMap extends SliceMeta {
+  width: number;
+  height: number;
+  /** Meters per cell. */
+  resolution: number;
+  /** Map-frame coordinates of cell (0,0)'s corner. */
+  originX: number;
+  originY: number;
+  /** Row-major cells: -1 unknown, 0 free, 1-100 occupied-ish. */
+  data: number[];
+}
+
+/** The map→odom transform from /tf, composed with /odom at render time. */
+export interface CockpitMapOdom extends SliceMeta {
+  x: number;
+  y: number;
+  yaw: number;
 }
 
 export interface DiagnosticsItem {
@@ -310,6 +359,8 @@ const meta: Record<SliceKey, SliceMeta> = {
   status: blankMeta(),
   diagnostics: blankMeta(),
   scan: blankMeta(),
+  map: blankMeta(),
+  mapOdom: blankMeta(),
 };
 
 type VoltageData = Omit<CockpitVoltage, keyof SliceMeta>;
@@ -318,6 +369,8 @@ type ImuData = Omit<CockpitImu, keyof SliceMeta>;
 type ClearanceData = { meters: number | null };
 type StatusData = Omit<CockpitStatus, keyof SliceMeta>;
 type ScanData = Omit<CockpitScan, keyof SliceMeta>;
+type MapData = Omit<CockpitMap, keyof SliceMeta>;
+type MapOdomData = Omit<CockpitMapOdom, keyof SliceMeta>;
 type DiagnosticsData = { items: DiagnosticsItem[] };
 
 function blankStatus(): StatusData {
@@ -373,6 +426,8 @@ function directStillAuthoritative(at: number | null): boolean {
   return at !== null && Date.now() - at <= DIRECT_TOPIC_AUTHORITY_MS;
 }
 let scanData: ScanData = blankScan();
+let mapData: MapData = { width: 0, height: 0, resolution: 0.05, originX: 0, originY: 0, data: [] };
+let mapOdomData: MapOdomData = { x: 0, y: 0, yaw: 0 };
 let diagnosticsData: DiagnosticsData = { items: [] };
 
 let connectionState: ConnectionState = 'disconnected';
@@ -382,6 +437,8 @@ let imuState: CockpitImu = { ...imuData, ...meta.imu };
 let clearanceState: CockpitClearance = { ...clearanceData, ...meta.clearance };
 let statusState: CockpitStatus = { ...statusData, ...meta.status };
 let scanState: CockpitScan = { ...scanData, ...meta.scan };
+let mapState: CockpitMap = { ...mapData, ...meta.map };
+let mapOdomState: CockpitMapOdom = { ...mapOdomData, ...meta.mapOdom };
 let diagnosticsState: CockpitDiagnostics = { ...diagnosticsData, ...meta.diagnostics };
 let bridgeState: CockpitBridge = { faults: [], deadTopics: [] };
 
@@ -395,6 +452,8 @@ const listeners = {
   status: new Set<() => void>(),
   diagnostics: new Set<() => void>(),
   scan: new Set<() => void>(),
+  map: new Set<() => void>(),
+  mapOdom: new Set<() => void>(),
   bridge: new Set<() => void>(),
 };
 
@@ -432,6 +491,14 @@ const rebuild: Record<SliceKey, () => void> = {
   scan: () => {
     scanState = { ...scanData, ...meta.scan };
     notify('scan');
+  },
+  map: () => {
+    mapState = { ...mapData, ...meta.map };
+    notify('map');
+  },
+  mapOdom: () => {
+    mapOdomState = { ...mapOdomData, ...meta.mapOdom };
+    notify('mapOdom');
   },
 };
 
@@ -475,6 +542,8 @@ function resetSlicesForNewConnection() {
   clearanceData = { meters: null };
   statusData = blankStatus();
   scanData = blankScan();
+  mapData = { width: 0, height: 0, resolution: 0.05, originX: 0, originY: 0, data: [] };
+  mapOdomData = { x: 0, y: 0, yaw: 0 };
   diagnosticsData = { items: [] };
   scanArrivals = [];
   allowMotionDirectAt = null;
@@ -680,6 +749,8 @@ const serverState = {
   voltage: { voltage: null, current: null, powerSupplyStatus: null, present: null, ...blankMeta() } as CockpitVoltage,
   odom: { x: null, y: null, yaw: null, linearSpeed: null, angularSpeed: null, ...blankMeta() } as CockpitOdom,
   imu: { ax: null, ay: null, az: null, gx: null, gy: null, gz: null, ...blankMeta() } as CockpitImu,
+  map: { width: 0, height: 0, resolution: 0.05, originX: 0, originY: 0, data: [], ...blankMeta() } as CockpitMap,
+  mapOdom: { x: 0, y: 0, yaw: 0, ...blankMeta() } as CockpitMapOdom,
   clearance: { meters: null, ...blankMeta() } as CockpitClearance,
   status: { ...blankStatus(), ...blankMeta() } as CockpitStatus,
   diagnostics: { items: [], ...blankMeta() } as CockpitDiagnostics,
@@ -843,7 +914,9 @@ export const rosClient = {
         id: opId('sub', topic),
         topic,
         type,
-        throttle_rate: isImage ? 100 : 50,
+        // /tf is a 50 Hz firehose (250 ms is plenty for map→odom); /map only
+        // republishes on slam_toolbox's 5 s update timer anyway.
+        throttle_rate: TOPIC_THROTTLE_MS[topic] ?? (isImage ? 100 : 50),
         // Never buffer video: one frame deep means a slow link drops frames
         // instead of queueing a growing lag behind the robot.
         ...(isImage ? { queue_length: 1 } : {}),
@@ -1109,6 +1182,48 @@ export const rosClient = {
         commit('scan');
         break;
       }
+      case '/map': {
+        // OccupancyGrid. rosbridge ships int8[] as a plain JSON number array
+        // (only uint8[] gets base64), and slam_toolbox only republishes on its
+        // map_update_interval, so this stays cheap.
+        const w = finite(msg.info?.width);
+        const h = finite(msg.info?.height);
+        const res = finite(msg.info?.resolution);
+        const cells = msg.data;
+        // A grid whose payload doesn't match its own dimensions is corrupt —
+        // reject at ingest so it can never half-render downstream.
+        if (!w || !h || !res || !Array.isArray(cells) || cells.length !== w * h) break;
+        mapData = {
+          width: w,
+          height: h,
+          resolution: res,
+          originX: finite(msg.info?.origin?.position?.x) ?? 0,
+          originY: finite(msg.info?.origin?.position?.y) ?? 0,
+          data: cells as number[],
+        };
+        commit('map');
+        break;
+      }
+      case '/tf': {
+        // We need exactly one link from the TF firehose: map→odom. The client
+        // composes it with the /odom pose at render time to place the robot
+        // on the occupancy grid.
+        const transforms = msg.transforms;
+        if (!Array.isArray(transforms)) break;
+        for (const t of transforms) {
+          if (t?.header?.frame_id !== 'map' || t?.child_frame_id !== 'odom') continue;
+          const qz = finite(t.transform?.rotation?.z) ?? 0;
+          const qw = finite(t.transform?.rotation?.w) ?? 1;
+          mapOdomData = {
+            x: finite(t.transform?.translation?.x) ?? 0,
+            y: finite(t.transform?.translation?.y) ?? 0,
+            yaw: 2.0 * Math.atan2(qz, qw),
+          };
+          commit('mapOdom');
+          break;
+        }
+        break;
+      }
     }
   },
 };
@@ -1141,6 +1256,8 @@ const subscribeStatus = makeSubscriber('status');
 const subscribeDiagnostics = makeSubscriber('diagnostics');
 const subscribeBridge = makeSubscriber('bridge');
 const subscribeScan = makeSubscriber('scan');
+const subscribeMap = makeSubscriber('map');
+const subscribeMapOdom = makeSubscriber('mapOdom');
 
 const getConnection = () => connectionState;
 const getVoltage = () => voltageState;
@@ -1151,6 +1268,8 @@ const getStatus = () => statusState;
 const getDiagnostics = () => diagnosticsState;
 const getBridge = () => bridgeState;
 const getScan = () => scanState;
+const getMap = () => mapState;
+const getMapOdom = () => mapOdomState;
 
 // Server snapshots are constants, so these are stable by construction.
 const getServerConnection = () => serverState.connection;
@@ -1162,6 +1281,8 @@ const getServerStatus = () => serverState.status;
 const getServerDiagnostics = () => serverState.diagnostics;
 const getServerBridge = () => serverState.bridge;
 const getServerScan = () => serverState.scan;
+const getServerMap = () => serverState.map;
+const getServerMapOdom = () => serverState.mapOdom;
 
 export function useConnectionState(): ConnectionState {
   return useSyncExternalStore(subscribeConnection, getConnection, getServerConnection);
@@ -1197,4 +1318,12 @@ export function useCockpitBridge(): CockpitBridge {
 
 export function useCockpitScan(): CockpitScan {
   return useSyncExternalStore(subscribeScan, getScan, getServerScan);
+}
+
+export function useCockpitMap(): CockpitMap {
+  return useSyncExternalStore(subscribeMap, getMap, getServerMap);
+}
+
+export function useCockpitMapOdom(): CockpitMapOdom {
+  return useSyncExternalStore(subscribeMapOdom, getMapOdom, getServerMapOdom);
 }

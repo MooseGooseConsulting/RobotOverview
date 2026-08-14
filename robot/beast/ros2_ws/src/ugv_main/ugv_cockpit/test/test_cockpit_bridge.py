@@ -74,6 +74,8 @@ EXPECTED_SUB_TOPICS = [
     '/ugv/allow_motion',
     '/oak/rgb/image_raw/compressed',
     '/cockpit/depth/compressed',
+    '/map',
+    '/tf',
 ]
 
 # Publishing any of these from a browser would bypass twist_mux arbitration or

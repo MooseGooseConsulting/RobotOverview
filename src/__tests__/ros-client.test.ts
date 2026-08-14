@@ -6,6 +6,8 @@ import {
   useCockpitOdom,
   useCockpitOverheadClearance,
   useCockpitScan,
+  useCockpitMap,
+  useCockpitMapOdom,
   useCockpitStatus,
   useCockpitBridge,
   useCockpitDiagnostics,
@@ -210,6 +212,10 @@ describe('rosClient and hooks', () => {
       '/ugv/allow_motion': 'std_msgs/msg/Bool',
       '/oak/rgb/image_raw/compressed': 'sensor_msgs/msg/CompressedImage',
       '/cockpit/depth/compressed': 'sensor_msgs/msg/CompressedImage',
+      // Phase E: occupancy grid + the map→odom link for robot-on-map placement.
+      // Robot-side whitelist mirrors these in ugv_cockpit/launch/rosbridge.launch.py.
+      '/map': 'nav_msgs/msg/OccupancyGrid',
+      '/tf': 'tf2_msgs/msg/TFMessage',
     };
 
     const EXPECTED_PUBLICATIONS: Record<string, string> = {
@@ -434,6 +440,90 @@ describe('rosClient and hooks', () => {
       });
       send360();
       expect(scanHook.result.current.intervalMs).toBeCloseTo(100, 0);
+    });
+  });
+
+  // ── MAP INGEST (/map + /tf) ───────────────────────────────────────────────
+  describe('map ingest', () => {
+    it('parses the occupancy grid with its origin and resolution', () => {
+      openSocket();
+      const mapHook = renderHook(() => useCockpitMap());
+      act(() => {
+        MockWebSocket.latestInstance?.triggerMessage({
+          op: 'publish',
+          topic: '/map',
+          msg: {
+            info: {
+              width: 3,
+              height: 2,
+              resolution: 0.05,
+              origin: { position: { x: -1.5, y: -2.0 } },
+            },
+            data: [-1, 0, 50, 100, 0, -1],
+          },
+        });
+      });
+      const m = mapHook.result.current;
+      expect(m.width).toBe(3);
+      expect(m.height).toBe(2);
+      expect(m.resolution).toBeCloseTo(0.05, 6);
+      expect(m.originX).toBeCloseTo(-1.5, 6);
+      expect(m.originY).toBeCloseTo(-2.0, 6);
+      expect(m.data).toEqual([-1, 0, 50, 100, 0, -1]);
+      expect(m.hasReceived).toBe(true);
+    });
+
+    it('rejects a grid whose data does not match its dimensions', () => {
+      openSocket();
+      const mapHook = renderHook(() => useCockpitMap());
+      act(() => {
+        MockWebSocket.latestInstance?.triggerMessage({
+          op: 'publish',
+          topic: '/map',
+          msg: {
+            info: { width: 4, height: 4, resolution: 0.05, origin: { position: { x: 0, y: 0 } } },
+            data: [0, 1], // 2 cells for a 4x4 claim
+          },
+        });
+      });
+      // Rejected at ingest: a size-mismatched grid never enters the store.
+      expect(mapHook.result.current.hasReceived).toBe(false);
+      expect(mapHook.result.current.data).toHaveLength(0);
+    });
+
+    it('extracts only the map→odom link from the /tf firehose', () => {
+      openSocket();
+      const moHook = renderHook(() => useCockpitMapOdom());
+      act(() => {
+        MockWebSocket.latestInstance?.triggerMessage({
+          op: 'publish',
+          topic: '/tf',
+          msg: {
+            transforms: [
+              // noise: some other link — must be ignored
+              {
+                header: { frame_id: 'odom' },
+                child_frame_id: 'base_footprint',
+                transform: { translation: { x: 9, y: 9 }, rotation: { z: 0, w: 1 } },
+              },
+              {
+                header: { frame_id: 'map' },
+                child_frame_id: 'odom',
+                // 90° about z: z = sin(45°), w = cos(45°)
+                transform: {
+                  translation: { x: 1.25, y: -0.5 },
+                  rotation: { z: Math.SQRT1_2, w: Math.SQRT1_2 },
+                },
+              },
+            ],
+          },
+        });
+      });
+      const mo = moHook.result.current;
+      expect(mo.x).toBeCloseTo(1.25, 6);
+      expect(mo.y).toBeCloseTo(-0.5, 6);
+      expect(mo.yaw).toBeCloseTo(Math.PI / 2, 5);
+      expect(mo.hasReceived).toBe(true);
     });
   });
 

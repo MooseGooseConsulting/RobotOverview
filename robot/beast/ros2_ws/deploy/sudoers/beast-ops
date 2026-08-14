@@ -107,6 +107,28 @@ Cmnd_Alias BEAST_SYSTEMCTL = \
     /usr/bin/systemctl status beast-mission-record@*.service, \
     /usr/bin/systemctl is-active beast-mission-record@*, \
     /usr/bin/systemctl is-active beast-mission-record@*.service, \
+    /usr/bin/systemctl start beast-wifi-watch, \
+    /usr/bin/systemctl start beast-wifi-watch.service, \
+    /usr/bin/systemctl stop beast-wifi-watch, \
+    /usr/bin/systemctl stop beast-wifi-watch.service, \
+    /usr/bin/systemctl restart beast-wifi-watch, \
+    /usr/bin/systemctl restart beast-wifi-watch.service, \
+    /usr/bin/systemctl try-restart beast-wifi-watch, \
+    /usr/bin/systemctl try-restart beast-wifi-watch.service, \
+    /usr/bin/systemctl status beast-wifi-watch, \
+    /usr/bin/systemctl status beast-wifi-watch.service, \
+    /usr/bin/systemctl is-active beast-wifi-watch, \
+    /usr/bin/systemctl is-active beast-wifi-watch.service, \
+    /usr/bin/systemctl is-enabled beast-wifi-watch, \
+    /usr/bin/systemctl is-enabled beast-wifi-watch.service, \
+    /usr/bin/systemctl enable beast-wifi-watch, \
+    /usr/bin/systemctl enable beast-wifi-watch.service, \
+    /usr/bin/systemctl enable --now beast-wifi-watch, \
+    /usr/bin/systemctl enable --now beast-wifi-watch.service, \
+    /usr/bin/systemctl disable beast-wifi-watch, \
+    /usr/bin/systemctl disable beast-wifi-watch.service, \
+    /usr/bin/systemctl disable --now beast-wifi-watch, \
+    /usr/bin/systemctl disable --now beast-wifi-watch.service, \
     /usr/bin/systemctl daemon-reload
 
 Cmnd_Alias BEAST_TAILSCALE = /usr/bin/tailscale serve *

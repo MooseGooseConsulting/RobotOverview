@@ -110,14 +110,15 @@ TOPICS_PUB_GLOB = (
 # odom_publisher) and "imu/raw" (same-payload alias for acceptance scripts
 # that still echo it). The web client subscribes /imu/raw.
 #
-# CROSS-REPO: RobotOverview #148 now subscribes /imu/raw plus the dedicated
-# safety topic below. Keep this exhaustive list in lockstep with its
-# ROS_SUBSCRIPTIONS contract; denying a safety subscription would force the UI
-# onto the slower aggregator and surface a bridge fault.
+# CROSS-REPO: keep this exhaustive list in lockstep with ROS_SUBSCRIPTIONS
+# in src/lib/ros/client.ts. Denying a safety subscription would force the UI
+# onto the slower aggregator and surface a bridge fault. /map + /tf are
+# telemetry only (occupancy under the scan); they cannot move the robot.
 TOPICS_SUB_GLOB = (
     '[/ugv/voltage, /scan, /odom, /imu/raw, /cockpit/overhead_clearance, '
     '/cockpit/status, /diagnostics, /ugv/allow_motion, '
-    '/oak/rgb/image_raw/compressed, /cockpit/depth/compressed]'
+    '/oak/rgb/image_raw/compressed, /cockpit/depth/compressed, '
+    '/map, /tf]'
 )
 
 # Exactly one service: the motion authority in ugv_bringup. The cockpit's

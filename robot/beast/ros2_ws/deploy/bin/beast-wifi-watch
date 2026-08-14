@@ -1,0 +1,48 @@
+#!/bin/bash
+# beast-wifi-watch — event-driven Wi-Fi link forensics for BEAST-01.
+#
+# The 60s beast-wifi-telemetry sampler proved drops happen; it cannot see WHY
+# because deauth/disassoc frames and CSA announcements live between samples.
+# This daemon follows `iw event` and appends one JSON line per kernel event to
+# /var/log/beast/wifi-events.jsonl. The interesting payloads:
+#   - "disconnected ... reason: N: <text>"  (who ended it, and why)
+#   - "beacon loss"                          (client lost the AP, not vice versa)
+#   - channel switch announcements           (DFS radar vacates)
+#   - new station / del station on our own interface
+#   - with -f: full auth/assoc/deauth frame bytes (SA = AP BSSID vs our STA)
+#
+# Logger only — does not reconnect. beast-link-watch owns gateway recovery.
+#
+# Installed 2026-08-13 for the unexplained ~60s drops (9 overnight 2026-08-10/11,
+# silent journald AND silent kernel log). -f added 2026-08-14 so the next flap
+# can name the sender.
+set -uo pipefail
+
+IFACE="${BEAST_WIFI_IFACE:-wlP1p1s0}"
+LOG_DIR=/var/log/beast
+LOG_FILE="$LOG_DIR/wifi-events.jsonl"
+
+mkdir -p "$LOG_DIR"
+
+echo_line() {
+  # $1 = raw iw event line
+  BT_TS=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ) BT_RAW="$1" python3 -c '
+import json, os
+print(json.dumps({"ts": os.environ["BT_TS"], "event": os.environ["BT_RAW"]}, separators=(",", ":")))
+' >> "$LOG_FILE"
+}
+
+# stdbuf: iw event block-buffers when piped; line-buffer or we see nothing live.
+# -t timestamps; -f prints the full auth/assoc/deauth frame (source address).
+# If iw exits (interface down across a driver reset), the while loop restarts it.
+while true; do
+  stdbuf -oL iw event -t -f 2>/dev/null | while IFS= read -r line; do
+    case "$line" in
+      *"$IFACE"*|*"phy #"*|*"beacon"*|*"channel switch"*|*"radar"*|*"disconnect"*|*"deauth"*|*"disassoc"*|*"assoc"*)
+        echo_line "$line"
+        ;;
+    esac
+  done
+  logger -t beast-wifi-watch -- "iw event exited (rc=$?); restarting in 5s"
+  sleep 5
+done
