@@ -531,3 +531,26 @@ class TestResumeIntegrator:
         path = str(tmp_path / 'p.csv')
         DurableCsvWriter(path).close()
         assert resume_integrator(path) == (0.0, 0.0)
+
+    def test_header_only_active_file_falls_back_to_newest_backup(self, tmp_path):
+        """Rotation moves the totals to <path>.1 and leaves a header-only
+        active file; a restart right then must resume from the backup, not
+        zero."""
+        path = str(tmp_path / 'p.csv')
+        w = DurableCsvWriter(path)
+        w.write_row(_row(charge_mah=-321.0, energy_wh=-3.9))
+        w.close()
+        os.replace(path, f'{path}.1')
+        DurableCsvWriter(path).close()
+        assert resume_integrator(path) == pytest.approx((-321.0, -3.9))
+
+    def test_active_rows_beat_backup(self, tmp_path):
+        path = str(tmp_path / 'p.csv')
+        w = DurableCsvWriter(path)
+        w.write_row(_row(charge_mah=-1.0, energy_wh=-0.01))
+        w.close()
+        os.replace(path, f'{path}.1')
+        w = DurableCsvWriter(path)
+        w.write_row(_row(charge_mah=-2.0, energy_wh=-0.02))
+        w.close()
+        assert resume_integrator(path) == pytest.approx((-2.0, -0.02))

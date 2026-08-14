@@ -32,7 +32,9 @@ ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/beast
 ExecStop=/bin/sh -c 'exec /home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-slam-save || true'
 Restart=on-failure
 RestartSec=10
-TimeoutStopSec=30
+# beast-slam-save's worst case is ~38 s (8 s /map read + two 15 s service
+# calls); the stop timeout must outlast it or shutdown kills the save.
+TimeoutStopSec=90
 
 [Install]
 WantedBy=multi-user.target

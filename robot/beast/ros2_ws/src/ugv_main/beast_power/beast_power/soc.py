@@ -88,9 +88,9 @@ def voltage_to_soc(voltage_v: float) -> float:
     callers must not call this when ``present`` is false.
     """
     if not math.isfinite(voltage_v):
-        # NaN already never clamped; +inf clamped to 1.0 ('100 % battery') and
-        # -inf to 0.0 on garbage input. Any non-finite volts is a failed
-        # measurement, so it stays NaN — never a fabricated SOC.
+        # Any non-finite volts (NaN, ±inf) is a failed measurement and returns
+        # NaN. Letting ±inf fall through to the clamps below would fabricate
+        # '100 %' / '0 %' from a broken sensor.
         return math.nan
     if voltage_v <= PACK_HARD_EMPTY_V:
         return 0.0

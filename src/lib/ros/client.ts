@@ -441,6 +441,10 @@ function directStillAuthoritative(at: number | null): boolean {
 }
 let scanData: ScanData = blankScan();
 let mapData: MapData = { width: 0, height: 0, resolution: 0.05, originX: 0, originY: 0, data: [] };
+// True once we dropped /map on this wire (fragment storm or oversized grid).
+// A fragmented dump arrives as MANY fragment frames; without this latch each
+// one would send another unsubscribe and record another fault.
+let mapDropped = false;
 let mapOdomData: MapOdomData = { x: 0, y: 0, yaw: 0 };
 let diagnosticsData: DiagnosticsData = { items: [] };
 
@@ -895,13 +899,19 @@ export const rosClient = {
           }
         } else if (data.op === 'fragment') {
           // Humble 2.0.7 fragments oversized /map dumps. We do not reassemble
-          // 80 MB JSON; drop /map so /scan can use the socket.
-          this.unsubscribeTopic('/map');
-          recordBridgeFault(
-            'warning',
-            'oversized topic fragmented; unsubscribed /map so /scan can flow',
-            'sub:/map',
-          );
+          // 80 MB JSON; drop /map so /scan can use the socket. Fragment frames
+          // carry no topic, so this is a heuristic: /map is the only topic on
+          // this wire big enough to fragment. Latch so a multi-fragment dump
+          // acts (and records a fault) exactly once per wire.
+          if (!mapDropped) {
+            mapDropped = true;
+            this.unsubscribeTopic('/map');
+            recordBridgeFault(
+              'warning',
+              'oversized topic fragmented; unsubscribed /map so /scan can flow',
+              'sub:/map',
+            );
+          }
         } else if (data.op === 'status') {
           const level = data.level === 'error' ? 'error' : data.level === 'warning' ? 'warning' : null;
           if (level) {
@@ -929,6 +939,9 @@ export const rosClient = {
     // Ask the bridge to actually tell us about refusals. Default `level: none`
     // means a glob-whitelisted bridge denies our topics in total silence.
     socket.send(JSON.stringify({ op: 'set_level', level: 'warning' }));
+
+    // Fresh wire, fresh /map subscription — re-arm the drop latch.
+    mapDropped = false;
 
     ROS_SUBSCRIPTIONS.forEach(({ topic, type }) => {
       if ((DEFERRED_WIRE_TOPICS as readonly string[]).includes(topic)) return;
@@ -1229,12 +1242,15 @@ export const rosClient = {
         // reject at ingest so it can never half-render downstream.
         if (!w || !h || !res || !Array.isArray(cells) || cells.length !== w * h) break;
         if (w * h > MAP_MAX_CELLS) {
-          this.unsubscribeTopic('/map');
-          recordBridgeFault(
-            'warning',
-            `occupancy grid ${w}×${h} exceeds ${MAP_MAX_CELLS} cells; unsubscribed /map`,
-            'sub:/map',
-          );
+          if (!mapDropped) {
+            mapDropped = true;
+            this.unsubscribeTopic('/map');
+            recordBridgeFault(
+              'warning',
+              `occupancy grid ${w}×${h} exceeds ${MAP_MAX_CELLS} cells; unsubscribed /map`,
+              'sub:/map',
+            );
+          }
           break;
         }
         mapData = {

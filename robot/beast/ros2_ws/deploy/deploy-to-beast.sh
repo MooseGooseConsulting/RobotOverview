@@ -466,6 +466,9 @@ say "3/4 install units + restart (passwordless; no slam)"
 remote_passwordless=$(cat <<REMOTE
 set -euo pipefail
 ws='$WS_DIR'
+# Set when a binary differs from the tree but passwordless install failed;
+# the script then finishes the allowlisted work and exits 2 (see below).
+pw_gap=0
 sudo -n /usr/local/sbin/beast-install-systemd-units
 install_bin_if_needed() {
   src="\$1"
@@ -483,6 +486,7 @@ install_bin_if_needed() {
     return 0
   fi
   echo "WARN cannot passwordless-install \$dest; leaving installed copy" >&2
+  pw_gap=1
   return 0
 }
 install_bin_if_needed "\$ws/deploy/bin/beast-wifi-watch" /usr/local/sbin/beast-wifi-watch
@@ -495,6 +499,10 @@ sudo -n /usr/bin/systemctl restart beast-ros-base
 sudo -n /usr/bin/systemctl try-restart beast-cockpit
 # Deliberately not: beast-slam
 sleep 20
+# exit 2 is a deliberate sentinel: everything allowlisted succeeded, but at
+# least one binary needs break-glass sudo to install. Any other nonzero rc
+# is a real failure and must abort the deploy.
+[ "\$pw_gap" -eq 0 ] || exit 2
 REMOTE
 )
 
@@ -505,9 +513,13 @@ set -e
 if [ "$pw_rc" -eq 0 ]; then
   echo "sudo: passwordless beast-ops path"
 elif [ "$pw_rc" -eq 2 ] && resolve_break_glass_sudo; then
+  # rc 2 = the remote script's sentinel for "allowlisted work done, but a
+  # binary install needs real sudo". Install ALL tree binaries here, then
+  # redo the unit install + restarts so the stack runs what was installed.
   echo "sudo: $sudo_pw_source for binary install"
   remote_break_glass="sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-link-watch /usr/local/sbin/beast-link-watch \
     && sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-wifi-watch /usr/local/sbin/beast-wifi-watch \
+    && sudo install -m 0755 '$WS_DIR'/deploy/bin/beast-slam-save /usr/local/sbin/beast-slam-save \
     && sudo -n /usr/local/sbin/beast-install-systemd-units \
     && sudo -n systemctl daemon-reload \
     && sudo -n systemctl try-restart beast-wifi-watch \

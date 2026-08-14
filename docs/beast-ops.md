@@ -556,11 +556,11 @@ publishing drive commands. Update this block, dated, whenever a session learns a
 | Topic / field | Trust? | Reality |
 |---|---|---|
 | `/ugv/voltage` → `voltage` | Real | Pack bus volts from ESP32 `v` |
-| `/ugv/voltage` → `percentage` | **Fake** | `V / 12.6` — not SOC; lies under load / while charging |
+| `/ugv/voltage` → `percentage` | **Provisional** | Usable-range OCV since `edae18d` (8.332 V = 0 %, 12.364 V = 100 %); mid-curve knees still generic; sags under load. The old fake `V / 12.6` is gone |
 | `/ugv/voltage` → `current`, `charge`, `capacity`, `temperature`, `power_supply_status` | **Cutover-dependent** | `beast_power` supplies signed current/status after deployment; charge/capacity/temperature remain NaN |
 | `/imu/raw`, `/imu/mag` scales | Assumed | Waveshare ICM-20948 LSB factors; not calibrated here; `frame_id` is `base_link` (wrong frame) |
 | `/odom/odom_raw` | Partial | `odl`/`odr` ÷100 assumed cm→m; `L`/`R` are ESP32 wheel speeds, not fused pose |
-| Charging / true SOC | **Provisional** | `beast_power` publishes usable-range OCV % (8.332–12.232 V) and logic-rail current; mid-curve and pack shunt still open; charging is observability only |
+| Charging / true SOC | **Provisional** | `beast_power` publishes usable-range OCV % (8.332–12.364 V) and logic-rail current; mid-curve and pack shunt still open; charging is observability only |
 
 Source: module docstring + inline `FAKE` / `DUMMY` / `ASSUMED` / `HACK` in
 [`robot/beast/ros2_ws/src/ugv_main/beast_base/beast_base/base_node.py`](../robot/beast/ros2_ws/src/ugv_main/beast_base/beast_base/base_node.py)
