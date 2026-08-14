@@ -23,8 +23,10 @@ Environment=XDG_RUNTIME_DIR=/run/user/1000
 # resolves the command on a CI runner that has no robot filesystem. Same shape
 # as beast-wifi-telemetry.service; ConditionPathExists above is the real check.
 ExecStart=/bin/sh -c 'exec /home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-pull'
-# A colcon build plus a 20 s settle plus the verify sweep. Generous, but the
-# agent must never be killed between "checkout moved" and "verify finished" —
-# that is precisely the half-deploy state it exists to prevent.
-TimeoutStartSec=1800
+# Must outlast a WORST-CASE run: two bounded colcon builds (the agent caps
+# each at BEAST_BUILD_TIMEOUT, default 1200 s) plus two restarts, settles, and
+# verify sweeps. A systemd kill here lands inside the marker window — the
+# exact half-deploy state the agent exists to prevent — so the agent bounds
+# its own longest step and this ceiling stays comfortably above the sum.
+TimeoutStartSec=3600
 UMask=0027

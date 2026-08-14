@@ -272,23 +272,37 @@ if [ "$gate_probe" = "false" ]; then
 else
   bad "cannot confirm motion gate disarmed (read: ${gate_probe:-nothing}); drive probe skipped, drive path UNVERIFIED"
 fi
-# Restore the gate, FAIL CLOSED, and only over our own state. Re-read first:
-# if the gate is not the "false" this probe set, an operator changed it while
-# the probe ran, and their newer decision wins — overwriting it from the stale
-# pre-probe snapshot could re-arm a robot someone just disarmed on purpose.
-# When it is untouched, re-arm only if the pre-probe read said literally
-# "true"; the old anything-but-"false" rule re-armed on the empty string a
-# timed-out read returns. Leaving it disarmed is always the recoverable
-# direction.
-gate_final="$(timeout 8 ros2 topic echo --once /ugv/allow_motion 2>/dev/null | awk '/^data:/ {print $2; exit}')"
-if [ -n "$gate_final" ] && [ "$gate_final" != "false" ]; then
-  warn "motion gate changed during the probe (now: $gate_final); leaving it as the operator set it"
-elif [ "$gate_before" = "true" ]; then
-  timeout 15 ros2 service call /ugv/set_allow_motion std_srvs/srv/SetBool '{data: true}' >/dev/null 2>&1 || true
-else
-  timeout 15 ros2 service call /ugv/set_allow_motion std_srvs/srv/SetBool '{data: false}' >/dev/null 2>&1 || true
-  if [ "$gate_before" != "false" ]; then
-    warn "could not read allow_motion before the probe; left the gate DISARMED (re-arm from the cockpit)"
+# Restore the gate, FAIL CLOSED, and only over our own state.
+#
+# Nothing to restore unless OUR disarm actually landed (gate_probe = "false""):
+# warning about "operator changes" when the disarm was simply lost would be a
+# phantom operator in exactly the log an engineer reads after a failed check.
+#
+# When it landed: re-read first — a gate that is no longer "false" was changed
+# by someone else mid-probe, and their newer decision wins. Re-arm only if the
+# pre-probe read said literally "true" (the old anything-but-"false" rule
+# re-armed on the empty string a timed-out read returns), then CONFIRM the
+# re-arm and warn if it cannot be confirmed — a silently disarmed robot after
+# a "verified" deploy was the worst quiet failure this block could produce.
+# A redundant operator disarm during the probe window is indistinguishable
+# from the probe's own (no state change, no log line), hence the standing
+# warn. Leaving it disarmed is always the recoverable direction.
+if [ "$gate_probe" = "false" ]; then
+  gate_final="$(timeout 8 ros2 topic echo --once /ugv/allow_motion 2>/dev/null | awk '/^data:/ {print $2; exit}')"
+  if [ -n "$gate_final" ] && [ "$gate_final" != "false" ]; then
+    warn "motion gate changed during the probe (now: $gate_final); leaving it as the operator set it"
+  elif [ "$gate_before" = "true" ]; then
+    timeout 15 ros2 service call /ugv/set_allow_motion std_srvs/srv/SetBool '{data: true}' >/dev/null 2>&1 || true
+    warn "re-armed the gate to its pre-probe state; if you disarmed DURING the probe, disarm again"
+    rearm_check="$(timeout 8 ros2 topic echo --once /ugv/allow_motion 2>/dev/null | awk '/^data:/ {print $2; exit}')"
+    if [ "$rearm_check" != "true" ]; then
+      warn "re-arm NOT confirmed (gate reads: ${rearm_check:-nothing}); robot may be DISARMED — re-arm from the cockpit"
+    fi
+  else
+    timeout 15 ros2 service call /ugv/set_allow_motion std_srvs/srv/SetBool '{data: false}' >/dev/null 2>&1 || true
+    if [ "$gate_before" != "false" ]; then
+      warn "could not read allow_motion before the probe; left the gate DISARMED (re-arm from the cockpit)"
+    fi
   fi
 fi
 

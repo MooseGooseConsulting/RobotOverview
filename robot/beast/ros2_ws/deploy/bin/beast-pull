@@ -49,6 +49,17 @@ SELF_HOLD="$STATE_DIR/pull-hold"
 IN_PROGRESS="$STATE_DIR/in-progress"
 STATE_FILE="$STATE_DIR/pull-state.json"
 LAST_GOOD="$STATE_DIR/last-good-sha"
+FAILED_TARGET="$STATE_DIR/failed-target"
+RECOVERY_COUNT="$STATE_DIR/recovery-attempts"
+
+# Hard ceiling on one colcon invocation. Without it, a build that outlives
+# beast-pull.service's TimeoutStartSec is killed by systemd INSIDE the marker
+# window — and recovery would rerun the identical build into the identical
+# kill, hourly, forever, with the stack down and nothing escalating. A timeout
+# HERE returns through the normal failure path instead: rollback, then
+# self-hold if that fails too. The service timeout is sized to fit two of
+# these plus overhead.
+BUILD_TIMEOUT_SECONDS="${BEAST_BUILD_TIMEOUT:-1200}"
 
 # Always rebuilt regardless of the diff: these four are the boot path, and
 # rebuilding them is cheap next to being wrong about them. Matches
@@ -82,7 +93,13 @@ die() { log "FAIL $*"; exit 1; }
 # artefact sit beside a newly symlinked source file and still look deployed.
 changed_packages() {
   local from="$1" to="$2" dir name
-  git -C "$REPO_DIR" diff --name-only "$from" "$to" -- "robot/beast/ros2_ws/src" \
+  # --no-renames: with rename detection on, a file moved between packages
+  # emits only its DESTINATION path, so the source package silently keeps its
+  # stale artefacts — exactly how beast_base was once extracted from
+  # ugv_bringup. quotePath off so a non-ASCII path is not C-quoted into a
+  # string the prefix match below would drop.
+  git -c core.quotePath=false -C "$REPO_DIR" diff --no-renames --name-only "$from" "$to" \
+      -- "robot/beast/ros2_ws/src" \
     | sed 's|/[^/]*$||' | sort -u \
     | while IFS= read -r dir; do
         name=""
@@ -125,7 +142,13 @@ if [ -e "$OPERATOR_HOLD" ]; then
 fi
 if [ -e "$SELF_HOLD" ]; then
   log "self-hold present ($SELF_HOLD) — a previous rollback failed to verify."
-  log "Investigate, then remove the file to re-enable automatic deploys."
+  if [ -e "$IN_PROGRESS" ]; then
+    log "the in-progress marker is ALSO present ($IN_PROGRESS): the last failure was"
+    log "mid-build, so beast-deploy-guard is holding beast-ros-base down. Remove BOTH"
+    log "files after investigating — clearing only the self-hold leaves boot blocked."
+  else
+    log "Investigate, then remove the file to re-enable automatic deploys."
+  fi
   exit 0
 fi
 
@@ -150,6 +173,12 @@ source "$WS_DIR/install/setup.bash" 2>/dev/null || true
 #     2026-08-07 and latches its last command, so wheels can be turning while
 #     nothing publishes. Silence on the command topic is not proof of stillness;
 #     silence from the wheels is.
+# RESIDUAL, named: with the stack DOWN both topics are silent, so the gate
+# reads "parked" in exactly the state where a latched ESP32 command is
+# unobservable. That needs beast_base hard-killed mid-drive AND nobody
+# noticing a headless runaway for up to an hour; beast_base sends its
+# unconditional stop the moment the stack comes back up.
+MOTION_SOURCE=""
 is_moving() {
   local sample
   sample="$(timeout "$MOTION_SAMPLE_SECONDS" ros2 topic echo /cmd_vel 2>/dev/null)"
@@ -160,7 +189,7 @@ is_moving() {
             v = $2 + 0; if (v < 0) v = -v;
             if (v > eps) { found = 1 }
           }
-          END { exit(found ? 0 : 1) }' && return 0
+          END { exit(found ? 0 : 1) }' && { MOTION_SOURCE="/cmd_vel (commanded)"; return 0; }
   fi
   # Odometry frames also carry pose (which grows without bound), so only the
   # twist section counts, and the flag resets at each `---` message boundary.
@@ -174,13 +203,13 @@ is_moving() {
             v = $2 + 0; if (v < 0) v = -v;
             if (v > eps) { found = 1 }
           }
-          END { exit(found ? 0 : 1) }' && return 0
+          END { exit(found ? 0 : 1) }' && { MOTION_SOURCE="/odom_wheel (measured — possible latched command)"; return 0; }
   fi
   return 1
 }
 
 if is_moving; then
-  log "robot is moving (non-zero /cmd_vel within ${MOTION_SAMPLE_SECONDS}s); skipping, will retry next tick"
+  log "robot is moving: non-zero $MOTION_SOURCE within ${MOTION_SAMPLE_SECONDS}s; skipping, will retry next tick"
   exit 0
 fi
 if systemctl list-units --state=active --no-legend 'beast-mission-record@*' 2>/dev/null | grep -q .; then
@@ -196,7 +225,21 @@ fi
 recovering=0
 if [ -e "$IN_PROGRESS" ]; then
   recovering=1
-  log "in-progress marker found: a previous deploy was interrupted mid-build; recovering"
+  # Escalate instead of looping: if recovery itself keeps dying (build always
+  # hits its timeout, disk full), the same rebuild would rerun hourly forever
+  # with the stack down and nothing telling anyone. Three strikes -> self-hold,
+  # loudly, with the marker left in place so the guard keeps boot parked.
+  attempt="$(cat "$RECOVERY_COUNT" 2>/dev/null || echo 0)"
+  attempt=$((attempt + 1))
+  printf '%s\n' "$attempt" > "$RECOVERY_COUNT"
+  if [ "$attempt" -ge 3 ]; then
+    : > "$SELF_HOLD"
+    log "FAIL recovery attempt $attempt — the same rebuild keeps dying the same way (build timeout? disk?)."
+    log "Set $SELF_HOLD; the marker stays and beast-deploy-guard keeps the stack down."
+    log "Investigate, then remove both $SELF_HOLD and $IN_PROGRESS."
+    exit 1
+  fi
+  log "in-progress marker found: a previous deploy was interrupted mid-build; recovering (attempt $attempt)"
 fi
 
 # --------------------------------------------------------------- fetch ----
@@ -213,6 +256,19 @@ if [ "$target" = "$current" ] && [ "$recovering" = 0 ]; then
 fi
 [ "$recovering" = 0 ] && log "deploy ref moved: ${current:0:12} -> ${target:0:12}"
 
+# A target that failed on-robot once will fail again until something changes,
+# and CI cannot see on-robot failures (i2c, serial, live-graph checks). Without
+# this memory the agent would stop/build/restart/verify/roll back the SAME bad
+# commit every hour — the stack down twice a tick, indefinitely. Cleared when
+# the ref moves; rm the file to force a retry of the same sha.
+if [ "$recovering" = 0 ] && [ -f "$FAILED_TARGET" ]; then
+  if [ "$(cat "$FAILED_TARGET" 2>/dev/null)" = "$target" ]; then
+    log "target ${target:0:12} already failed on-robot once; holding until $DEPLOY_REF moves (rm $FAILED_TARGET to retry)"
+    exit 0
+  fi
+  rm -f "$FAILED_TARGET"
+fi
+
 # Tracked-file modifications mean a human is mid-something. Untracked files are
 # normal on this robot (slam / telemetry leftovers) and are left alone.
 if [ -n "$(git -C "$REPO_DIR" status --porcelain --untracked-files=no)" ]; then
@@ -223,15 +279,36 @@ fi
 # point, and the build span must start there so the interrupted build's
 # packages are definitely in the set. Never overwrite LAST_GOOD with a sha
 # that was mid-deploy when the lights went out.
+# Validated, not trusted: a power cut during the write below can leave
+# LAST_GOOD empty, and an empty rollback point would corrupt every git call
+# that consumes it. An unusable file falls back to HEAD.
+rollback_sha=""
 if [ "$recovering" = 1 ] && [ -f "$LAST_GOOD" ]; then
-  rollback_sha="$(cat "$LAST_GOOD")"
-else
-  rollback_sha="$current"
+  rollback_sha="$(git -C "$REPO_DIR" rev-parse --verify \
+    "$(cat "$LAST_GOOD")^{commit}" 2>/dev/null)" || rollback_sha=""
 fi
+[ -n "$rollback_sha" ] || rollback_sha="$current"
 [ "$recovering" = 0 ] && printf '%s\n' "$current" > "$LAST_GOOD"
 
 packages="$(build_set "$rollback_sha" "$target")"
 log "build set: $packages"
+
+# Pin ONE verify script for this whole session, forward and rollback runs
+# alike. The checkout moves during a deploy, so "the verify on disk" is a
+# moving target — and a rollback across the commit that INTRODUCED beast-verify
+# (or a fleet rollback to a commit before it) would otherwise fail on a file
+# that no longer exists, turning a clean rollback into a self-hold. Prefer the
+# target tree's copy (the contract being deployed); fall back to the current
+# checkout's.
+SESSION_VERIFY="$STATE_DIR/session-verify.sh"
+if ! git -C "$REPO_DIR" show "$target:robot/beast/ros2_ws/deploy/bin/beast-verify" \
+    > "$SESSION_VERIFY" 2>/dev/null || ! [ -s "$SESSION_VERIFY" ]; then
+  if [ -f "$WS_DIR/deploy/bin/beast-verify" ]; then
+    cp "$WS_DIR/deploy/bin/beast-verify" "$SESSION_VERIFY"
+  else
+    die "no beast-verify in the target tree or the current checkout"
+  fi
+fi
 
 # Host-side systemd payloads are part of the deploy too: unit files that change
 # in this span must be reinstalled (in EITHER direction — a rollback of a unit
@@ -245,9 +322,25 @@ if ! git -C "$REPO_DIR" diff --quiet "$rollback_sha" "$target" \
   log "systemd unit files changed in this span; will reinstall via beast-install-systemd-units"
 fi
 
+if [ "$recovering" = 1 ]; then
+  # The interrupted run recorded its own target and package set in the marker.
+  # Recovery must rebuild AT LEAST those packages: the ref may have moved since
+  # (a fleet rollback via force-push is the everyday case), which can shrink
+  # the freshly computed span right out from under the half-built packages —
+  # leaving A-era artefacts under an X-era tree that then "verifies".
+  interrupted_pkgs="$(cut -d' ' -f2- < "$IN_PROGRESS" 2>/dev/null || true)"
+  if [ -n "$interrupted_pkgs" ]; then
+    packages="$(printf '%s\n' $packages $interrupted_pkgs | sort -u | tr '\n' ' ')"
+    log "recovery build set (union with interrupted run): $packages"
+  fi
+  # The interrupted run may already have installed ITS target's unit files;
+  # reinstall unconditionally so units match whatever tree recovery lands on.
+  units_changed=1
+fi
+
 # ------------------------------------------------------------- deploy ----
 checkout_build_restart() {
-  local sha="$1" pkgs="$2"
+  local sha="$1" pkgs="$2" available selected p
 
   # Stop the stack before moving a --symlink-install workspace under it. The
   # motion gate proved the robot is parked, so a stopped base is a safe state,
@@ -259,8 +352,10 @@ checkout_build_restart() {
   # beast-deploy-guard refuses to boot the stack. Not earlier (a failed stop
   # would leave a marker guarding a perfectly consistent workspace) and it
   # must NOT span the restart below, or the guard would reject this agent's
-  # own deploy.
-  : > "$IN_PROGRESS"
+  # own deploy. The payload — this run's target and package set — is what a
+  # future recovery rebuilds, so a killed run's work is never lost to a
+  # deploy ref that moved in the meantime.
+  printf '%s %s\n' "$sha" "$pkgs" > "$IN_PROGRESS"
 
   # Detached on purpose. deploy-to-beast.sh names the robot's branch after the
   # DEPLOYING WORKSTATION's branch, which is how the robot ended up sitting on a
@@ -268,8 +363,29 @@ checkout_build_restart() {
   git -C "$REPO_DIR" checkout --quiet --detach "$sha" || return 1
   [ "$(git -C "$REPO_DIR" rev-parse HEAD)" = "$sha" ] || return 1
 
+  # Filter the requested set against what colcon can actually discover in THIS
+  # tree. The set was resolved against the target; the rollback tree (or a
+  # recovery union) can name packages that do not exist here — added by the
+  # target, deleted by it, or renamed — and colcon must not be handed a
+  # selection it cannot resolve. Dropping them is correct in every direction:
+  # a package absent from this sha's tree has nothing to build at this sha.
+  available="$(cd "$WS_DIR" && colcon list --names-only 2>/dev/null)"
+  selected=""
+  for p in $pkgs; do
+    if printf '%s\n' "$available" | grep -qx "$p"; then
+      selected="$selected $p"
+    else
+      log "package $p does not exist at ${sha:0:12}; dropping it from this build"
+    fi
+  done
+  if [ -z "${selected# }" ]; then
+    log "none of the requested packages exist at ${sha:0:12}"
+    return 1
+  fi
+
   ( cd "$WS_DIR" \
-      && colcon build --packages-select $pkgs --symlink-install --executor sequential ) \
+      && timeout "$BUILD_TIMEOUT_SECONDS" \
+           colcon build --packages-select $selected --symlink-install --executor sequential ) \
     || return 1
 
   if [ "$units_changed" = 1 ]; then
@@ -297,9 +413,10 @@ if ! checkout_build_restart "$target" "$packages"; then
   verify_result="deploy-failed"
 else
   log "restarted on ${target:0:12}; verifying"
-  if bash "$WS_DIR/deploy/bin/beast-verify"; then
+  if bash "$SESSION_VERIFY"; then
     log "OK deployed and verified ${target:0:12}"
     write_state "$target" "$packages" "pass"
+    rm -f "$RECOVERY_COUNT" "$FAILED_TARGET"
     exit 0
   fi
   log "verification FAILED on ${target:0:12}; rolling back"
@@ -307,11 +424,16 @@ else
 fi
 
 # ------------------------------------------------------------ rollback ----
-# Rebuild the same package set on the way back: the forward build already
-# overwrote those artefacts, so restoring the checkout alone is not enough.
-if checkout_build_restart "$rollback_sha" "$packages" && bash "$WS_DIR/deploy/bin/beast-verify"; then
+# Rebuild the same package set on the way back (filtered against the rollback
+# tree inside checkout_build_restart): the forward build already overwrote
+# those artefacts, so restoring the checkout alone is not enough.
+if checkout_build_restart "$rollback_sha" "$packages" && bash "$SESSION_VERIFY"; then
   log "rolled back to ${rollback_sha:0:12} and verified"
   write_state "$rollback_sha" "$packages" "rolled-back-from-${target:0:12}"
+  # Remember the failed target so the next tick does not redeploy the same
+  # bad commit and take the stack down twice an hour indefinitely.
+  printf '%s\n' "$target" > "$FAILED_TARGET"
+  rm -f "$RECOVERY_COUNT"
   exit 1
 fi
 
@@ -320,7 +442,13 @@ fi
 # failure was mid-build, the in-progress marker is still present and
 # beast-deploy-guard keeps the stack parked — stopped and loud, by design.
 : > "$SELF_HOLD"
+printf '%s\n' "$target" > "$FAILED_TARGET"
 write_state "$rollback_sha" "$packages" "rollback-failed-held"
 log "FAIL rollback to ${rollback_sha:0:12} also failed to verify ($verify_result on the way in)."
-log "Set $SELF_HOLD; automatic deploys are stopped until a human clears it."
+if [ -e "$IN_PROGRESS" ]; then
+  log "Set $SELF_HOLD; the in-progress marker remains and beast-deploy-guard keeps the stack down."
+  log "Investigate, then remove both $SELF_HOLD and $IN_PROGRESS."
+else
+  log "Set $SELF_HOLD; automatic deploys are stopped until a human clears it."
+fi
 exit 1

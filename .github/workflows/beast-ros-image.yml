@@ -6,10 +6,13 @@ on:
     # triggers deploy-pin.yml, whose deploy-ref job advances the source ref
     # BEAST-01 follows — so a path missing here is a robot change that never
     # deploys. The old subset list excluded ugv_nav, the build scripts, and
-    # deploy/** entirely; a few extra image builds are cheaper than a deploy
-    # pipeline that silently ignores whole directories.
+    # deploy/** entirely. Docs and markdown are carved back out: advancing the
+    # deploy ref makes the ROBOT stop its stack, rebuild, restart, and run the
+    # disarm/burst verify — a physical cost no prose edit should incur.
     paths:
       - 'robot/beast/ros2_ws/**'
+      - '!robot/beast/ros2_ws/docs/**'
+      - '!robot/beast/ros2_ws/**/*.md'
       - '.github/workflows/beast-ros-image.yml'
   push:
     branches:
@@ -18,10 +21,13 @@ on:
     # triggers deploy-pin.yml, whose deploy-ref job advances the source ref
     # BEAST-01 follows — so a path missing here is a robot change that never
     # deploys. The old subset list excluded ugv_nav, the build scripts, and
-    # deploy/** entirely; a few extra image builds are cheaper than a deploy
-    # pipeline that silently ignores whole directories.
+    # deploy/** entirely. Docs and markdown are carved back out: advancing the
+    # deploy ref makes the ROBOT stop its stack, rebuild, restart, and run the
+    # disarm/burst verify — a physical cost no prose edit should incur.
     paths:
       - 'robot/beast/ros2_ws/**'
+      - '!robot/beast/ros2_ws/docs/**'
+      - '!robot/beast/ros2_ws/**/*.md'
       - '.github/workflows/beast-ros-image.yml'
   workflow_dispatch:
 

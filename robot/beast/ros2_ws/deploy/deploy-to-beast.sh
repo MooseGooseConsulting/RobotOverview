@@ -135,6 +135,17 @@ if [ "$VERIFY_ONLY" = 1 ]; then
   exit $?
 fi
 
+# An interrupted beast-pull leaves its in-progress marker, and beast-ros-base's
+# ExecStartPre guard refuses to start while it exists — so a manual deploy from
+# here would build fine and then die at the restart, half-deployed. Refuse up
+# front instead: the agent's next tick recovers the workspace on its own.
+if ssh "${ssh_opts[@]}" "$HOST" 'test -e /data/beast/deploy/in-progress' 2>/dev/null; then
+  echo "beast-pull was interrupted mid-build on $HOST (marker: /data/beast/deploy/in-progress)." >&2
+  echo "Its next timer tick rebuilds and recovers automatically — or run deploy/bin/beast-pull" >&2
+  echo "on the robot now. Only rm the marker yourself if the workspace is known-sound." >&2
+  exit 1
+fi
+
 LOCAL_SHA=""
 ROBOT_BRANCH="deploy-incoming"
 if git -C "$LOCAL_REPO_ROOT" rev-parse --verify "$REF^{commit}" >/dev/null 2>&1; then

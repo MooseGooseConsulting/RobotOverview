@@ -178,6 +178,26 @@ def test_deleted_package_resolves_to_nothing(repo: Path) -> None:
     assert build_set(repo, base, head) == ALWAYS
 
 
+def test_cross_package_rename_rebuilds_both_packages(repo: Path) -> None:
+    """A file moved between packages must rebuild BOTH sides.
+
+    With git's default rename detection, the diff emits only the destination
+    path, so the source package would silently keep its stale artefacts —
+    exactly how beast_base was once extracted from ugv_bringup. The script
+    diffs with --no-renames to see both endpoints.
+    """
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(
+        repo,
+        "mv",
+        f"{WS_REL}/src/ugv_main/ugv_nav/ugv_nav.py",
+        f"{WS_REL}/src/ugv_main/ugv_vision/ugv_nav.py",
+    )
+    _git(repo, "commit", "-qm", "move node between packages")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    assert build_set(repo, base, head) == ALWAYS | {"ugv_nav", "ugv_vision"}
+
+
 def test_package_name_comes_from_the_name_tag_not_the_directory(repo: Path) -> None:
     """colcon selects by the <name> tag; directory names are convention only."""
     base = _git(repo, "rev-parse", "HEAD").strip()

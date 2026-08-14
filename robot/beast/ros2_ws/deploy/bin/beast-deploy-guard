@@ -20,9 +20,17 @@
 set -u
 
 MARKER="${BEAST_DEPLOY_MARKER:-/data/beast/deploy/in-progress}"
+SELF_HOLD="${BEAST_SELF_HOLD:-/data/beast/deploy/pull-hold}"
+OPERATOR_HOLD="/etc/beast/pull-hold"
 
 [ -e "$MARKER" ] || exit 0
 
 echo "beast-deploy-guard: deploy marker present ($MARKER) — a deploy was interrupted mid-build; refusing to start a possibly half-built workspace." >&2
-echo "beast-deploy-guard: beast-pull's next tick will rebuild and recover automatically; or remove the marker to force a start." >&2
+if [ -e "$SELF_HOLD" ] || [ -e "$OPERATOR_HOLD" ]; then
+  # Promising automatic recovery here would be a lie: beast-pull exits on its
+  # holds before it ever looks at the marker.
+  echo "beast-deploy-guard: a pull hold is ALSO set, so beast-pull will NOT recover this automatically. Investigate, then remove the hold(s) AND the marker." >&2
+else
+  echo "beast-deploy-guard: beast-pull's next tick will rebuild and recover automatically; or remove the marker to force a start." >&2
+fi
 exit 1
