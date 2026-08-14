@@ -1,0 +1,19 @@
+name: Letta PR Review
+
+# Thin caller: wires the reusable MooseGoose Review Chief workflow
+# (MooseGooseConsulting/coldaine-codeOps) into this repo's PR lifecycle.
+# Requires the org secret LETTA_API_KEY to be visible to this repo.
+on:
+  pull_request:
+    types: [opened, ready_for_review, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    uses: MooseGooseConsulting/coldaine-codeOps/.github/workflows/letta-pr-review.yml@main
+    secrets:
+      LETTA_API_KEY: ${{ secrets.LETTA_API_KEY }}
