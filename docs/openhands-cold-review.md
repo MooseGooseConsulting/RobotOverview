@@ -40,17 +40,41 @@ not debug the workflow.
 
 ## 2. GitHub App "OpenHands Cold Review"
 
-Create an org GitHub App named **OpenHands Cold Review** (expected slug
-`openhands-cold-review`, posts as `openhands-cold-review[bot]`):
+Create at
+[New GitHub App](https://github.com/organizations/MooseGooseConsulting/settings/apps/new)
+(expected slug `openhands-cold-review`, posts as `openhands-cold-review[bot]`).
+No existing org app is reusable — live `cold-claude-code` is only
+contents/issues/PRs, and we are not widening it.
 
-- Permissions: near-blanket, same shape as `cold-claude-code` (38 of 39
-  repository permissions except `Single file`, nearly all Read and write;
-  org grants with the same withhold list — no member management, no PAT
-  admin, no Copilot Business). The Action only *uses* PR/issue write;
-  the extra scopes are so later plugin/Canvas/check-run work does not bounce.
-- No webhook (GitHub Actions is the event delivery)
-- No org seat
-- Install **only** on `MooseGooseConsulting/RobotOverview`
+Click path:
 
-Then copy the App ID into `OPENHANDS_COLD_REVIEW_APP_ID` and the generated PEM
-into `OPENHANDS_COLD_REVIEW_PRIVATE_KEY`.
+1. GitHub App name: `OpenHands Cold Review`. Homepage:
+   `https://github.com/MooseGooseConsulting/RobotOverview`.
+2. Webhook: **uncheck Active**. Leave the URL empty. Actions is event delivery.
+3. Repository permissions — **38 of 39, everything except Single file**,
+   nearly all **Read and write**:
+   Actions, Administration, Agent secrets, Agent tasks, Agent variables,
+   Checks, Codespaces (incl. lifecycle admin and secrets), Commit statuses,
+   Contents, Dependabot alerts and secrets, Deployments, Discussions,
+   Environments, Issues, Metadata (read), Packages, Pages, Projects: Admin,
+   Pull requests, Repository security advisories, Secret scanning alerts and
+   bypass/dismissal requests, Secrets, Variables, Webhooks, Workflows.
+4. Organization permissions — same withhold list as the *intent* of
+   `cold-claude-code` (not its live four-scope install): grant org Secrets,
+   Self-hosted runners, Webhooks, custom org/repo roles, Organization
+   credentials, org Projects: Admin, and Dependabot/code-scanning/secret-scanning
+   dismissal and bypass (Read and write). **Withhold:** org Administration
+   (member management), Members, Blocking users, personal-access-token
+   management, GitHub Copilot Business, Models, API Insights,
+   organization-level Codespaces/secrets management.
+5. Create the app. Generate a private key. Copy the numeric App ID.
+6. Install **only** on `MooseGooseConsulting/RobotOverview`. Do not install
+   org-wide. GitHub will show a scary permission review — expected.
+7. If GitHub shows “Permission updates requested,” approve it on the org
+   installation before the wet-run.
+
+Then paste App ID into `OPENHANDS_COLD_REVIEW_APP_ID` and the PEM into
+`OPENHANDS_COLD_REVIEW_PRIVATE_KEY` on environment `openhands-review`.
+
+Optional Doppler `homelab/dev` copy of those **names** only — do not reuse
+`CODEX_GITHUB_*`.
