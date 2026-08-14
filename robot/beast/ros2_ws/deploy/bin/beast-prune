@@ -1,0 +1,219 @@
+#!/bin/bash
+# beast-prune — report, and optionally remove, orphaned colcon build/install
+# package trees on BEAST-01.
+#
+# WHY THIS EXISTS
+# ----------------
+# colcon has no prune. `colcon build --packages-select <set>` only ever
+# touches the packages it is given — it never notices that a package
+# disappeared from src/ (deleted, renamed, or freshly parked with
+# COLCON_IGNORE) and never removes that package's build/<name> or
+# install/<name> directory. Because install/ is a --symlink-install tree,
+# install/setup.bash sources every package directory it finds there, so an
+# orphaned package stays IN THE OVERLAY — discoverable by `ros2 pkg list` and
+# launchable by `ros2 run`/`ros2 launch` — long after `colcon list` in the
+# checkout stops naming it.
+#
+# Not hypothetical: the 2026-08-14 SLAM survey found exactly this live —
+# vizanti (5 packages), emcl2, explore_lite, and ugv_web_app, every one of
+# them PARKED with COLCON_IGNORE (see AGENTS.md "Currently parked"), still
+# had directories under install/. Codex flagged the same hazard from the
+# other direction on PR #224 (a target commit that DELETES a package):
+# "the deployment then succeeds while the removed package can remain
+# discoverable and executable through install/setup.bash."
+#
+# WHY THIS IS A SEPARATE, MANUAL TOOL — NOT PART OF beast-pull
+# --------------------------------------------------------------
+# PR #224's own review closed the "prune it in beast-pull" suggestion with:
+# "Colcon has no prune; doing it with rm -rf from an unattended agent is a
+# bigger hazard than the stale artefacts." That verdict stands. beast-prune
+# is therefore:
+#   * never invoked by beast-pull, beast-pull.service, or beast-pull.timer —
+#     grep the deploy tree if you doubt it, or see
+#     test_beast_prune_is_not_wired_into_beast_pull in tools/ci/test_beast_
+#     prune.py, which asserts it;
+#   * report-only by default — no flag ever deletes anything;
+#   * destructive ONLY behind an explicit --prune, which itself refuses a
+#     tty-less invocation unless --yes is ALSO given, so a stray unattended
+#     call (a cron typo, a copy-paste into a service file) still can't rm -rf
+#     anything.
+#
+# WHAT COUNTS AS AN ORPHAN
+# -------------------------
+# This workspace uses colcon's default (isolated) layout: one subdirectory
+# per package under both build/ and install/, named by the colcon PACKAGE
+# NAME (the <name> tag — see beast-pull's own build-set resolution for why
+# that is not always the directory name). "Available" is whatever `colcon
+# list --names-only` reports for the CURRENT checkout on disk, whatever
+# commit HEAD happens to be — this tool does not read git history, only
+# "does this directory still correspond to a package colcon can see right
+# now." Any top-level DIRECTORY under build/ or install/ that is not in that
+# list is an orphan. Top-level FILES (setup.bash, local_setup.bash,
+# COLCON_IGNORE, the .colcon_install_layout marker, …) are never package
+# directories and are always left alone; hidden directories are skipped for
+# the same reason.
+#
+# Usage:
+#   beast-prune                 report-only: list orphans (if any), exit 0.
+#                                Exits 1 only on a hard error (colcon itself
+#                                broken) — never on "orphans exist".
+#   beast-prune --check         report-only, but exit 1 if any orphan is
+#                                found and 0 if build/ and install/ are
+#                                clean. For a human (or a future monitor) to
+#                                poll — never wired into a deploy path.
+#   beast-prune --prune         report, then remove orphaned build/<name>
+#                                and install/<name> dirs. Prompts for
+#                                confirmation on a real tty; refuses outright
+#                                without one unless --yes is also given.
+#   beast-prune --prune --yes   same, without the confirmation prompt.
+#
+# Env overrides (mirrors beast-pull):
+#   BEAST_REPO_DIR    checkout root (default /home/beast/beast/RobotOverview)
+#   BEAST_STATE_DIR   beast-pull's state dir (default /data/beast/deploy) —
+#                     read-only here, only to refuse --prune mid-deploy.
+#   BEAST_PRUNE_COLCON_LIST   TEST ONLY: path to a file of package names (one
+#                     per line), used INSTEAD of running `colcon list
+#                     --names-only`. Lets tools/ci exercise every mode
+#                     (report, --check, --prune) against a synthetic
+#                     build/install tree with no ROS, no colcon, and no
+#                     robot. Unset in production; never set this on the
+#                     robot.
+set -uo pipefail
+
+REPO_DIR="${BEAST_REPO_DIR:-/home/beast/beast/RobotOverview}"
+WS_DIR="$REPO_DIR/robot/beast/ros2_ws"
+STATE_DIR="${BEAST_STATE_DIR:-/data/beast/deploy}"
+IN_PROGRESS="$STATE_DIR/in-progress"
+BUILD_DIR="$WS_DIR/build"
+INSTALL_DIR="$WS_DIR/install"
+
+log() { printf 'beast-prune: %s\n' "$*"; }
+die() { printf 'beast-prune: %s\n' "$*" >&2; exit 1; }
+
+mode="report"
+assume_yes=0
+for a in "$@"; do
+  case "$a" in
+    --check) mode="check" ;;
+    --prune) mode="prune" ;;
+    --yes|-y) assume_yes=1 ;;
+    -h|--help)
+      sed -n '2,80p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) die "unknown argument '$a' (usage: beast-prune [--check|--prune] [--yes])" ;;
+  esac
+done
+
+# --------------------------------------------------------- available set ----
+# Real path: ask colcon, in the workspace, right now. Test path: a pre-baked
+# file, so tools/ci can exercise every mode with no ROS installed.
+available_packages() {
+  if [ -n "${BEAST_PRUNE_COLCON_LIST:-}" ]; then
+    grep -v '^[[:space:]]*$' "$BEAST_PRUNE_COLCON_LIST"
+    return
+  fi
+  ( cd "$WS_DIR" && colcon list --names-only )
+}
+
+# ------------------------------------------------------------ candidates ----
+# Top-level, non-hidden DIRECTORIES only — see the header comment for why
+# that alone is enough to exclude every non-package file colcon writes into
+# build/ and install/.
+tree_dirs() {
+  local root="$1" d name
+  [ -d "$root" ] || return 0
+  for d in "$root"/*/; do
+    [ -d "$d" ] || continue
+    name="$(basename "$d")"
+    case "$name" in .*) continue ;; esac
+    printf '%s\n' "$name"
+  done
+}
+
+# Prints "<name> <locations>" lines, one per orphaned package, sorted by
+# name. <locations> is "build", "install", or "build,install" — which
+# tree(s) actually hold a directory for that name.
+orphan_report() {
+  local available
+  available="$(available_packages)" \
+    || die "colcon list failed in $WS_DIR (see stderr above); refusing to guess"
+  [ -n "$available" ] \
+    || die "colcon discovered no packages in $WS_DIR; that is a colcon fault, not an empty tree — refusing to treat every build/install dir as orphaned"
+
+  { tree_dirs "$BUILD_DIR"; tree_dirs "$INSTALL_DIR"; } | sort -u \
+    | while IFS= read -r name; do
+        printf '%s\n' "$available" | grep -qx "$name" && continue
+        loc=""
+        [ -d "$BUILD_DIR/$name" ] && loc="build"
+        if [ -d "$INSTALL_DIR/$name" ]; then
+          [ -n "$loc" ] && loc="$loc,install" || loc="install"
+        fi
+        printf '%s %s\n' "$name" "$loc"
+      done
+}
+
+print_orphan_line() {
+  local name="$1" b="" i="" parts=""
+  [ -d "$BUILD_DIR/$name" ] \
+    && b="build($(du -sh "$BUILD_DIR/$name" 2>/dev/null | cut -f1))"
+  [ -d "$INSTALL_DIR/$name" ] \
+    && i="install($(du -sh "$INSTALL_DIR/$name" 2>/dev/null | cut -f1))"
+  parts="$b"
+  [ -n "$i" ] && parts="${parts:+$parts }$i"
+  printf '  %-28s %s\n' "$name" "$parts"
+}
+
+if [ ! -d "$BUILD_DIR" ] && [ ! -d "$INSTALL_DIR" ]; then
+  log "no build/ or install/ directory under $WS_DIR; nothing to prune"
+  exit 0
+fi
+
+report="$(orphan_report)" || exit 1
+count=0
+[ -n "$report" ] && count="$(printf '%s\n' "$report" | wc -l)"
+
+log "workspace: $WS_DIR"
+
+case "$mode" in
+  report|check)
+    if [ "$count" -eq 0 ]; then
+      log "no orphaned package trees found; build/ and install/ match the current checkout"
+      exit 0
+    fi
+    log "$count orphaned package tree(s) found (present in build/ or install/, absent from colcon list):"
+    printf '%s\n' "$report" | while IFS=' ' read -r name _loc; do print_orphan_line "$name"; done
+    log "re-run with --prune to remove them (or --prune --yes to skip the confirmation prompt)"
+    [ "$mode" = "check" ] && exit 1
+    exit 0
+    ;;
+  prune)
+    [ -e "$IN_PROGRESS" ] \
+      && die "deploy in progress ($IN_PROGRESS present); refusing to prune mid-build — retry once the deploy finishes"
+    if [ "$count" -eq 0 ]; then
+      log "no orphaned package trees found; nothing to prune"
+      exit 0
+    fi
+    log "$count orphaned package tree(s) found:"
+    printf '%s\n' "$report" | while IFS=' ' read -r name _loc; do print_orphan_line "$name"; done
+    if [ "$assume_yes" -ne 1 ]; then
+      if ! printf 'beast-prune: remove the %d tree(s) above? [y/N] ' "$count" > /dev/tty 2>/dev/null; then
+        die "no controlling terminal to prompt on; refusing to prune without --yes"
+      fi
+      read -r reply < /dev/tty || die "could not read confirmation from /dev/tty"
+      case "$reply" in
+        y|Y|yes|YES) ;;
+        *) log "aborted; nothing removed"; exit 1 ;;
+      esac
+    fi
+    printf '%s\n' "$report" | while IFS=' ' read -r name _loc; do
+      for tree_dir in "$BUILD_DIR" "$INSTALL_DIR"; do
+        d="$tree_dir/$name"
+        if [ -d "$d" ]; then
+          rm -rf -- "$d" && log "removed $d" || log "FAILED to remove $d"
+        fi
+      done
+    done
+    log "prune complete"
+    ;;
+esac

@@ -35,6 +35,38 @@ forced-rollback proof → parked-gate proof) has passed. The container image
 (`beast-ros-image.yml`) still builds and the homelab manifest still pins it,
 but both are provenance only — the robot reads neither.
 
+## Orphaned build/install trees — `bin/beast-prune`
+
+colcon has no prune. `beast-pull` only ever rebuilds the packages it
+selects — a package deleted, renamed, or parked with `COLCON_IGNORE` keeps
+its `build/<name>` and `install/<name>` directories forever, and because
+`install/` is a `--symlink-install` tree, `install/setup.bash` keeps
+sourcing them: an orphaned package stays discoverable and launchable long
+after `colcon list` in the checkout stops naming it. The 2026-08-14 SLAM
+survey found this live — `vizanti`, `emcl2`, `explore_lite`, and
+`ugv_web_app` (every currently parked package) still had directories under
+`install/`.
+
+`bin/beast-prune` reports, and on request removes, those orphans by
+comparing `build/`/`install/` package directories against `colcon list
+--names-only` in the current checkout:
+
+```bash
+beast-prune                  # report-only (default) — never deletes anything
+beast-prune --check          # report-only; exit 1 if any orphan is found
+beast-prune --prune          # remove orphans; prompts for confirmation on a tty
+beast-prune --prune --yes    # remove orphans without prompting
+```
+
+**Deliberately not part of the unattended timer path.** PR #224's review
+declined to prune from `beast-pull` itself: "doing it with `rm -rf` from an
+unattended agent is a bigger hazard than the stale artefacts." `beast-prune`
+is a separate, hand-run tool — `beast-pull`, its service, and its timer
+never invoke it (`tools/ci/test_beast_prune.py` asserts this). Run it in
+report-only mode first; only pass `--prune` once you have read the report,
+and only with `--yes` once you are certain — it refuses to prompt without a
+real terminal, so it can never be accidentally scripted into deleting.
+
 ## Manual override — `deploy-to-beast.sh` (recovery)
 
 This directory also holds `deploy-to-beast.sh`: the **manual override**

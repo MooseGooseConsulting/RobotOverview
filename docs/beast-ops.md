@@ -7,6 +7,24 @@ re-verify against the live robot before relying on anything stale.
 
 ## Quick connect
 
+**`beast-prune` added 2026-08-14 (code-only — NOT verified on the robot):**
+New `robot/beast/ros2_ws/deploy/bin/beast-prune` reports orphaned
+`build/`/`install/` package trees — deleted, renamed, or parked packages
+that `colcon build --packages-select` never removes and that
+`install/setup.bash` (a `--symlink-install` tree) keeps sourcing regardless.
+Report-only by default; removes only behind an explicit `--prune --yes` (or
+`--prune` with a real confirmation prompt), and is never called from
+`beast-pull`/its timer (`tools/ci/test_beast_prune.py` asserts that). This
+session had **no SSH/Tailscale reachability to BEAST-01** (cloud session,
+no `ssh` binary, no Tailscale client) and **no Hangar DB access** (no
+`doppler`, no installed `pg` module) — so the on-robot report-only run this
+tool needs before anyone trusts it is still owed. Next session with
+`ssh beast-01-ts`: run bare `beast-prune` (report-only) first, confirm the
+orphans it lists line up with AGENTS.md's "Currently parked" set (vizanti's
+5 packages, plus `ugv_web_app`, `explore_lite`, `emcl2`) and nothing
+unexpected, and land the result as a Hangar insight before ever running
+`--prune` for real.
+
 **Shakedown: first autonomous navigation 2026-08-14 ~20:45Z (live):** Robot ran
 the whole session **untethered** (Ethernet + charger unplugged ~19:48Z) and was
 parked at **10.88 V (~3.6 V/cell) — plug the charger back in.** Supervised tick
