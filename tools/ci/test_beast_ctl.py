@@ -86,6 +86,41 @@ def test_beast_nav_is_start_stop_only(verb):
     assert "not permitted" in r.stderr
 
 
+# --- mask is not offered, because it cannot work ------------------------------
+# systemd masks a unit by symlinking its name to /dev/null in
+# /etc/systemd/system, and beast-install-systemd-units installs every beast unit
+# as a real file in exactly that directory — so mask fails with "File
+# /etc/systemd/system/<unit> already exists" for all of them. The policy table
+# granted `mask` on all four timers until 2026-08-15 and never could have
+# honoured it. A capability that reads as available and fails at the moment
+# someone needs it is worse than no entry at all; `stop` and `disable` are the
+# real controls. See the header comment before adding it back.
+@pytest.mark.parametrize(
+    "unit",
+    [
+        "beast-pull.timer",
+        "beast-wifi-telemetry.timer",
+        "beast-link-watch.timer",
+        "beast-storage-maintenance.timer",
+        "beast-ros-base",
+        "beast-slam",
+    ],
+)
+@pytest.mark.parametrize("verb", ["mask", "unmask"])
+def test_mask_is_refused_everywhere(unit, verb):
+    r = run(verb, unit)
+    assert r.returncode == 2, f"{verb} {unit} was permitted"
+    assert "not permitted" in r.stderr
+
+
+def test_policy_table_advertises_no_mask_class():
+    """`beast-ctl policy` is the operator-facing inventory; it must not list a
+    class the script cannot perform."""
+    r = run("policy")
+    assert r.returncode == 0
+    assert "mask" not in r.stdout, "the policy dump still advertises a mask class"
+
+
 # --- default deny ------------------------------------------------------------
 @pytest.mark.parametrize(
     "args,needle",
