@@ -287,10 +287,16 @@ So all scripted motion goes through
 launched detached so it outlives the SSH session that started it:
 
 ```bash
-ssh beast-01-ts "setsid nohup /home/beast/ops/beast-mission spin 45 \
-  ros2 topic pub -r 10 /cmd_vel_ui geometry_msgs/msg/Twist \
+ssh beast-01-ts "setsid nohup \
+  /home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-mission \
+  spin 45 ros2 topic pub -r 10 /cmd_vel_ui geometry_msgs/msg/Twist \
   '{angular: {z: 0.35}}' > /tmp/spin.out 2>&1 < /dev/null &"
 ```
+
+Run it from the workspace checkout, like `beast-slam-save`, so a deploy
+updates it. That is safe here precisely because it needs **no** privilege —
+unlike `beast-ctl`, which must only ever run from root-owned `/usr/local/sbin`
+because `/home/beast` is writable by `beast`.
 
 It arms, runs the body under `timeout`, and on **every** exit path — success,
 failure, SIGTERM, SIGINT, bound reached — runs a three-layer stop: estop lock
