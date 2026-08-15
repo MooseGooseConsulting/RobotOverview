@@ -19,6 +19,18 @@ export type UnitStatus = (typeof UNIT_STATUSES)[number];
 
 export type BayId = 'robotics' | 'compute' | 'network' | 'home' | 'audio';
 
+export const HANGAR_BAY_IDS: readonly BayId[] = [
+  'robotics',
+  'compute',
+  'network',
+  'home',
+  'audio',
+] as const;
+
+export function isHangarBayId(value: unknown): value is BayId {
+  return typeof value === 'string' && (HANGAR_BAY_IDS as readonly string[]).includes(value);
+}
+
 export const BAY_ACCENTS = ['cyan', 'amber'] as const;
 export type BayAccent = (typeof BAY_ACCENTS)[number];
 

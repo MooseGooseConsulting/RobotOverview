@@ -46,9 +46,12 @@ On `icarus-laptop`, do not start local containers. Use the cluster DB (LAN
 
 ## Files
 
-- `find.ts` — **search the live DB from the CLI** (assets/terminals/sockets/insights/
+- `find.ts` — **search the live DB from the CLI** (assets, terminals, sockets,
+  documents, nets, activity, missions, capabilities, wishlist, insights,
   briefings). `doppler run --project homelab --config dev -- npx tsx db/hangar/find.ts <term>`.
   Use this before asking anyone for a hardware spec; `grep` only finds the CI fixtures.
+  `FIND_SURFACES` / `FIND_SURFACE_SKIP` are the coverage contract — a new
+  `CREATE TABLE` must land in one of them.
 - `schema.sql` — full rebuild DDL for normalized inventory tables.
 - `migrations/` — additive live migrations, including
   `2026-07-31-hangar-corpus.sql` (corpus tables),
