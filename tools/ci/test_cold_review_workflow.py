@@ -103,7 +103,7 @@ def test_stock_openhands_acp_luna_xhigh_no_effort_hacks():
     )
     assert review["uses"] == "OpenHands/extensions/plugins/pr-review@main"
     assert review["with"]["agent-kind"] == "acp"
-    assert review["with"]["acp-command"] == "npx -y @agentclientprotocol/codex-acp"
+    assert review["with"]["acp-command"] == "npx -y @agentclientprotocol/codex-acp@1.1.9"
     assert review["with"]["llm-model"] == "gpt-5.6-luna/xhigh"
     assert review["with"]["github-token"] == "${{ steps.app.outputs.token }}"
     # Rejected silent no-ops from earlier drafts.

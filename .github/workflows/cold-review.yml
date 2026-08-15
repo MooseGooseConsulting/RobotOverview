@@ -83,7 +83,7 @@ jobs:
         uses: OpenHands/extensions/plugins/pr-review@main
         with:
           agent-kind: acp
-          acp-command: npx -y @agentclientprotocol/codex-acp
+          acp-command: npx -y @agentclientprotocol/codex-acp@1.1.9
           llm-model: gpt-5.6-luna/xhigh
           github-token: ${{ steps.app.outputs.token }}
       - name: Cleanup Codex auth

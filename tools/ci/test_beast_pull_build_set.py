@@ -26,11 +26,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BEAST_PULL = REPO_ROOT / "robot" / "beast" / "ros2_ws" / "deploy" / "bin" / "beast-pull"
 WS_REL = "robot/beast/ros2_ws"
 
-# CI (ci-tools-tests.yml) runs on ubuntu, where this is always present. Locally
-# on Windows it resolves to Git Bash; skip rather than fail if neither exists.
-BASH = shutil.which("bash")
+def _find_bash() -> str | None:
+    if os.name == "nt":
+        git_bash = r"C:\Program Files\Git\bin\bash.exe"
+        if Path(git_bash).exists():
+            return git_bash
+    return shutil.which("bash")
 
-pytestmark = pytest.mark.skipif(BASH is None, reason="bash is required to run beast-pull")
+
+BASH = _find_bash()
+pytestmark = pytest.mark.skipif(
+    BASH is None or not Path(BASH).exists(), reason="bash is required to run beast-pull"
+)
 
 # Rebuilt on every deploy regardless of the diff (beast-pull's ALWAYS_PACKAGES).
 ALWAYS = {"beast_power", "beast_base", "ugv_bringup", "ugv_cockpit"}
