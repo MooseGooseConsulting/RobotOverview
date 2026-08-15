@@ -105,6 +105,7 @@ function noopBridge(): BeastRobotBridge {
     driveOnHeading: blank,
     spin: blank,
     backUp: blank,
+    navigateToPose: blank,
     stop: blank,
   };
 }
