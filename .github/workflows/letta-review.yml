@@ -36,6 +36,20 @@ jobs:
           # Do NOT persist the write-scoped github.token into the working tree.
           persist-credentials: false
 
+      - name: Pre-install Bun
+        run: |
+          mkdir -p "$HOME/.bun/bin"
+          if ! command -v bun >/dev/null; then
+            BUN_URL="https://github.com/oven-sh/bun/releases/download/bun-v1.2.11/bun-linux-x64.zip"
+            curl -fsSL "$BUN_URL" -o /tmp/bun.zip
+            unzip -q -o /tmp/bun.zip -d /tmp
+            mv -f /tmp/bun-linux-x64/bun "$HOME/.bun/bin/bun"
+            chmod +x "$HOME/.bun/bin/bun"
+            rm -rf /tmp/bun.zip /tmp/bun-linux-x64
+          fi
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.bun/bin:$PATH"
+
       - name: Letta deep review
         id: letta
         # Pin the action while it remains experimental.
