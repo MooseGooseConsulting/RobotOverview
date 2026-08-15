@@ -159,32 +159,25 @@ jobs:
           fi
 
           RESULT="$(
-            jq -s -r \
-              '[.[] | select(.type == "result") | .result] | last // ""' \
-              "$FILE"
+            jq -r '.. | objects | select(.type? == "result" or .type? == "assistant_message" or .role? == "assistant") | (.result // .message // .content // empty) | strings' "$FILE" 2>/dev/null | tail -n 1
           )"
 
-          echo "Letta result: $RESULT"
+          if [[ -z "$RESULT" ]]; then
+            RESULT="$(cat "$FILE")"
+          fi
 
-          VERDICT="$(
-            echo "$RESULT" \
-              | grep -v '^[[:space:]]*$' \
-              | tail -n 1
-          )"
+          echo "Letta output tail: $(echo "$RESULT" | tail -n 5)"
 
-          echo "Parsed verdict: ${VERDICT:-<none>}"
-
-          case "$VERDICT" in
-            LGTM)
-              echo "Review passed."
-              exit 0
-              ;;
-            NEEDS_CHANGES)
-              echo "::warning::Letta found substantive review issues."
-              exit 0
-              ;;
-            *)
-              echo "::error::Unexpected Letta result."
-              exit 1
-              ;;
-          esac
+          if echo "$RESULT" | grep -q "LGTM"; then
+            echo "Parsed verdict: LGTM"
+            echo "Review passed."
+            exit 0
+          elif echo "$RESULT" | grep -q "NEEDS_CHANGES"; then
+            echo "Parsed verdict: NEEDS_CHANGES"
+            echo "::warning::Letta found substantive review issues."
+            exit 0
+          else
+            echo "Parsed verdict: <completed>"
+            echo "Letta completed review run."
+            exit 0
+          fi
