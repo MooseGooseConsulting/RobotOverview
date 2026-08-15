@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { JetBrains_Mono, Inter, Outfit } from 'next/font/google';
 import './globals.css';
 import { HangarProvider } from '@/components/HangarProvider';
+import { HangarDown } from '@/components/HangarDown';
 import { Shell } from '@/components/Shell';
 import { getHangarSpine } from '@/server/hangar/spine';
 import { normalizeLibraryBaseUrl } from '@/lib/documents';
@@ -23,7 +24,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     spine.source === 'postgres'
       ? { source: 'postgres' as const }
       : {
-          source: 'static' as const,
+          source: 'unavailable' as const,
           fallbackReason: spine.fallbackReason,
         };
   const libraryBaseUrl = normalizeLibraryBaseUrl(process.env.DATACORE_LIBRARY_URL);
@@ -31,13 +32,17 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} ${outfit.variable}`}>
       <body>
-        <HangarProvider
-          initialData={spine.data}
-          initialSpineRead={spineReadStatus}
-          initialLibraryBaseUrl={libraryBaseUrl}
-        >
-          <Shell>{children}</Shell>
-        </HangarProvider>
+        {spine.source === 'unavailable' ? (
+          <HangarDown reason={spine.fallbackReason} />
+        ) : (
+          <HangarProvider
+            initialData={spine.data}
+            initialSpineRead={spineReadStatus}
+            initialLibraryBaseUrl={libraryBaseUrl}
+          >
+            <Shell>{children}</Shell>
+          </HangarProvider>
+        )}
         <div className="crt-overlay" aria-hidden />
       </body>
     </html>
