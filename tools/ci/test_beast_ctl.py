@@ -30,16 +30,24 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BEAST_CTL = REPO_ROOT / "robot" / "beast" / "ros2_ws" / "deploy" / "bin" / "beast-ctl"
 SUDOERS = REPO_ROOT / "robot" / "beast" / "ros2_ws" / "deploy" / "sudoers" / "beast-ops"
 
-BASH = shutil.which("bash") or r"C:\Program Files\Git\bin\bash.exe"
+def _find_bash() -> str | None:
+    if os.name == "nt":
+        git_bash = r"C:\Program Files\Git\bin\bash.exe"
+        if Path(git_bash).exists():
+            return git_bash
+    return shutil.which("bash")
+
+
+BASH = _find_bash()
 pytestmark = pytest.mark.skipif(
-    not Path(BASH).exists(), reason="bash unavailable (Windows without Git Bash)"
+    BASH is None or not Path(BASH).exists(), reason="bash unavailable (Windows without Git Bash)"
 )
 
 
 def run(*args: str) -> subprocess.CompletedProcess:
     env = dict(os.environ, BEAST_CTL_DRYRUN="1")
     return subprocess.run(
-        [BASH, str(BEAST_CTL), *args],
+        [BASH, BEAST_CTL.as_posix(), *args],
         capture_output=True,
         text=True,
         env=env,
