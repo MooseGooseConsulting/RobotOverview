@@ -104,6 +104,10 @@ All five, and none of them is a line count:
 4. A ROS node dying makes its systemd unit fail. `systemctl is-active` is admissible evidence.
 5. The workspace is built from a pinned manifest of upstream packages plus a named, justified
    list of what is genuinely ours.
+6. **The kill list below is executed.** `deploy/bin` is roughly 300–400 lines, not 1,870; the
+   unit count is roughly 8, not 17; and every surviving script has a written reason a standard
+   mechanism could not do its job. This is the measurable half of the done condition — the other
+   five are properties, this one is a number.
 
 ## Phases
 
@@ -181,6 +185,43 @@ not move," or worse, "moves wrong."
 
 Do not start P5 until P0–P4 are done and the robot is verifiably healthy on a known-good base.
 
+## The kill list
+
+The point of the phases is not to add a provisioning layer on top of what exists — it is to
+**retire the layer that exists**. Every script below was written because a capability was
+missing; the phases restore the capability, and the script goes. Stated per file so this plan
+can be held to it.
+
+Lines are exact (`wc -l`, 2026-08-15). Survivor sizes marked *(est.)* are estimates, not
+measurements — they should be treated as targets to argue with, not as facts.
+
+| Script | Lines | Exists because | Fate |
+| --- | ---: | --- | --- |
+| `beast-mission` | 155 | no `cmd_vel` watchdog (D8) | **Deleted at P5.** `diff_drive_controller` supplies the timeout as a contract |
+| `beast-deploy-guard` | 36 | `--symlink-install` deploy is not atomic | **Deleted** when deploy becomes atomic |
+| `beast-gamepad` | 45 | no teleop story after the port | **Deleted.** `joy` + `teleop_twist_joy` are upstream and do exactly this |
+| `install-operator-shortcuts.sh` | 47 | same | **Deleted** with it |
+| `beast-wifi-telemetry` | 204 | Wi-Fi drops, no evidence | **Leaves the repo.** This is UniFi forensics; it lives here only because the symptom appeared here |
+| `beast-wifi-watch` | 48 | need deauth/CSA frames between samples | Leaves with it |
+| `beast-link-watch` | 49 | link dies unattended | Leaves with it |
+| `beast-install-systemd-units` | 59 | nothing provisions the machine | **Absorbed into `provision.sh` at P2** |
+| `install-beast-sudoers.sh` | 40 | `beast-ctl` needs a root install | Absorbed at P2 |
+| `beast-slam-save` | 69 | map lifecycle unmanaged; races on `ros2 node list` | Becomes a lifecycle hook on a real node, not a shell script guessing whether SLAM is up |
+| `beast-verify` | 309 | systemd cannot see node health | **P4 retires most of it.** `systemctl is-active` becomes admissible; what remains is a small hardware probe (drive path, pack, i2c) — ~60 *(est.)* |
+| `beast-ctl` | 162 | sudoers cannot express a policy | Shrinks once units are root-run and deploy is not user-driven — ~50 *(est.)* |
+| `beast-pull` | 647 | there is no deploy system | **Re-evaluated at P5, not preserved.** An atomic deploy collapses it to fetch + swap + verify — ~150 *(est.)*. It survives P0–P4 because it works and nothing better exists yet |
+| **Total** | **1,870** | | **~300–400 remaining** *(est.)* |
+
+Alongside it: **17 systemd units → roughly 8**, once the Wi-Fi trio (3 units + 2 timers) leaves
+and the deploy pair collapses. And the vendored workspace, **51,361 lines → a ~30-line `.repos`
+manifest** plus the four carried items named in P3.
+
+Two honesty notes on this table. First, the ~1,500 lines it retires are **load-bearing** lines —
+every one is currently doing a job — which is exactly why this is worth doing and why the
+inert-vendor-package deletion was not. Second, no phase may delete its script before the
+replacement capability is demonstrated on the robot; a fate in this table is a commitment about
+sequence, not permission to remove something early.
+
 ## Watch out for
 
 Traps that will bite a rebuild specifically, each verified this session:
@@ -222,16 +263,21 @@ Traps that will bite a rebuild specifically, each verified this session:
 
 ## Anti-goals
 
+These constrain *how* the cull happens. None of them is a reason to cull less — the kill list
+above is the deliverable, and a phase that ends with the same number of scripts has failed.
+
 - **No big-bang rewrite.** Nav2 autonomously drove 1.9 m and stopped 0.096 m from goal on
-  2026-08-15. Every phase must leave a robot that drives.
-- **No vanity deletion.** The ~28,000 SLOC of never-launched vendor packages (`openslam_gmapping`,
-  `teb_local_planner`, `costmap_converter`, `ugv_voice`, …) are **inert**. `beast-pull` rebuilds
-  only the four always-packages plus what changed, so they are not even a recurring build cost.
-  Removing them is cosmetic and fixes nothing. They may fall out of P3 for free; they are not a
-  goal.
-- **No config-management framework** for one robot.
-- **Do not delete `beast-pull`.** 647 lines, but it works and it is tested. Revisit only after P4.
+  2026-08-15. Every phase must leave a robot that drives, and nothing is deleted before its
+  replacement is demonstrated on hardware. This bounds sequence, not scope.
+- **Do not count inert code as progress.** The ~28,000 SLOC of never-launched vendor packages
+  (`openslam_gmapping`, `teb_local_planner`, `costmap_converter`, `ugv_voice`, …) cost nothing —
+  `beast-pull` rebuilds only the four always-packages plus what changed, so they are not even a
+  recurring build cost. They fall out of P3 for free. Deleting them is not an achievement and must
+  never be reported as one; the ~1,500 load-bearing lines in the kill list are the real measure.
+- **No config-management framework** for one robot. The bug is *undeclared*, not
+  *not-declared-in-Ansible*.
 - **No script #17.** If the answer to a phase is "write another supervisor," the phase is wrong.
+  Every phase must end with fewer moving parts than it started with.
 
 ## Verification
 
