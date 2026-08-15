@@ -155,10 +155,10 @@ describe('Datacore page', () => {
     expect(screen.queryByRole('option', { name: 'High' })).not.toBeInTheDocument();
   });
 
-  it('shows DATACORE OFFLINE banner and hides packs when both lanes are static', () => {
+  it('shows DATACORE OFFLINE banner and hides packs when both lanes are unavailable', () => {
     render(
       <HangarProvider>
-        <DatacoreClient briefings={[]} packs={[]} briefingsSource="static" packsSource="static" />
+        <DatacoreClient briefings={[]} packs={[]} briefingsSource="unavailable" packsSource="unavailable" />
       </HangarProvider>,
     );
 
@@ -168,14 +168,14 @@ describe('Datacore page', () => {
     expect(screen.getByRole('heading', { name: /\d+ insights?/i })).toBeInTheDocument();
   });
 
-  it('static lanes with fixture corpus still render packs under OFFLINE banner', () => {
+  it('unavailable lanes with fixture corpus still render packs under OFFLINE banner', () => {
     render(
       <HangarProvider>
         <DatacoreClient
           briefings={FIXTURE_BRIEFINGS}
           packs={FIXTURE_PACKS}
-          briefingsSource="static"
-          packsSource="static"
+          briefingsSource="unavailable"
+          packsSource="unavailable"
         />
       </HangarProvider>,
     );
@@ -191,7 +191,7 @@ describe('Datacore page', () => {
       <HangarProvider>
         <DatacoreClient
           briefings={[]}
-          briefingsSource="static"
+          briefingsSource="unavailable"
           packs={FIXTURE_PACKS}
           packsSource="postgres"
         />

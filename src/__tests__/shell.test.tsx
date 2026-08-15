@@ -11,7 +11,7 @@ vi.mock('next/navigation', () => ({
 describe('Shell spine fallback status', () => {
   it('shows Postgres spine fallback as a visible warning, not silent fallback', () => {
     render(
-      <HangarProvider initialSpineRead={{ source: 'static', fallbackReason: 'postgres-error' }}>
+      <HangarProvider initialSpineRead={{ source: 'unavailable', fallbackReason: 'postgres-error' }}>
         <Shell>
           <div>Items content</div>
         </Shell>
@@ -22,10 +22,10 @@ describe('Shell spine fallback status', () => {
 
     expect(banner).toHaveTextContent('STATIC SPINE');
     expect(banner).toHaveTextContent(
-      'Hangar Postgres spine read FAILED — serving hangar.ts fixture.',
+      'Hangar Postgres spine read failed. There is no offline inventory.',
     );
     expect(banner).not.toHaveTextContent(/silently/i);
-    expect(screen.getByText(/DATA · STATIC · PG ERR/)).toBeInTheDocument();
+    expect(screen.getByText(/DATA · DOWN · PG ERR/)).toBeInTheDocument();
   });
 
   it('does not show the static-data banner for Postgres-backed reads', () => {

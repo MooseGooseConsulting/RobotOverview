@@ -5,7 +5,7 @@ import type {
   SpecRow,
 } from '@/data/types';
 import { INVENTORY_ITEM_STATUSES, PROVENANCE_KINDS, isSourceRecordKind } from '@/data/types';
-import type { HangarReadStatus } from '@/lib/hangar-read-status';
+import type { HangarFallbackReason, HangarReadStatus } from '@/lib/hangar-read-status';
 import type { Queryable } from './queryable';
 import { readHangarOrUnavailable } from './read-model';
 import {
@@ -47,9 +47,6 @@ type InventoryItemRow = {
   related_insights: string[] | null;
 };
 
-export type InventoryItemsRead =
-  | { source: 'postgres'; items: InventoryItem[] }
-  | { source: 'unavailable'; fallbackReason: NonNullable<HangarReadStatus['fallbackReason']> };
 
 const INVENTORY_ITEMS_SQL = `
   SELECT
@@ -228,6 +225,18 @@ export async function readInventoryItemsFromPostgres(client: Queryable) {
   ]);
   return result.rows.map(mapInventoryItemRow);
 }
+
+export type InventoryItemsRead =
+  | {
+      source: 'postgres';
+      fallbackReason?: undefined;
+      items: InventoryItem[];
+    }
+  | {
+      source: 'unavailable';
+      fallbackReason: HangarFallbackReason;
+      items?: undefined;
+    };
 
 export async function getInventoryItems(): Promise<InventoryItemsRead> {
   const read = await readHangarOrUnavailable({

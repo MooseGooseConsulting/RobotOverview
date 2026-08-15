@@ -17,8 +17,8 @@ describe('hangar read status presentation', () => {
       label: 'PG',
       dotClass: 'bg-signal-ok',
     });
-    expect(HANGAR_READ_SOURCE_META.static).toEqual({
-      label: 'STATIC',
+    expect(HANGAR_READ_SOURCE_META.unavailable).toEqual({
+      label: 'DOWN',
       dotClass: 'bg-amber',
     });
   });
@@ -38,17 +38,17 @@ describe('hangar read status presentation', () => {
   it('has lane-specific fallback copy for every fallback reason', () => {
     expect(Object.keys(HANGAR_READ_LANE_META).sort()).toEqual([...HANGAR_READ_LANES].sort());
     expect(HANGAR_READ_LANE_META.inventory).toEqual({
-      fallbackDetail: 'Serving inventory items from the static hangar.ts spine.',
-      fallbackReasonDetails: {
+      downDetail: 'Inventory Postgres is unreachable. There is no TypeScript catalog.',
+      downReasonDetails: {
         'not-configured':
-          'Inventory Postgres is not configured — items are coming from the hangar.ts spine.',
+          'Inventory Postgres is not configured. There is no TypeScript catalog.',
         'postgres-error':
-          'Inventory Postgres read FAILED — serving items from the hangar.ts spine.',
+          'Inventory Postgres read failed. There is no TypeScript catalog.',
       },
     });
 
     HANGAR_READ_LANES.forEach((lane) => {
-      expect(Object.keys(HANGAR_READ_LANE_META[lane].fallbackReasonDetails).sort()).toEqual(
+      expect(Object.keys(HANGAR_READ_LANE_META[lane].downReasonDetails).sort()).toEqual(
         [...HANGAR_FALLBACK_REASONS].sort(),
       );
     });
@@ -56,24 +56,24 @@ describe('hangar read status presentation', () => {
 
   it('formats compact read labels for the shell status line', () => {
     expect(hangarReadStatusLabel({ source: 'postgres' })).toBe('PG');
-    expect(hangarReadStatusLabel({ source: 'static' })).toBe('STATIC');
-    expect(hangarReadStatusLabel({ source: 'static', fallbackReason: 'not-configured' })).toBe(
-      'STATIC · NOT CFG',
+    expect(hangarReadStatusLabel({ source: 'unavailable' })).toBe('DOWN');
+    expect(hangarReadStatusLabel({ source: 'unavailable', fallbackReason: 'not-configured' })).toBe(
+      'DOWN · NOT CFG',
     );
-    expect(hangarReadStatusLabel({ source: 'static', fallbackReason: 'postgres-error' })).toBe(
-      'STATIC · PG ERR',
+    expect(hangarReadStatusLabel({ source: 'unavailable', fallbackReason: 'postgres-error' })).toBe(
+      'DOWN · PG ERR',
     );
   });
 
   it('returns banner detail for fallback and unknown-static cases', () => {
     expect(hangarFallbackDetail('inventory', 'not-configured')).toBe(
-      'Inventory Postgres is not configured — items are coming from the hangar.ts spine.',
+      'Inventory Postgres is not configured. There is no TypeScript catalog.',
     );
     expect(hangarFallbackDetail('inventory', 'postgres-error')).toBe(
-      'Inventory Postgres read FAILED — serving items from the hangar.ts spine.',
+      'Inventory Postgres read failed. There is no TypeScript catalog.',
     );
     expect(hangarFallbackDetail('inventory')).toBe(
-      'Serving inventory items from the static hangar.ts spine.',
+      'Inventory Postgres is unreachable. There is no TypeScript catalog.',
     );
   });
 });

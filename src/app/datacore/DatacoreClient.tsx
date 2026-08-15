@@ -37,8 +37,8 @@ export function DatacoreClient({ briefings, briefingsSource, packs, packsSource 
   const [q, setQ] = useState('');
   const [bay, setBay] = useState<'all' | string>('all');
   const [conf, setConf] = useState<ConfidenceFilter>('all');
-  const briefingsOffline = briefingsSource === 'static';
-  const packsOffline = packsSource === 'static';
+  const briefingsOffline = briefingsSource === 'unavailable';
+  const packsOffline = packsSource === 'unavailable';
   const offline = briefingsOffline && packsOffline;
   const hasFixtureCorpus = packs.length > 0 || briefings.length > 0;
 

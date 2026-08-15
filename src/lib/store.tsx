@@ -388,7 +388,7 @@ export function HangarProvider({
   };
 
   const value = useMemo<HangarStore>(() => {
-    const inventoryRead = initialSpineRead ?? { source: 'static' as const, fallbackReason: 'not-configured' as const };
+    const inventoryRead = initialSpineRead ?? { source: 'unavailable' as const, fallbackReason: 'not-configured' as const };
     const data = {
       ...spine,
       units,
