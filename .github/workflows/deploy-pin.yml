@@ -140,15 +140,112 @@ jobs:
               buildUrl = context.payload.workflow_run.html_url;
 
               // Re-running an old build must not roll production backwards.
-              // Automatic pins only ever move production to what main is right
-              // now; deliberate historical deploys go through workflow_dispatch.
+              // Automatic pins only ever move production forward; deliberate
+              // historical deploys go through workflow_dispatch.
+              //
+              // "Forward" means different things per surface, and conflating
+              // them stranded the robot for real on 2026-08-14. The naive test
+              // is `sha === main tip`, which is right for hangar (the cluster
+              // serves main) and WRONG for beast, because the robot deploys
+              // from source and only robot paths change what it runs. Combined
+              // with the image workflow's path filter it opens a permanent gap:
+              //
+              //   1. #236 touched beast_power; its image build took 8m55s
+              //      (a real rebuild, not a cache hit).
+              //   2. #238 (.github only) merged inside that window.
+              //   3. #236's pin then skipped as "old" — main had moved.
+              //   4. #238 touches no robot path, so it never triggered a build,
+              //      so it never pinned either.
+              //
+              // The ref stayed at #237 and the SoC fix could NEVER deploy on
+              // its own. Worse, the run reported success: a deploy that
+              // silently delivers nothing is the exact failure mode continuous
+              // deploy exists to remove. Any commit that is slow to build and
+              // is followed by a docs/CI commit reproduces it.
+              //
+              // So ask the question that actually matters to each consumer:
+              // hangar — "is this main's tip?"; beast — "is this still the
+              // newest commit that changes what the ROBOT runs?" A later
+              // non-robot commit is irrelevant to the robot and must not
+              // strand it. A later robot commit still skips: its own build
+              // pins it, and deploying the older one would roll the robot
+              // backwards, which is the case this guard was written for.
               const head = await github.rest.repos.getCommit({ owner, repo, ref: 'main' });
               if (head.data.sha !== sha) {
-                core.notice(
-                  `skipping: build is for ${sha.slice(0, 7)}, but main is now ` +
-                  `${head.data.sha.slice(0, 7)}. Use workflow_dispatch to deploy an older commit.`);
-                core.setOutput('skip', 'true');
-                return;
+                // Mirrors beast-ros-image.yml's `paths:` filter. The two must
+                // agree: a path built there but not counted here re-opens the
+                // gap from the other side. tools/ci/test_deploy_ref_paths.py
+                // asserts they stay in sync.
+                const robotPath = (f) =>
+                  f.startsWith('robot/beast/ros2_ws/') &&
+                  !f.startsWith('robot/beast/ros2_ws/docs/') &&
+                  !f.endsWith('.md');
+                const affectsRobot = (files) =>
+                  files.some((f) => robotPath(f.filename) ||
+                    f.filename === '.github/workflows/beast-ros-image.yml');
+
+                let stranded = false;
+                if (surface === 'beast') {
+                  // ONE call. compareCommits returns an AGGREGATE `files` array
+                  // for the whole base..head range, which is exactly the
+                  // question being asked — "did anything after `sha` touch a
+                  // robot path?" — so there is no need to walk commits and no
+                  // per-commit file list to fetch. Walking them would cost one
+                  // getCommit per intervening commit, worst exactly in the case
+                  // this guard exists to tolerate (main advancing quickly), and
+                  // a rate-limited pin fails closed into the same stranding.
+                  const cmp = await github.rest.repos.compareCommitsWithBasehead({
+                    owner, repo, basehead: `${sha}...${head.data.sha}`,
+                  });
+
+                  // Every uncertain answer below resolves to `stranded = true`,
+                  // i.e. skip. That is the safe direction: skipping leaves the
+                  // robot on known-good code and workflow_dispatch is always
+                  // available, whereas pinning on incomplete evidence puts
+                  // superseded code on a machine that moves.
+                  if (cmp.data.status === 'behind' || cmp.data.status === 'diverged') {
+                    // `sha` is not an ancestor of main — a re-run of a build
+                    // from an abandoned branch. Never deploy that.
+                    core.notice(`refusing: ${sha.slice(0, 7)} is not an ancestor of main (${cmp.data.status}).`);
+                    stranded = true;
+                  } else if ((cmp.data.total_commits || 0) > (cmp.data.commits || []).length) {
+                    // The compare endpoint caps `commits` (250) and `files`
+                    // (300) and does NOT error when it truncates — it just
+                    // returns less. A truncated range cannot prove the absence
+                    // of a newer robot commit, and "absence of evidence" is the
+                    // precise mistake this whole PR is about.
+                    core.notice(
+                      `refusing: ${sha.slice(0, 7)}..main spans ${cmp.data.total_commits} ` +
+                      `commits and the compare response is truncated; cannot prove ` +
+                      `nothing newer touches robot paths.`);
+                    stranded = true;
+                  } else if ((cmp.data.files || []).length >= 300) {
+                    core.notice(
+                      `refusing: compare returned ${cmp.data.files.length} files (at the ` +
+                      `API cap); the file list may be truncated.`);
+                    stranded = true;
+                  } else if (affectsRobot(cmp.data.files || [])) {
+                    core.notice(
+                      `skipping: a newer commit than ${sha.slice(0, 7)} touches robot ` +
+                      `paths; its own build pins it.`);
+                    stranded = true;
+                  } else {
+                    core.info(
+                      `main is ${head.data.sha.slice(0, 7)}, but nothing after ` +
+                      `${sha.slice(0, 7)} touches robot paths — still the newest ` +
+                      `robot state, so pinning it rather than stranding it.`);
+                  }
+                } else {
+                  stranded = true;
+                }
+
+                if (stranded) {
+                  core.notice(
+                    `skipping: build is for ${sha.slice(0, 7)}, but main is now ` +
+                    `${head.data.sha.slice(0, 7)}. Use workflow_dispatch to deploy an older commit.`);
+                  core.setOutput('skip', 'true');
+                  return;
+                }
               }
             }
 

@@ -21,6 +21,11 @@ on:
       - 'robot/beast/ros2_ws/src/ugv_main/beast_power/beast_power/soc.py'
       - '.github/workflows/ci-tools-tests.yml'
       - '.github/workflows/deploy-pin.yml'
+      # test_deploy_ref_paths.py holds beast-ros-image.yml's `paths:`
+      # filter and deploy-pin's robot-path guard to ONE rule. Without
+      # this trigger, a commit editing only those filters would skip the
+      # very test that exists to catch them drifting apart.
+      - '.github/workflows/beast-ros-image.yml'
       - '.github/workflows/cold-review.yml'
       - '.github/actionlint.yaml'
       - '.agents/skills/custom-codereview-guide.md'
@@ -40,6 +45,11 @@ on:
       - 'robot/beast/ros2_ws/src/ugv_main/beast_power/beast_power/soc.py'
       - '.github/workflows/ci-tools-tests.yml'
       - '.github/workflows/deploy-pin.yml'
+      # test_deploy_ref_paths.py holds beast-ros-image.yml's `paths:`
+      # filter and deploy-pin's robot-path guard to ONE rule. Without
+      # this trigger, a commit editing only those filters would skip the
+      # very test that exists to catch them drifting apart.
+      - '.github/workflows/beast-ros-image.yml'
       - '.github/workflows/cold-review.yml'
       - '.github/actionlint.yaml'
       - '.agents/skills/custom-codereview-guide.md'

@@ -13,6 +13,13 @@ on:
       - 'robot/beast/ros2_ws/**'
       - '!robot/beast/ros2_ws/docs/**'
       - '!robot/beast/ros2_ws/**/*.md'
+      # Root-level prose needs its own line. Whether `**` can match an
+      # empty path segment is not worth guessing at: the pattern above
+      # left robot/beast/ros2_ws/README.md matching, while deploy-pin's
+      # guard excluded it — the two filters must agree or the robot
+      # silently stops deploying. tools/ci/test_deploy_ref_paths.py
+      # caught exactly that drift and now holds both to one rule.
+      - '!robot/beast/ros2_ws/*.md'
       - '.github/workflows/beast-ros-image.yml'
   push:
     branches:
@@ -28,6 +35,13 @@ on:
       - 'robot/beast/ros2_ws/**'
       - '!robot/beast/ros2_ws/docs/**'
       - '!robot/beast/ros2_ws/**/*.md'
+      # Root-level prose needs its own line. Whether `**` can match an
+      # empty path segment is not worth guessing at: the pattern above
+      # left robot/beast/ros2_ws/README.md matching, while deploy-pin's
+      # guard excluded it — the two filters must agree or the robot
+      # silently stops deploying. tools/ci/test_deploy_ref_paths.py
+      # caught exactly that drift and now holds both to one rule.
+      - '!robot/beast/ros2_ws/*.md'
       - '.github/workflows/beast-ros-image.yml'
   workflow_dispatch:
 
