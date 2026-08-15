@@ -542,11 +542,12 @@ collision_monitor:
       type: "scan"
       topic: "/scan"
       enabled: True
-    pointcloud:
-      type: "pointcloud"
-      topic: "/oak/points"
-      transport_type: "raw"  # raw or/ with compression (zlib, draco, zstd)
-      min_height: 0.1
-      max_height: 0.5
-      min_range: 0.2
-      enabled: True
+    # Removed oak_d_lite depth streams (Hard Gate 10)
+    # pointcloud:
+    #   type: "pointcloud"
+    #   topic: "/oak/points"
+    #   transport_type: "raw"  # raw or/ with compression (zlib, draco, zstd)
+    #   min_height: 0.1
+    #   max_height: 0.5
+    #   min_range: 0.2
+    #   enabled: True

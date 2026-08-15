@@ -175,6 +175,12 @@ class BeastBaseNode(Node):
         )
         self.add_on_set_parameters_callback(self._on_set_parameters)
 
+        # Software Watchdog
+        self._last_cmd_vel_time = self.get_clock().now()
+        # True if we sent a non-zero velocity recently, preventing unnecessary duplicate zeroes
+        self._is_moving = False 
+        self._watchdog_timer = self.create_timer(0.1, self._watchdog_callback)
+
         # Timer to periodically execute the feedback loop
         self.feedback_thread = threading.Thread(target=self.feedback_loop_thread, daemon=True)
         self.feedback_thread.start()
@@ -357,6 +363,7 @@ class BeastBaseNode(Node):
 
     # Callback for processing velocity commands m/s
     def cmd_vel_callback(self, msg):
+        self._last_cmd_vel_time = self.get_clock().now()
         linear_velocity = msg.linear.x
         angular_velocity = msg.angular.z
 
@@ -369,11 +376,23 @@ class BeastBaseNode(Node):
                         'Rejected non-zero cmd_vel while allow_motion is false'
                     )
                 self.send_stop_command()
+                self._is_moving = False
             return
+
+        self._is_moving = (linear_velocity != 0.0 or angular_velocity != 0.0)
 
         # Send the velocity data to the UGV as a JSON string
         data = json.dumps({'T': '13', 'X': linear_velocity, 'Z': angular_velocity}) + "\n"
         self.base_controller.send_command(data.encode())
+
+    def _watchdog_callback(self):
+        if not self._is_moving:
+            return
+        elapsed = self.get_clock().now() - self._last_cmd_vel_time
+        if elapsed.nanoseconds > 500_000_000:
+            self.get_logger().warning('Watchdog timeout: no cmd_vel received for 500ms, stopping robot')
+            self.send_stop_command()
+            self._is_moving = False
 
     def send_stop_command(self):
         data = json.dumps({'T': '13', 'X': 0.0, 'Z': 0.0}) + "\n"

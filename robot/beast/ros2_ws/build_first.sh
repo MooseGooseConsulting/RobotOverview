@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-WS=/home/ws/ugv_ws
+WS=/home/beast/beast/RobotOverview/robot/beast/ros2_ws
 BASHRC=~/.bashrc
 
 add_if_not_exist () {
@@ -205,7 +205,7 @@ colcon build \
     gz_ros2_control \
     openslam_gmapping slam_gmapping \
     ldlidar rf2o_laser_odometry \
-    robot_pose_publisher \
+
     teb_msgs teb_local_planner \
     ugv_msgs \
   --symlink-install \
@@ -217,7 +217,6 @@ colcon build \
 # It was missing from this list until 2026-08-14.
 colcon build \
   --packages-select \
-    ugv_bringup ugv_cockpit ugv_chat_ai ugv_description ugv_gazebo \
     beast_power beast_base ugv_nav ugv_slam ugv_tools ugv_vision ugv_voice \
   --symlink-install \
   --executor sequential

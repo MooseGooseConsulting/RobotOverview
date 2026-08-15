@@ -89,7 +89,12 @@ def launch_setup(context, *args, **kwargs):
             'rviz_config': rviz_config,
             'allow_motion': LaunchConfiguration('allow_motion'),
         }.items(),
-        condition=UnlessCondition(use_sim_time)   
+        condition=IfCondition(
+            launch.substitutions.PythonExpression([
+                "'", LaunchConfiguration('use_sim_time'), "' == 'false' and ",
+                "'", LaunchConfiguration('start_base'), "' == 'true'"
+            ])
+        )
     )
 
     bringup_gazebo_launch = IncludeLaunchDescription(PythonLaunchDescriptionSource(
@@ -159,6 +164,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time',default_value='false',description='Use simulation/Gazebo clock'),
+        DeclareLaunchArgument('start_base', default_value='false', description='Launch bringup_lidar. Set to false if beast-ros-base is running.'),
         DeclareLaunchArgument('use_slam',default_value='false',description='Whether run a SLAM'),
         DeclareLaunchArgument('use_rviz', default_value='false',description='Whether to launch RViz2'),
         DeclareLaunchArgument(

@@ -129,7 +129,7 @@ TOPICS_SUB_GLOB = (
 # Bracketed, single-entry, never "" — an empty STRING parses to None, which
 # rosbridge reads as allow-all.
 SERVICES_GLOB = '[/ugv/set_allow_motion]'
-ACTIONS_GLOB = '[]'
+ACTIONS_GLOB = '[/drive_on_heading, /spin, /backup, /navigate_to_pose]'
 
 
 def generate_launch_description():

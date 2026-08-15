@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-WS=/home/ws/ugv_ws
+WS=/home/beast/beast/RobotOverview/robot/beast/ros2_ws
 cd $WS || exit 1
 
 # Parked 2026-08-14 — these carry a COLCON_IGNORE and must NOT be listed here;
@@ -10,8 +10,6 @@ cd $WS || exit 1
 #     — the vizanti launch files opened an unauthenticated rosbridge on
 #       0.0.0.0:5001; neutralized 2026-08-07, not run since.
 #   ugv_web_app  — superseded by the Hangar cockpit (ugv_cockpit).
-#   explore_lite — standalone frontier-exploration workflow (docs/navigation.md);
-#                  no service we run launches it.
 #   emcl2        — alternative localizer. ugv_nav instantiates it only under
 #                  use_localization:=emcl (localization_launch.py), a mode we
 #                  do not use; that arg will fail while this is parked.
@@ -31,7 +29,7 @@ PACKAGES=(
   slam_gmapping
   ldlidar
   rf2o_laser_odometry
-  robot_pose_publisher
+
   teb_msgs
   teb_local_planner
   ugv_msgs
@@ -43,7 +41,6 @@ PACKAGES=(
   beast_base
   ugv_bringup
   ugv_cockpit
-  ugv_chat_ai
   ugv_description
   ugv_gazebo
   ugv_nav

@@ -49,6 +49,12 @@ export type BackUpInput = {
   speed?: number;
 };
 
+export type NavigateToPoseInput = {
+  x: number;
+  y: number;
+  yaw: number;
+};
+
 /**
  * Transport-agnostic robot face used by agent tools.
  * Production wires this to the roslib singleton; tests inject mocks.
@@ -59,6 +65,7 @@ export interface BeastRobotBridge {
   driveOnHeading(input: DriveOnHeadingInput): Promise<MotionToolResult>;
   spin(input: SpinInput): Promise<MotionToolResult>;
   backUp(input: BackUpInput): Promise<MotionToolResult>;
+  navigateToPose(input: NavigateToPoseInput): Promise<MotionToolResult>;
   stop(): Promise<MotionToolResult>;
 }
 

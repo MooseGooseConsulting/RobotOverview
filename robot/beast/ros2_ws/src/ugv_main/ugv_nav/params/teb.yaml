@@ -159,8 +159,8 @@ controller_server:
       angular_dist_threshold: 0.3
       forward_sampling_distance: 0.5
       rotate_to_goal_heading: True
-      rotate_to_heading_angular_vel: 0.8
-      max_angular_accel: 3.2
+      rotate_to_heading_angular_vel: 0.5
+      max_angular_accel: 0.5
       simulate_ahead_time: 2.5
       primary_controller: "teb_local_planner::TebLocalPlannerROS"
       footprint_model.type: circular
@@ -181,7 +181,7 @@ controller_server:
       max_vel_x: 0.26
       max_vel_theta: 0.5
       acc_lim_x: 0.5
-      acc_lim_theta: 3.2
+      acc_lim_theta: 0.5
 
 local_costmap:
   local_costmap:
@@ -457,11 +457,12 @@ collision_monitor:
       type: "scan"
       topic: "/scan"
       enabled: True
-    pointcloud:
-      type: "pointcloud"
-      topic: "/oak/points"
-      transport_type: "raw"  # raw or/ with compression (zlib, draco, zstd)
-      min_height: 0.1
-      max_height: 0.5
-      min_range: 0.2
-      enabled: True
+    # Removed oak_d_lite depth streams (Hard Gate 10)
+    # pointcloud:
+    #   type: "pointcloud"
+    #   topic: "/oak/points"
+    #   transport_type: "raw"  # raw or/ with compression (zlib, draco, zstd)
+    #   min_height: 0.1
+    #   max_height: 0.5
+    #   min_range: 0.2
+    #   enabled: True

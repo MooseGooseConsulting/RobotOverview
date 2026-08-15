@@ -1251,6 +1251,7 @@ export const rosClient = {
         if (w * h > MAP_MAX_CELLS) {
           if (!mapDropped) {
             mapDropped = true;
+            console.warn(`[ROS Client] occupancy grid ${w}×${h} exceeds ${MAP_MAX_CELLS} cells; unsubscribed /map`);
             this.unsubscribeTopic('/map');
             recordBridgeFault(
               'warning',
