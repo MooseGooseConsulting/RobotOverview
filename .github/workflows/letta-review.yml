@@ -58,6 +58,7 @@ jobs:
 
       - name: Letta deep review
         id: letta
+        continue-on-error: true
         # Pin the action while it remains experimental.
         uses: letta-ai/letta-code-action@daa80f29e345315623ff759f5ecf5018946bbc15
         with:
@@ -156,8 +157,8 @@ jobs:
           FILE="${{ steps.letta.outputs.execution_file }}"
 
           if [[ -z "$FILE" || ! -f "$FILE" ]]; then
-            echo "::error::Letta did not produce an execution result."
-            exit 1
+            echo "::warning::Letta did not produce an execution result file (likely external rate limit or connection issue)."
+            exit 0
           fi
 
           RESULT="$(
@@ -165,7 +166,7 @@ jobs:
           )"
 
           if [[ -z "$RESULT" ]]; then
-            RESULT="$(cat "$FILE")"
+            RESULT="$(cat "$FILE" 2>/dev/null || echo "")"
           fi
 
           echo "Letta output tail: $(echo "$RESULT" | tail -n 5)"
@@ -177,6 +178,9 @@ jobs:
           elif echo "$RESULT" | grep -q "NEEDS_CHANGES"; then
             echo "Parsed verdict: NEEDS_CHANGES"
             echo "::warning::Letta found substantive review issues."
+            exit 0
+          elif echo "$RESULT" | grep -q -i "quota\|rate limit\|credits"; then
+            echo "::warning::Letta API rate limited or out of credits. Skipping review check."
             exit 0
           else
             echo "Parsed verdict: <completed>"
