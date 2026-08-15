@@ -167,6 +167,23 @@ def test_estop_lock_is_republished_not_published_once(source: str) -> None:
     )
 
 
+def test_held_lock_publisher_is_itself_bounded(source: str) -> None:
+    """The explicit kill is the thing that might not happen. Missions run under
+    `setsid`, so a SIGKILL between starting the 2 Hz lock publisher and killing
+    it leaves that publisher reparented and alive — holding the estop lock
+    engaged forever, masking every source for every future session. The next
+    operator finds a robot that arms, accepts commands, reports no error and
+    does not move."""
+    stop = source[source.index("stop_everything()") :]
+    engage = stop[: stop.index("zero tail")]
+    launch = [ln for ln in engage.splitlines() if "cmd_vel_estop_lock" in ln]
+    assert launch, "no estop lock publisher found in the stop sequence"
+    assert any("timeout" in ln for ln in launch), (
+        "the backgrounded estop lock publisher must be bounded by `timeout`, or "
+        "a SIGKILLed mission orphans it and wedges the lock permanently"
+    )
+
+
 def test_lock_is_released_so_it_cannot_wedge_the_next_session(source: str) -> None:
     """A lock left engaged silently blocks the NEXT mission, and an operator
     debugging that has no way to see why."""

@@ -96,7 +96,17 @@ stop_everything() {
   say "STOP: engaging three-layer stop (exit rc=$rc)"
 
   # Layer 1 — mask every source at the mux, held at 2 Hz for the duration.
-  ros2 topic pub -r 2 /cmd_vel_estop_lock std_msgs/msg/Bool '{data: true}' \
+  #
+  # Bounded by `timeout` even though it is killed explicitly below, because the
+  # explicit kill is the thing that might not happen. Missions run under
+  # `setsid`, so if this shell is SIGKILLed between here and that kill, the
+  # publisher is reparented and survives — holding the estop lock engaged
+  # forever and silently masking EVERY source for every future session. The
+  # next operator would find a robot that arms, accepts commands, reports no
+  # error and does not move: the exact ambiguity the pre-arm lock clear at the
+  # bottom of this file exists to prevent, made permanent. 30 s comfortably
+  # outlasts the ~16 s worst case below.
+  timeout 30 ros2 topic pub -r 2 /cmd_vel_estop_lock std_msgs/msg/Bool '{data: true}' \
     >>"$LOG" 2>&1 &
   ESTOP_PID=$!
 
