@@ -77,6 +77,19 @@ def test_mission_name_rejects_injection(name: str) -> None:
 
 
 @needs_bash
+@pytest.mark.parametrize("bound", ["0", "00", "000"])
+def test_zero_bound_is_refused(bound: str) -> None:
+    """`timeout 0 CMD` means NO time limit in GNU coreutils, not "expire
+    immediately". A zero bound sails through a digits-only check and produces
+    exactly what this script exists to make impossible: an unbounded, moving
+    robot. Verified against the real `timeout`: `timeout 0 sleep 2` runs to
+    completion."""
+    result = run("probe", bound, "true")
+    assert result.returncode == 2, f"bound {bound!r} was accepted"
+    assert "positive integer" in (result.stdout + result.stderr)
+
+
+@needs_bash
 @pytest.mark.parametrize("bound", ["-5", "abc", "1.5", "", "10s", "0x10"])
 def test_max_seconds_must_be_a_positive_integer(bound: str) -> None:
     """`timeout` is the only thing bounding a moving robot. Garbage in it is
@@ -189,6 +202,36 @@ def test_arm_failure_does_not_run_the_body(source: str) -> None:
     unknown gate state."""
     assert re.search(r"ARM FAILED.*\n.*exit 1|\|\| \{ say \"ARM FAILED\"; exit 1; \}", source), (
         "a failed arm must exit before the mission body runs"
+    )
+
+
+def test_the_stop_runs_once_per_mission(source: str) -> None:
+    """A signalled shell runs the SIGNAL trap and then the EXIT trap, so a
+    handler registered for INT, TERM and EXIT fires twice on every Ctrl-C or
+    systemd stop. The second pass re-engages the estop lock after the first
+    released it, which makes a clean stop unreadable in the log."""
+    stop = source[source.index("stop_everything()") :]
+    guard = stop[: stop.index("STOP: engaging")] if "STOP: engaging" in stop else stop
+    assert "STOP_DONE" in guard, (
+        "the stop handler needs an idempotence guard, or INT/TERM plus EXIT run "
+        "the whole sequence twice"
+    )
+
+
+def test_script_is_executable_in_git() -> None:
+    """The robot runs this straight from the deployed checkout, like
+    beast-slam-save. A 100644 blob is a mission that dies on `Permission
+    denied` — and the fallback an operator reaches for is the unsupervised
+    foreground publisher this script exists to replace."""
+    mode = subprocess.run(
+        ["git", "ls-files", "-s", "--", str(SCRIPT.relative_to(REPO).as_posix())],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    ).stdout.split()
+    assert mode and mode[0] == "100755", (
+        f"beast-mission must be committed executable, got {mode[0] if mode else 'nothing'}"
     )
 
 

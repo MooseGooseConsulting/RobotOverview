@@ -50,7 +50,13 @@ LOGDIR=/data/beast/missions
 NAME=$1; shift
 MAXSEC=$1; shift
 case $NAME in *[!A-Za-z0-9._-]*) echo "mission name has illegal characters" >&2; exit 2 ;; esac
+# Zero is rejected explicitly, not as pedantry: `timeout 0 CMD` means NO time
+# limit in GNU coreutils, not "expire immediately". A bound of 0 would sail
+# through a digits-only check and produce exactly the thing this script exists
+# to make impossible — an unbounded, moving robot.
 case $MAXSEC in ''|*[!0-9]*) echo "max_seconds must be a positive integer" >&2; exit 2 ;; esac
+# Digits-only is not enough; the arithmetic test is what rejects 0, 00, 000.
+[ "$MAXSEC" -gt 0 ] || { echo "max_seconds must be a positive integer (0 disables the timeout)" >&2; exit 2; }
 
 # set +u: ament's setup scripts read unset variables and would abort under -u.
 set +u
@@ -66,10 +72,27 @@ say() { printf '[%s] %s\n' "$(date -u +%H:%M:%SZ)" "$*" | tee -a "$LOG"; }
 
 ESTOP_PID=""
 
+STOP_DONE=""
+
 stop_everything() {
   rc=$?
   # Never let a failure inside the stop sequence skip the rest of it.
   set +e
+
+  # One stop per mission. The handler is registered for INT and TERM as well as
+  # EXIT, and a signalled shell runs the signal trap AND THEN the EXIT trap — so
+  # without this the whole sequence runs twice on every Ctrl-C or systemd stop.
+  # Running it twice is not dangerous (each layer is idempotent and the second
+  # pass still ends disarmed), but it doubles the shutdown latency, starts a
+  # second 2 Hz lock publisher, and re-engages the estop lock AFTER the first
+  # pass released it — so anyone reading the log sees the lock cycle twice and
+  # cannot tell a clean stop from a confused one. Clarity in the stop path is
+  # worth more than the two lines it costs.
+  if [ -n "$STOP_DONE" ]; then
+    say "STOP: already completed; ignoring duplicate trap"
+    return
+  fi
+  STOP_DONE=1
   say "STOP: engaging three-layer stop (exit rc=$rc)"
 
   # Layer 1 — mask every source at the mux, held at 2 Hz for the duration.
