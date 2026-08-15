@@ -69,6 +69,8 @@ jobs:
 
           model: auto
 
+          create_new_conversation: "true"
+          show_full_output: "true"
           track_progress: ""
           tracking_comment: "false"
 
