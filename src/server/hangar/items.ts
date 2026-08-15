@@ -1,4 +1,4 @@
-import { HANGAR_BAY_IDS, hangarData } from '@/data/hangar';
+import { HANGAR_BAY_IDS } from '@/data/hangar';
 import type {
   InventoryItem,
   SourceRecord,
@@ -7,7 +7,7 @@ import type {
 import { INVENTORY_ITEM_STATUSES, PROVENANCE_KINDS, isSourceRecordKind } from '@/data/types';
 import type { HangarReadStatus } from '@/lib/hangar-read-status';
 import type { Queryable } from './queryable';
-import { readWithStaticFallback } from './read-model';
+import { readHangarOrUnavailable } from './read-model';
 import {
   enumValue,
   isTrimmedHttpUrl,
@@ -47,9 +47,9 @@ type InventoryItemRow = {
   related_insights: string[] | null;
 };
 
-export type InventoryItemsRead = HangarReadStatus & {
-  items: InventoryItem[];
-};
+export type InventoryItemsRead =
+  | { source: 'postgres'; items: InventoryItem[] }
+  | { source: 'unavailable'; fallbackReason: NonNullable<HangarReadStatus['fallbackReason']> };
 
 const INVENTORY_ITEMS_SQL = `
   SELECT
@@ -230,9 +230,8 @@ export async function readInventoryItemsFromPostgres(client: Queryable) {
 }
 
 export async function getInventoryItems(): Promise<InventoryItemsRead> {
-  const read = await readWithStaticFallback({
+  const read = await readHangarOrUnavailable({
     label: 'inventory items',
-    staticData: hangarData.items,
     readFromPostgres: readInventoryItemsFromPostgres,
   });
 
@@ -244,8 +243,7 @@ export async function getInventoryItems(): Promise<InventoryItemsRead> {
   }
 
   return {
-    source: 'static',
+    source: 'unavailable',
     fallbackReason: read.fallbackReason,
-    items: read.data,
   };
 }
