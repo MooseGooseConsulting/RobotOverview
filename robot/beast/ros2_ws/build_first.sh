@@ -204,10 +204,9 @@ colcon build \
     costmap_converter_msgs costmap_converter \
     gz_ros2_control \
     openslam_gmapping slam_gmapping \
-    ldlidar rf2o_laser_odometry \
-
+    ldlidar rf2o_laser_odometry robot_pose_publisher explore_lite \
     teb_msgs teb_local_planner \
-    ugv_msgs \
+    ugv_msgs ugv_bringup ugv_cockpit ugv_description ugv_gazebo \\
   --symlink-install \
   --executor sequential
 
