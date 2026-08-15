@@ -36,6 +36,10 @@ jobs:
           # Do NOT persist the write-scoped github.token into the working tree.
           persist-credentials: false
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Pre-install Bun
         run: |
           mkdir -p "$RUNNER_TEMP/bun/bin"
