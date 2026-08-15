@@ -108,9 +108,10 @@ All five, and none of them is a line count:
 ## Phases
 
 Ordered so that **everything that only records** precedes **everything that changes**. The
-recording phases are zero-risk, and they are the safety net for the rest. They are also urgent
-in a way the others are not: that knowledge is one dead NVMe away from being gone, and it decays
-out of context fast.
+recording phases are cheap and cannot break anything, and they are the safety net for the rest —
+that is the whole justification for putting them first. There is no deadline on them. The mild
+structural point is that the state they capture currently has one copy, on a machine with no
+backup; that is a single point of failure, not a prediction that anything is about to fail.
 
 ### P0 — Capture, change nothing *(zero risk; do first)*
 
