@@ -127,7 +127,8 @@ function repairNonFiniteTokens(raw: string): string {
   return out;
 }
 
-/** Server-side rosbridge singleton. Connects only when a URL is configured; */
+/**
+ * Server-side rosbridge singleton. Connects only when a URL is configured;
  * reconnects after drop; exposes BeastRobotBridge for agent tools.
  */
 export class BeastRosClient implements BeastRobotBridge {
