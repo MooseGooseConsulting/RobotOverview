@@ -37,7 +37,24 @@ set -euo pipefail
 #   hold      start stop ONLY - no restart. For units whose death must be
 #             noticed by a human rather than papered over.
 #   lifecycle enable disable (with or without --now)
-#   mask      mask unmask
+#
+# There is deliberately NO `mask` class. It was here until 2026-08-15, granted
+# to all four timers, and it could never have worked for any of them: systemd
+# implements masking by symlinking the unit name to /dev/null in
+# /etc/systemd/system, and beast-install-systemd-units installs every beast
+# unit as a real file in exactly that directory. `mask` therefore fails with
+# "File /etc/systemd/system/beast-pull.timer already exists" every time —
+# discovered when reaching for it to hold off a deploy during a live driving
+# session.
+#
+# A policy table's whole value is that it is an honest inventory of what is
+# possible, so a capability that cannot work is worse than no entry at all:
+# it reads as available and fails at the moment someone needs it. `stop`
+# (this run, immediately) and `disable` (across reboots) are the real
+# controls and both work today. If masking is ever genuinely wanted, the fix
+# is to install units to /usr/local/lib/systemd/system instead, which leaves
+# /etc/systemd/system free for the mask symlink — a deliberate change to the
+# installer, not a line added back here.
 #
 # beast-nav is `hold` and deliberately has NO lifecycle: the unit ships without
 # an [Install] section and the never-enable contract (owner-supervised nav
@@ -50,14 +67,14 @@ beast-cockpit-serve|run,lifecycle
 beast-slam|run,lifecycle
 beast-nav|hold
 beast-pull|run
-beast-pull.timer|run,lifecycle,mask
+beast-pull.timer|run,lifecycle
 beast-wifi-telemetry|run,lifecycle
-beast-wifi-telemetry.timer|run,lifecycle,mask
+beast-wifi-telemetry.timer|run,lifecycle
 beast-wifi-watch|run,lifecycle
 beast-link-watch|run,lifecycle
-beast-link-watch.timer|run,lifecycle,mask
+beast-link-watch.timer|run,lifecycle
 beast-storage-maintenance|run,lifecycle
-beast-storage-maintenance.timer|run,lifecycle,mask
+beast-storage-maintenance.timer|run,lifecycle
 beast-storage-prepare|run,lifecycle
 beast-blackbox-record|run,lifecycle
 beast-mission-record@|run
@@ -67,7 +84,6 @@ VERBS_READ="status is-active is-enabled is-failed show cat list-timers list-unit
 VERBS_RUN="start stop restart try-restart reload-or-restart"
 VERBS_HOLD="start stop"
 VERBS_LIFECYCLE="enable disable"
-VERBS_MASK="mask unmask"
 
 die() { printf 'beast-ctl: %s\n' "$1" >&2; exit 2; }
 in_list() { case " $2 " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
@@ -124,9 +140,6 @@ case ,$classes, in
 esac
 case ,$classes, in
   *,lifecycle,*) allowed="$allowed $VERBS_LIFECYCLE" ;;
-esac
-case ,$classes, in
-  *,mask,*)      allowed="$allowed $VERBS_MASK" ;;
 esac
 
 in_list "$verb" "$allowed" \
