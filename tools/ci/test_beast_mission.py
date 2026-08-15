@@ -18,6 +18,7 @@ are asserted structurally.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -28,8 +29,18 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "robot/beast/ros2_ws/deploy/bin/beast-mission"
 
-BASH = shutil.which("bash")
-needs_bash = pytest.mark.skipif(BASH is None, reason="bash not available")
+def _find_bash() -> str | None:
+    if os.name == "nt":
+        git_bash = r"C:\Program Files\Git\bin\bash.exe"
+        if Path(git_bash).exists():
+            return git_bash
+    return shutil.which("bash")
+
+
+BASH = _find_bash()
+needs_bash = pytest.mark.skipif(
+    BASH is None or not Path(BASH).exists(), reason="bash not available"
+)
 
 
 @pytest.fixture(scope="module")
@@ -39,7 +50,7 @@ def source() -> str:
 
 def run(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [BASH, str(SCRIPT), *args], capture_output=True, text=True, timeout=30
+        [BASH, SCRIPT.as_posix(), *args], capture_output=True, text=True, timeout=30
     )
 
 

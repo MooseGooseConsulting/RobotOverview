@@ -36,27 +36,25 @@ jobs:
           # Do NOT persist the write-scoped github.token into the working tree.
           persist-credentials: false
 
-      - name: Pre-install Bun in tool cache
+      - name: Pre-install Bun
         run: |
-          TOOL_CACHE="${RUNNER_TOOL_CACHE:-$HOME/_work/_tool}"
-          BUN_CACHE_DIR="$TOOL_CACHE/bun/1.2.11/x64"
-          mkdir -p "$BUN_CACHE_DIR"
-          if [ ! -f "$BUN_CACHE_DIR/bun" ]; then
+          mkdir -p "$RUNNER_TEMP/bun/bin"
+          if [ ! -f "$RUNNER_TEMP/bun/bin/bun" ]; then
             BUN_URL="https://github.com/oven-sh/bun/releases/download/bun-v1.2.11/bun-linux-x64.zip"
             curl -fsSL "$BUN_URL" -o /tmp/bun.zip
             unzip -q -o /tmp/bun.zip -d /tmp
-            mv -f /tmp/bun-linux-x64/bun "$BUN_CACHE_DIR/bun"
-            chmod +x "$BUN_CACHE_DIR/bun"
-            touch "$TOOL_CACHE/bun/1.2.11/x64.complete"
+            mv -f /tmp/bun-linux-x64/bun "$RUNNER_TEMP/bun/bin/bun"
+            chmod +x "$RUNNER_TEMP/bun/bin/bun"
             rm -rf /tmp/bun.zip /tmp/bun-linux-x64
           fi
-          echo "$BUN_CACHE_DIR" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/bun/bin" >> "$GITHUB_PATH"
 
       - name: Letta deep review
         id: letta
         # Pin the action while it remains experimental.
         uses: letta-ai/letta-code-action@daa80f29e345315623ff759f5ecf5018946bbc15
         with:
+          path_to_bun_executable: ${{ runner.temp }}/bun/bin/bun
           letta_api_key: ${{ secrets.LETTA_API_KEY }}
           github_token: ${{ github.token }}
           agent_id: agent-20812d4a-e8e4-49f2-bb4b-e482fabaf6e6
