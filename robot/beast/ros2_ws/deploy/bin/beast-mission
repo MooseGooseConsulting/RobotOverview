@@ -1,0 +1,155 @@
+#!/bin/bash
+# beast-mission - run one bounded motion mission with a guaranteed stop.
+#
+# WHY THIS EXISTS
+# ---------------
+# Nothing in this stack stops the robot when a command source goes quiet.
+# ugv_cockpit/config/twist_mux.yaml says it plainly: twist_mux arbitration
+# only decides WHOSE command gets through, the cmd_vel silence watchdog was
+# removed by owner decision D8 on 2026-08-07, and the ESP32 keeps executing
+# its last velocity indefinitely. "The publisher stopped publishing" is not
+# a stop — it is a runaway with a quiet console.
+#
+# That makes the shape of any motion session non-negotiable: the thing that
+# started the motion must also, on EVERY exit path, actively command a stop.
+# A foreground `ros2 topic pub` over SSH fails this — drop the Wi-Fi and the
+# publisher dies mid-command with the robot still driving. So missions run
+# detached (setsid) on the robot, bounded by `timeout`, and the stop lives in
+# an EXIT trap that fires on success, failure, SIGTERM and SIGINT alike.
+#
+# THE STOP IS THREE INDEPENDENT LAYERS, deliberately redundant
+# ------------------------------------------------------------
+#   1. estop lock  -> /cmd_vel_estop_lock (Bool true, priority 255) masks
+#      every Twist source at the mux, including nav's cmd_vel_nav (10).
+#      Republished at 2 Hz for the whole stop: twist_mux subscribes VOLATILE,
+#      so a single --once publish can lose the discovery race, and the lock
+#      does not survive a twist_mux restart. That contract is written down in
+#      twist_mux.yaml; this honours it rather than re-learning it.
+#   2. zero tail   -> /cmd_vel_ui (priority 50) outranks cmd_vel_nav (10), so
+#      an explicit zero Twist reaches the ESP32 even while Nav2 is still
+#      shouting. Layer 1 masks the source; layer 2 overwrites the last value.
+#   3. allow_motion -> /ugv/set_allow_motion false makes beast_base send its
+#      own explicit T:13 0,0 to the ESP32. This is the authoritative stop:
+#      it does not depend on the mux, on QoS matching, or on anything above.
+#
+# Any one layer alone has a failure mode the other two cover. Run all three,
+# in that order, every time.
+#
+# Usage:
+#   beast-mission <name> <max_seconds> <command...>
+#
+# The command runs with ROS sourced and ARMED. When it returns — or the
+# timeout fires, or someone kills the mission — the stop sequence runs.
+# Logs land in /data/beast/missions/<name>-<stamp>.log.
+set -uo pipefail
+
+WS=/home/beast/beast/RobotOverview/robot/beast/ros2_ws
+LOGDIR=/data/beast/missions
+
+[ $# -ge 3 ] || { echo "usage: beast-mission <name> <max_seconds> <command...>" >&2; exit 2; }
+NAME=$1; shift
+MAXSEC=$1; shift
+case $NAME in *[!A-Za-z0-9._-]*) echo "mission name has illegal characters" >&2; exit 2 ;; esac
+# Zero is rejected explicitly, not as pedantry: `timeout 0 CMD` means NO time
+# limit in GNU coreutils, not "expire immediately". A bound of 0 would sail
+# through a digits-only check and produce exactly the thing this script exists
+# to make impossible — an unbounded, moving robot.
+case $MAXSEC in ''|*[!0-9]*) echo "max_seconds must be a positive integer" >&2; exit 2 ;; esac
+# Digits-only is not enough; the arithmetic test is what rejects 0, 00, 000.
+[ "$MAXSEC" -gt 0 ] || { echo "max_seconds must be a positive integer (0 disables the timeout)" >&2; exit 2; }
+
+# set +u: ament's setup scripts read unset variables and would abort under -u.
+set +u
+source /opt/ros/humble/setup.bash
+source "$WS/install/setup.bash"
+set -u
+
+mkdir -p "$LOGDIR"
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+LOG="$LOGDIR/$NAME-$STAMP.log"
+
+say() { printf '[%s] %s\n' "$(date -u +%H:%M:%SZ)" "$*" | tee -a "$LOG"; }
+
+ESTOP_PID=""
+
+STOP_DONE=""
+
+stop_everything() {
+  rc=$?
+  # Never let a failure inside the stop sequence skip the rest of it.
+  set +e
+
+  # One stop per mission. The handler is registered for INT and TERM as well as
+  # EXIT, and a signalled shell runs the signal trap AND THEN the EXIT trap — so
+  # without this the whole sequence runs twice on every Ctrl-C or systemd stop.
+  # Running it twice is not dangerous (each layer is idempotent and the second
+  # pass still ends disarmed), but it doubles the shutdown latency, starts a
+  # second 2 Hz lock publisher, and re-engages the estop lock AFTER the first
+  # pass released it — so anyone reading the log sees the lock cycle twice and
+  # cannot tell a clean stop from a confused one. Clarity in the stop path is
+  # worth more than the two lines it costs.
+  if [ -n "$STOP_DONE" ]; then
+    say "STOP: already completed; ignoring duplicate trap"
+    return
+  fi
+  STOP_DONE=1
+  say "STOP: engaging three-layer stop (exit rc=$rc)"
+
+  # Layer 1 — mask every source at the mux, held at 2 Hz for the duration.
+  #
+  # Bounded by `timeout` even though it is killed explicitly below, because the
+  # explicit kill is the thing that might not happen. Missions run under
+  # `setsid`, so if this shell is SIGKILLed between here and that kill, the
+  # publisher is reparented and survives — holding the estop lock engaged
+  # forever and silently masking EVERY source for every future session. The
+  # next operator would find a robot that arms, accepts commands, reports no
+  # error and does not move: the exact ambiguity the pre-arm lock clear at the
+  # bottom of this file exists to prevent, made permanent. 30 s comfortably
+  # outlasts the ~16 s worst case below.
+  timeout 30 ros2 topic pub -r 2 /cmd_vel_estop_lock std_msgs/msg/Bool '{data: true}' \
+    >>"$LOG" 2>&1 &
+  ESTOP_PID=$!
+
+  # Layer 2 — explicit zero from a rung above nav, repeated: one message can
+  # be lost to discovery, and twist_mux only forwards on receipt.
+  timeout 4 ros2 topic pub -r 10 --times 20 /cmd_vel_ui geometry_msgs/msg/Twist \
+    '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}' \
+    >>"$LOG" 2>&1
+  say "STOP: zero tail sent on /cmd_vel_ui"
+
+  # Layer 3 — the authoritative one. beast_base emits T:13 0,0 on the false
+  # edge, independent of the mux entirely.
+  timeout 10 ros2 service call /ugv/set_allow_motion std_srvs/srv/SetBool \
+    '{data: false}' >>"$LOG" 2>&1
+  say "STOP: allow_motion set false (T:13 0,0 issued by beast_base)"
+
+  # Hold the lock a moment past the disarm so nothing races in behind it,
+  # then release it — a lock left engaged would silently block the NEXT
+  # session, and an operator debugging that has no way to see why.
+  sleep 2
+  [ -n "$ESTOP_PID" ] && kill "$ESTOP_PID" 2>/dev/null
+  wait "$ESTOP_PID" 2>/dev/null
+  timeout 6 ros2 topic pub -r 5 --times 10 /cmd_vel_estop_lock std_msgs/msg/Bool \
+    '{data: false}' >>"$LOG" 2>&1
+  say "STOP: estop lock released; robot is disarmed and stationary"
+  say "MISSION $NAME finished rc=$rc  log=$LOG"
+}
+trap stop_everything EXIT INT TERM
+
+say "MISSION $NAME starting (max ${MAXSEC}s)"
+say "cmd: $*"
+
+# Clear any lock left engaged by a previous session before arming, or the
+# mission drives into a mux that is masking it and looks mysteriously dead.
+timeout 6 ros2 topic pub -r 5 --times 10 /cmd_vel_estop_lock std_msgs/msg/Bool \
+  '{data: false}' >>"$LOG" 2>&1
+
+timeout 10 ros2 service call /ugv/set_allow_motion std_srvs/srv/SetBool \
+  '{data: true}' >>"$LOG" 2>&1 || { say "ARM FAILED"; exit 1; }
+say "ARMED"
+
+timeout --signal=TERM --kill-after=10 "$MAXSEC" "$@" >>"$LOG" 2>&1
+rc=$?
+[ "$rc" -eq 124 ] && say "mission hit its ${MAXSEC}s bound and was stopped"
+say "mission body returned rc=$rc"
+exit "$rc"

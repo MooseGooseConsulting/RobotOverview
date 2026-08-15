@@ -273,6 +273,59 @@ deliberate operator decision as enabling `beast-cockpit`).
 
 `beast-ros-base` must be active (`allow_motion` true). ESP32 **latches** last velocity — **center the sticks** (or publish an explicit zero) before ending teleop; do not treat Ctrl+C or unplugging the pad as a stop. `beast-gamepad` sends a zero on exit as a backstop. Detail: [`robot/beast/ros2_ws/docs/teleoperation.md`](../robot/beast/ros2_ws/docs/teleoperation.md).
 
+### Unattended motion — use `beast-mission`, never a foreground publisher
+
+The three rows above assume a human with a hand on the control. An **agent**
+driving over SSH has no such hand, and the failure mode is not theoretical:
+there is no `cmd_vel` silence watchdog anywhere in this stack (removed by owner
+decision D8, 2026-08-07), so a publisher that dies mid-command leaves the ESP32
+executing that command indefinitely. Dropping Wi-Fi during a foreground
+`ros2 topic pub` is a runaway, not an interruption.
+
+So all scripted motion goes through
+[`deploy/bin/beast-mission`](../robot/beast/ros2_ws/deploy/bin/beast-mission),
+launched detached so it outlives the SSH session that started it:
+
+```bash
+ssh beast-01-ts "setsid nohup \
+  /home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-mission \
+  spin 45 ros2 topic pub -r 10 /cmd_vel_ui geometry_msgs/msg/Twist \
+  '{angular: {z: 0.35}}' > /tmp/spin.out 2>&1 < /dev/null &"
+```
+
+Run it from the workspace checkout, like `beast-slam-save`, so a deploy
+updates it. That is safe here precisely because it needs **no** privilege —
+unlike `beast-ctl`, which must only ever run from root-owned `/usr/local/sbin`
+because `/home/beast` is writable by `beast`.
+
+It arms, runs the body under `timeout`, and on **every** exit path — success,
+failure, SIGTERM, SIGINT, bound reached — runs a three-layer stop: estop lock
+held at 2 Hz (masks every source at the mux) → zero tail on `/cmd_vel_ui`
+(priority 50, outranks nav's 10) → `/ugv/set_allow_motion false` (makes
+`beast_base` emit its own `T:13 0,0`, independent of the mux). Each layer
+covers a failure the others do not. Logs land in `/data/beast/missions/`.
+Never poll a mission by holding the publishing process in the foreground —
+tail its log over a separate SSH call. Properties are pinned by
+`tools/ci/test_beast_mission.py`.
+
+**Turn slowly when mapping.** slam_toolbox's `coarse_search_angle_offset` is
+0.349 rad (20°/match). Rotating faster outruns the scan matcher: the map
+freezes and `map→odom` pins to identity **while the node stays alive and looks
+healthy**. 0.35 rad/s against the 10 Hz LD19 is ~2°/scan, comfortably inside
+the wedge. Verify the map actually grew
+(`ros2 topic echo --once /map --field info`) rather than assuming it did.
+
+**Abort on the pack _state_, not on a voltage you picked.** `soc.py` exposes
+`pack_state` — `nominal` / `low` / `reserve` / `critical`, edges derived from
+measured time-to-cutoff. Gate on `critical`. Do **not** invent a floor: on
+2026-08-14 an agent picked 9.9 V from nothing (3.3 V/cell × 3) and ended a
+navigation session with roughly 12 minutes of reserve still in the pack. The
+measured numbers are ~8.33 V hard trip and ~9.6 V recommended operational
+stop, and the percentage field rides a generic table — the *state* is the
+gate. Until PR #236 reaches the robot the running node reports the
+uncompensated percentage, so compensate by hand meanwhile:
+`OCV ≈ V + |I| × 0.14 Ω`.
+
 - **Docker on robot (re-verified 2026-08-14):** Docker Engine **29.6.1**,
   `docker.service` active, **no containers running**. The pull-agent runtime
   prerequisite is met; the pull agent itself is not installed (above).
