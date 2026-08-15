@@ -53,11 +53,26 @@ CASES = [
 ]
 
 
-def _image_workflow_paths() -> list[str]:
+# This model implements only the subset of GitHub's `paths:` syntax the filter
+# actually uses: `*`, `**`, and a leading `!`. GitHub also supports `?`, `+`,
+# and character classes, and its `**` can match zero path segments in ways this
+# translation does not reproduce. That gap is not hypothetical — it is exactly
+# how `robot/beast/ros2_ws/README.md` slipped through `**/*.md`. So rather than
+# grow the model toward a full reimplementation (which would be a second thing
+# to get wrong), `test_filter_uses_only_the_modelled_glob_subset` fails loudly
+# the moment the filter adopts a construct this cannot faithfully evaluate.
+MODELLED_GLOB_CHARS = set("*")
+UNMODELLED_GLOB_CHARS = set("?+[]")
+
+
+def _image_workflow_triggers() -> dict:
     wf = yaml.safe_load(IMAGE_WF.read_text(encoding="utf-8"))
     # PyYAML parses the `on:` key as the boolean True.
-    triggers = wf.get("on", wf.get(True))
-    return triggers["push"]["paths"]
+    return wf.get("on", wf.get(True))
+
+
+def _image_workflow_paths(trigger: str = "push") -> list[str]:
+    return _image_workflow_triggers()[trigger]["paths"]
 
 
 def _matches_workflow_filter(path: str, patterns: list[str]) -> bool:
@@ -127,3 +142,65 @@ def test_guard_refuses_commits_not_on_main() -> None:
         "the beast guard must reject compare statuses that mean `sha` is not an "
         "ancestor of main, or a re-run of an abandoned branch could deploy"
     )
+
+
+def test_guard_refuses_a_truncated_compare() -> None:
+    """GitHub's compare endpoint caps `commits` (250) and `files` (300) and does
+    NOT error when it truncates — it simply returns less. A truncated range
+    cannot prove the absence of a newer robot commit, and concluding "nothing
+    newer" from a short page would pin superseded code onto a machine that
+    moves: the same absence-of-evidence mistake this file exists to prevent,
+    arriving from the other direction."""
+    src = PIN_WF.read_text(encoding="utf-8")
+    assert "total_commits" in src, (
+        "the guard must compare total_commits against the returned page before "
+        "concluding no newer robot commit exists"
+    )
+    assert "300" in src, "the guard must treat a file list at the API cap as truncated"
+
+
+def test_guard_costs_one_api_call() -> None:
+    """Walking commits would cost one getCommit per intervening commit, worst
+    exactly when main is advancing quickly — the case this guard exists to
+    tolerate. A rate-limited pin fails closed into the same stranding it fixes.
+    The compare endpoint's aggregate `files` answers the question directly."""
+    src = PIN_WF.read_text(encoding="utf-8")
+    guard = src[src.index("if (surface === 'beast')") : src.index("if (stranded)")]
+    # Comments in this block deliberately DISCUSS getCommit to explain why it is
+    # absent; assert against code only, or the explanation trips its own test.
+    code = "\n".join(
+        line for line in guard.splitlines() if not line.strip().startswith("//")
+    )
+    assert "cmp.data.files" in code, "the guard must use the aggregate file list"
+    assert "getCommit" not in code, (
+        "no per-commit getCommit inside the staleness guard — use the compare "
+        "response's aggregate `files` instead"
+    )
+    assert "for (" not in code, "the guard must not iterate commits"
+
+
+def test_pull_request_and_push_filters_agree() -> None:
+    """beast-ros-image.yml carries the same `paths:` list twice. If they drift,
+    PR builds stop exercising the rule that main pushes deploy on — so the gate
+    a change was reviewed under is not the gate that ships it."""
+    triggers = _image_workflow_triggers()
+    assert triggers["pull_request"]["paths"] == triggers["push"]["paths"], (
+        "beast-ros-image.yml's pull_request and push `paths:` filters diverged"
+    )
+
+
+def test_filter_uses_only_the_modelled_glob_subset() -> None:
+    """_matches_workflow_filter models `*`, `**` and a leading `!` — nothing
+    else. If the filter adopts `?`, `+` or a character class, this model can
+    stay green while GitHub behaves differently, which is precisely the class of
+    bug that let README.md through. Fail loudly instead of silently drifting."""
+    for trigger in ("pull_request", "push"):
+        for pattern in _image_workflow_paths(trigger):
+            body = pattern[1:] if pattern.startswith("!") else pattern
+            offenders = UNMODELLED_GLOB_CHARS & set(body)
+            assert not offenders, (
+                f"{pattern!r} uses glob construct(s) {sorted(offenders)} that "
+                f"_matches_workflow_filter does not model — extend the model (and "
+                f"these tests) before using them, or the filter and this gate can "
+                f"disagree without failing"
+            )

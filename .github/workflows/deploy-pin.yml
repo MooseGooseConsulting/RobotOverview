@@ -186,32 +186,52 @@ jobs:
 
                 let stranded = false;
                 if (surface === 'beast') {
-                  // Commits on main after `sha`, oldest-first. compareCommits
-                  // gives us the file list per commit without N extra calls.
+                  // ONE call. compareCommits returns an AGGREGATE `files` array
+                  // for the whole base..head range, which is exactly the
+                  // question being asked — "did anything after `sha` touch a
+                  // robot path?" — so there is no need to walk commits and no
+                  // per-commit file list to fetch. Walking them would cost one
+                  // getCommit per intervening commit, worst exactly in the case
+                  // this guard exists to tolerate (main advancing quickly), and
+                  // a rate-limited pin fails closed into the same stranding.
                   const cmp = await github.rest.repos.compareCommitsWithBasehead({
                     owner, repo, basehead: `${sha}...${head.data.sha}`,
                   });
+
+                  // Every uncertain answer below resolves to `stranded = true`,
+                  // i.e. skip. That is the safe direction: skipping leaves the
+                  // robot on known-good code and workflow_dispatch is always
+                  // available, whereas pinning on incomplete evidence puts
+                  // superseded code on a machine that moves.
                   if (cmp.data.status === 'behind' || cmp.data.status === 'diverged') {
                     // `sha` is not an ancestor of main — a re-run of a build
                     // from an abandoned branch. Never deploy that.
+                    core.notice(`refusing: ${sha.slice(0, 7)} is not an ancestor of main (${cmp.data.status}).`);
+                    stranded = true;
+                  } else if ((cmp.data.total_commits || 0) > (cmp.data.commits || []).length) {
+                    // The compare endpoint caps `commits` (250) and `files`
+                    // (300) and does NOT error when it truncates — it just
+                    // returns less. A truncated range cannot prove the absence
+                    // of a newer robot commit, and "absence of evidence" is the
+                    // precise mistake this whole PR is about.
+                    core.notice(
+                      `refusing: ${sha.slice(0, 7)}..main spans ${cmp.data.total_commits} ` +
+                      `commits and the compare response is truncated; cannot prove ` +
+                      `nothing newer touches robot paths.`);
+                    stranded = true;
+                  } else if ((cmp.data.files || []).length >= 300) {
+                    core.notice(
+                      `refusing: compare returned ${cmp.data.files.length} files (at the ` +
+                      `API cap); the file list may be truncated.`);
+                    stranded = true;
+                  } else if (affectsRobot(cmp.data.files || [])) {
+                    core.notice(
+                      `skipping: a newer commit than ${sha.slice(0, 7)} touches robot ` +
+                      `paths; its own build pins it.`);
                     stranded = true;
                   } else {
-                    for (const c of cmp.data.commits) {
-                      const detail = await github.rest.repos.getCommit({
-                        owner, repo, ref: c.sha,
-                      });
-                      if (affectsRobot(detail.data.files || [])) {
-                        core.notice(
-                          `skipping: ${c.sha.slice(0, 7)} is a newer robot-path ` +
-                          `commit than ${sha.slice(0, 7)}; its own build pins it.`);
-                        stranded = true;
-                        break;
-                      }
-                    }
-                  }
-                  if (!stranded) {
                     core.info(
-                      `main is ${head.data.sha.slice(0, 7)}, but no commit after ` +
+                      `main is ${head.data.sha.slice(0, 7)}, but nothing after ` +
                       `${sha.slice(0, 7)} touches robot paths — still the newest ` +
                       `robot state, so pinning it rather than stranding it.`);
                   }
