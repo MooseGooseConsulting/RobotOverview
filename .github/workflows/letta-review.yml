@@ -40,7 +40,8 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Pre-install Bun
+      - name: Pre-install Bun and Letta
+        id: preinstall
         run: |
           mkdir -p "$RUNNER_TEMP/bun/bin"
           if [ ! -f "$RUNNER_TEMP/bun/bin/bun" ]; then
@@ -52,6 +53,8 @@ jobs:
             rm -rf /tmp/bun.zip /tmp/bun-linux-x64
           fi
           echo "$RUNNER_TEMP/bun/bin" >> "$GITHUB_PATH"
+          npm install -g --ignore-scripts @letta-ai/letta-code@latest
+          echo "letta_path=$(which letta)" >> "$GITHUB_OUTPUT"
 
       - name: Letta deep review
         id: letta
@@ -59,6 +62,7 @@ jobs:
         uses: letta-ai/letta-code-action@daa80f29e345315623ff759f5ecf5018946bbc15
         with:
           path_to_bun_executable: ${{ runner.temp }}/bun/bin/bun
+          path_to_letta_executable: ${{ steps.preinstall.outputs.letta_path }}
           letta_api_key: ${{ secrets.LETTA_API_KEY }}
           github_token: ${{ github.token }}
           agent_id: agent-20812d4a-e8e4-49f2-bb4b-e482fabaf6e6
