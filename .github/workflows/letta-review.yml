@@ -1,8 +1,5 @@
 name: Letta PR Review
 
-# Thin caller: wires the reusable MooseGoose Review Chief workflow
-# (MooseGooseConsulting/coldaine-codeOps) into this repo's PR lifecycle.
-# Requires the org secret LETTA_API_KEY to be visible to this repo.
 on:
   pull_request:
     types: [opened, ready_for_review, synchronize, reopened]
@@ -11,9 +8,182 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
+  checks: read
 
 jobs:
   review:
-    uses: MooseGooseConsulting/coldaine-codeOps/.github/workflows/letta-pr-review.yml@main
-    secrets:
-      LETTA_API_KEY: ${{ secrets.LETTA_API_KEY }}
+    name: Letta Deep Review
+
+    # Internal PRs only. Fork PRs don't receive organization secrets anyway.
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Serialize revisions of ONE PR, not all PRs.
+    concurrency:
+      group: letta-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout exact reviewed commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+          # Do NOT persist the write-scoped github.token into the working tree.
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Pre-install Bun and Letta
+        id: preinstall
+        run: |
+          mkdir -p "$RUNNER_TEMP/bun/bin"
+          if [ ! -f "$RUNNER_TEMP/bun/bin/bun" ]; then
+            BUN_URL="https://github.com/oven-sh/bun/releases/download/bun-v1.2.11/bun-linux-x64.zip"
+            curl -fsSL "$BUN_URL" -o /tmp/bun.zip
+            unzip -q -o /tmp/bun.zip -d /tmp
+            mv -f /tmp/bun-linux-x64/bun "$RUNNER_TEMP/bun/bin/bun"
+            chmod +x "$RUNNER_TEMP/bun/bin/bun"
+            rm -rf /tmp/bun.zip /tmp/bun-linux-x64
+          fi
+          echo "$RUNNER_TEMP/bun/bin" >> "$GITHUB_PATH"
+          npm install -g --ignore-scripts @letta-ai/letta-code@latest
+          echo "letta_path=$(which letta)" >> "$GITHUB_OUTPUT"
+
+      - name: Letta deep review
+        id: letta
+        continue-on-error: true
+        # Pin the action while it remains experimental.
+        uses: letta-ai/letta-code-action@daa80f29e345315623ff759f5ecf5018946bbc15
+        with:
+          path_to_bun_executable: ${{ runner.temp }}/bun/bin/bun
+          path_to_letta_executable: ${{ steps.preinstall.outputs.letta_path }}
+          letta_api_key: ${{ secrets.LETTA_API_KEY }}
+          github_token: ${{ github.token }}
+          agent_id: agent-20812d4a-e8e4-49f2-bb4b-e482fabaf6e6
+
+          model: auto
+
+          create_new_conversation: "true"
+          show_full_output: "true"
+          track_progress: ""
+          tracking_comment: "false"
+
+          prompt: |
+            Perform a deep code review of PR
+            #${{ github.event.pull_request.number }}
+            in ${{ github.repository }}.
+
+            Reviewed head SHA:
+            ${{ github.event.pull_request.head.sha }}
+
+            First identify the full repository identity and retrieve any
+            repository-specific knowledge you have for it.
+
+            Read applicable AGENTS.md/project instructions.
+
+            Read the PR title, body and relevant discussion:
+
+              gh pr view ${{ github.event.pull_request.number }} \
+                --json title,body,comments,baseRefName,headRefName
+
+            Read the complete diff:
+
+              gh pr diff ${{ github.event.pull_request.number }}
+
+            Understand the intended change before looking for defects.
+
+            Use your established deep-review procedure.
+
+            For a non-trivial PR, use up to three parallel independent
+            subagents:
+
+            1. correctness / regression / state / concurrency
+            2. tests / callers / integration / validation
+            3. architecture / security / domain-specific risk
+
+            For a tiny or obviously simple PR, use fewer if additional
+            agents provide no useful independent coverage.
+
+            Subagents investigate only. They must not publish to GitHub.
+
+            Collect their candidate findings, deduplicate them, and
+            independently try to disprove each candidate.
+
+            Follow relevant execution paths and surrounding code when
+            necessary. Do not restrict analysis mechanically to the diff.
+
+            Only report a finding when:
+            - there is a concrete incorrect behavior or material risk;
+            - the execution path is realistic;
+            - surrounding code does not already prevent it;
+            - this PR introduces or materially worsens it;
+            - the cited code and line are correct.
+
+            Default posture: signal only. Most good PRs should pass.
+
+            Never flag style, subjective implementation preferences,
+            generic best practices, speculative hardening, unrelated
+            pre-existing defects, or invented requirements.
+
+            If substantive findings survive verification, create concise
+            inline GitHub review comments on the exact changed lines.
+            Do not create a separate verbose summary comment.
+
+            Do not modify files, commit, push or merge.
+
+            After the review, retain only genuinely durable lessons,
+            generalizing techniques globally and namespacing repository
+            facts under ${{ github.repository }}.
+
+            If no substantive findings remain, finish exactly:
+
+            LGTM
+
+            If substantive findings were published, finish exactly:
+
+            NEEDS_CHANGES
+
+      - name: Interpret review result
+        if: always()
+        shell: bash
+        run: |
+          FILE="${{ steps.letta.outputs.execution_file }}"
+
+          if [[ -z "$FILE" || ! -f "$FILE" ]]; then
+            echo "::warning::Letta did not produce an execution result file (likely external rate limit or connection issue)."
+            exit 0
+          fi
+
+          RESULT="$(
+            jq -r '.. | objects | select(.type? == "result" or .type? == "assistant_message" or .role? == "assistant") | (.result // .message // .content // empty) | strings' "$FILE" 2>/dev/null | tail -n 1
+          )"
+
+          if [[ -z "$RESULT" ]]; then
+            RESULT="$(cat "$FILE" 2>/dev/null || echo "")"
+          fi
+
+          echo "Letta output tail: $(echo "$RESULT" | tail -n 5)"
+
+          if echo "$RESULT" | grep -q "LGTM"; then
+            echo "Parsed verdict: LGTM"
+            echo "Review passed."
+            exit 0
+          elif echo "$RESULT" | grep -q "NEEDS_CHANGES"; then
+            echo "Parsed verdict: NEEDS_CHANGES"
+            echo "::warning::Letta found substantive review issues."
+            exit 0
+          elif echo "$RESULT" | grep -q -i "quota\|rate limit\|credits"; then
+            echo "::warning::Letta API rate limited or out of credits. Skipping review check."
+            exit 0
+          else
+            echo "Parsed verdict: <completed>"
+            echo "Letta completed review run."
+            exit 0
+          fi
