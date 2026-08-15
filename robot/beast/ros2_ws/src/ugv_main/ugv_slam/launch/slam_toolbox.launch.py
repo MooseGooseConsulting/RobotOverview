@@ -97,6 +97,7 @@ def generate_launch_description():
     # Return launch description
     return LaunchDescription([
         use_sim_time_arg,
+        start_base_arg,
         use_rviz_arg,
         use_slam_arg,
         allow_motion_arg,
