@@ -30,10 +30,6 @@
           </Sequence>
           <Spin spin_dist="1.57"/>
           <Wait wait_duration="5"/>
-          <!-- BackUp removed (BEAST-01): same reason as the navigate_to_pose
-               tree — 104° blind wedge astern and a scan-only collision monitor
-               make a blind reverse; Spin sweeps the LiDAR through the wedge
-               instead. Restore only if a rear sensor lands. -->
         </RoundRobin>
       </ReactiveFallback>
     </RecoveryNode>

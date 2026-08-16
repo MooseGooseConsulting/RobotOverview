@@ -35,12 +35,6 @@
           </Sequence>
           <Spin spin_dist="1.57"/>
           <Wait wait_duration="5"/>
-          <!-- BackUp removed (BEAST-01): the rear mast leaves a 104° blind wedge
-               astern (body 128°–232°, NaN at the LiDAR driver) and the collision
-               monitor watches /scan only, so a BackUp recovery reverses into
-               space nothing can sense. Spin stays — an in-place rotation sweeps
-               the LiDAR *through* the wedge, the correct recovery for this
-               sensor geometry. Restore only if a rear sensor lands. -->
         </RoundRobin>
       </ReactiveFallback>
     </RecoveryNode>

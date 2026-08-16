@@ -1,0 +1,22 @@
+# BEAST-01 Frontier exploration layer
+# Starts explore_lite node
+#
+# Must be run when both beast-slam and beast-nav are running safely.
+# Do not enable autostart - starts manually.
+
+[Unit]
+Description=BEAST-01 Frontier exploration layer (owner-supervised)
+After=beast-nav.service beast-ros-base.service
+Wants=beast-nav.service beast-ros-base.service
+AssertPathExists=/home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/explore_lite/share/explore_lite/config/params.yaml
+
+[Service]
+Type=simple
+User=beast
+Group=beast
+WorkingDirectory=/home/beast/beast/RobotOverview/robot/beast/ros2_ws
+EnvironmentFile=-/etc/beast/ugv.env
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/bin/sh -c 'exec /home/beast/beast/RobotOverview/robot/beast/ros2_ws/deploy/bin/beast-deploy-guard'
+ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/setup.bash && exec ros2 launch explore_lite explore.launch.py params_file:=/home/beast/beast/RobotOverview/robot/beast/ros2_ws/install/explore_lite/share/explore_lite/config/params.yaml'
+Restart=no

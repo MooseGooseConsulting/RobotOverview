@@ -24,8 +24,7 @@ setup(
     entry_points={
         'console_scripts': [
             'keyboard_ctrl = ugv_tools.keyboard_ctrl:main',
-            'joy_ctrl = ugv_tools.joy_ctrl:main',
-            'behavior_ctrl = ugv_tools.behavior_ctrl:main'
+            'joy_ctrl = ugv_tools.joy_ctrl:main'
         ],
     },
 )

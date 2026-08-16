@@ -55,7 +55,10 @@ from rosbridge_library.capabilities.call_service import CallService
 from rosbridge_library.capabilities.defragmentation import Defragment
 from rosbridge_library.capabilities.publish import Publish
 from rosbridge_library.capabilities.subscribe import Subscribe
+from rosbridge_library.capabilities.send_action_goal import SendActionGoal
+from rosbridge_library.capabilities.cancel_action_goal import CancelActionGoal
 from rosbridge_library.rosbridge_protocol import RosbridgeProtocol
+
 from rosbridge_server import RosbridgeWebSocket
 
 from ugv_cockpit.cockpit_contract import (
@@ -64,7 +67,7 @@ from ugv_cockpit.cockpit_contract import (
     parse_allowed_origins,
 )
 
-COCKPIT_CAPABILITIES = (Advertise, Publish, Subscribe, Defragment, CallService)
+COCKPIT_CAPABILITIES = (Advertise, Publish, Subscribe, Defragment, CallService, SendActionGoal, CancelActionGoal)
 
 
 def _check_origin(self, origin):

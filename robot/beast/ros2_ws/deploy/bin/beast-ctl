@@ -66,6 +66,7 @@ beast-cockpit|run,lifecycle
 beast-cockpit-serve|run,lifecycle
 beast-slam|run,lifecycle
 beast-nav|hold
+beast-explore|hold
 beast-pull|run
 beast-pull.timer|run,lifecycle
 beast-wifi-telemetry|run,lifecycle

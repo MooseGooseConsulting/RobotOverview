@@ -6,6 +6,7 @@ import type {
   BeastRobotStatus,
   DriveOnHeadingInput,
   MotionToolResult,
+  NavigateToPoseInput,
   SpinInput,
 } from './types';
 import { BEAST_MAX_SPEED_MPS } from './types';
@@ -73,6 +74,7 @@ const ACTION_NAMES = {
   drive: '/drive_on_heading',
   spin: '/spin',
   backup: '/backup',
+  navToPose: '/navigate_to_pose',
 } as const;
 
 function envBridgeUrl(): string | null {
@@ -83,6 +85,46 @@ function durationFromSeconds(seconds: number): { sec: number; nanosec: number } 
   const sec = Math.floor(seconds);
   const nanosec = Math.round((seconds - sec) * 1e9);
   return { sec, nanosec };
+}
+
+/** Matches a bare non-finite literal at an exact offset. Sticky, not global. */
+const NON_FINITE_TOKEN = /-?(?:NaN|Infinity)/y;
+
+/** Rewrite bare `NaN` / `Infinity` to `null`, but ONLY outside string literals. */
+function repairNonFiniteTokens(raw: string): string {
+  let out = '';
+  let i = 0;
+  let inString = false;
+  while (i < raw.length) {
+    const ch = raw[i];
+    if (inString) {
+      out += ch;
+      if (ch === '\\') {
+        i += 1;
+        if (i < raw.length) out += raw[i];
+      } else if (ch === '"') {
+        inString = false;
+      }
+    } else {
+      if (ch === '"') {
+        inString = true;
+        out += ch;
+      } else if (ch === 'N' || ch === 'I' || ch === '-') {
+        NON_FINITE_TOKEN.lastIndex = i;
+        const match = NON_FINITE_TOKEN.exec(raw);
+        if (match) {
+          out += 'null';
+          i += match[0].length;
+          continue;
+        }
+        out += ch;
+      } else {
+        out += ch;
+      }
+    }
+    i++;
+  }
+  return out;
 }
 
 /**
@@ -101,7 +143,7 @@ export class BeastRosClient implements BeastRobotBridge {
   private roslib: RosLibLike | null = null;
   private ros: RosHandle | null = null;
   private topics: TopicHandle[] = [];
-  private actions: Partial<Record<'drive' | 'spin' | 'backup', ActionHandle>> = {};
+  private actions: Partial<Record<'drive' | 'spin' | 'backup' | 'navToPose', ActionHandle>> = {};
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalClose = false;
   private disposed = false;
@@ -250,6 +292,23 @@ export class BeastRosClient implements BeastRobotBridge {
     });
   }
 
+  async navigateToPose(input: NavigateToPoseInput): Promise<MotionToolResult> {
+    return this.runAction('navToPose', {
+      pose: {
+        header: { frame_id: 'map' },
+        pose: {
+          position: { x: input.x, y: input.y, z: 0.0 },
+          orientation: {
+            x: 0,
+            y: 0,
+            z: Math.sin(input.yaw / 2),
+            w: Math.cos(input.yaw / 2),
+          },
+        },
+      }
+    });
+  }
+
   async stop(): Promise<MotionToolResult> {
     if (!this.url) {
       return {
@@ -287,6 +346,25 @@ export class BeastRosClient implements BeastRobotBridge {
 
   private async ensureRoslib(): Promise<RosLibLike> {
     if (this.roslib) return this.roslib;
+
+    // Prevent NaN scan defect from crashing roslib handlers upstream
+    type PatchedJsonParse = typeof JSON.parse & { _nanPatched?: boolean };
+    const jsonParse = JSON.parse as PatchedJsonParse;
+    if (!jsonParse._nanPatched) {
+      const origParse = JSON.parse;
+      JSON.parse = function (text: string, reviver?: Parameters<typeof origParse>[1]) {
+        try {
+          return origParse(text, reviver);
+        } catch (err) {
+          if (typeof text === 'string' && (text.includes('NaN') || text.includes('Infinity'))) {
+            return origParse(repairNonFiniteTokens(text), reviver);
+          }
+          throw err;
+        }
+      };
+      (JSON.parse as PatchedJsonParse)._nanPatched = true;
+    }
+
     if (this.injectedRoslib) {
       this.roslib = this.injectedRoslib;
       return this.roslib;
@@ -396,6 +474,13 @@ export class BeastRosClient implements BeastRobotBridge {
         actionType: 'nav2_msgs/action/BackUp',
       });
     }
+    if (!this.actions.navToPose) {
+      this.actions.navToPose = new this.roslib.Action({
+        ros: this.ros,
+        name: ACTION_NAMES.navToPose,
+        actionType: 'nav2_msgs/action/NavigateToPose',
+      });
+    }
   }
 
   private handleTopic(name: string, msg: Record<string, unknown>): void {
@@ -411,6 +496,7 @@ export class BeastRosClient implements BeastRobotBridge {
         break;
       }
       case '/scan': {
+        // Prevent NaN scan defect from crashing roslib handlers upstream or causing logic errors here
         this.lastScanAt = this.now();
         break;
       }
@@ -420,7 +506,7 @@ export class BeastRosClient implements BeastRobotBridge {
   }
 
   private async runAction(
-    which: 'drive' | 'spin' | 'backup',
+    which: 'drive' | 'spin' | 'backup' | 'navToPose',
     goal: Record<string, unknown>,
   ): Promise<MotionToolResult> {
     if (!this.url) {
