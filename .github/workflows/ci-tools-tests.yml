@@ -28,7 +28,6 @@ on:
       - '.github/workflows/beast-ros-image.yml'
       - '.github/workflows/cold-review.yml'
       - '.github/actionlint.yaml'
-      - '.agents/skills/custom-codereview-guide.md'
   push:
     branches: [main]
     paths:
@@ -52,7 +51,6 @@ on:
       - '.github/workflows/beast-ros-image.yml'
       - '.github/workflows/cold-review.yml'
       - '.github/actionlint.yaml'
-      - '.agents/skills/custom-codereview-guide.md'
 
 permissions:
   contents: read
