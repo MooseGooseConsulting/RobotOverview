@@ -88,7 +88,14 @@ export const FIND_IDENTITY_FIELDS = {
   documents: ['id', 'title', 'kind'],
   nets: ['id', 'name', 'kind', 'terminals.id', 'terminals.asset_id', 'terminals.name'],
   activity_log: ['id', 'kind', 'asset_id'],
-  missions: ['id', 'code', 'name', 'mission_constraints.label'],
+  missions: [
+    'id',
+    'code',
+    'name',
+    'mission_constraints.label',
+    'mission_requisitions.asset_id',
+    'required_loadout',
+  ],
   capabilities: ['id', 'name'],
   wishlist_meta: ['asset_id', 'assets.name', 'for_asset_id', 'for_mission_id'],
   insights: ['id', 'title', 'insight_assets.asset_id', 'insight_missions.mission_id'],
@@ -232,6 +239,7 @@ function documentWhere(identity: boolean): string {
   }
   return `d.id ilike $1 or d.title ilike $1 or d.kind ilike $1
                or coalesce(d.note,'') ilike $1
+               or coalesce(d.url,'') ilike $1
                or d.library_path ilike $1
                or exists (
                     select 1 from document_assets da
@@ -267,8 +275,17 @@ function activityWhere(identity: boolean): string {
 }
 
 function missionWhere(identity: boolean): string {
+  const requisitionHit = `exists (
+                    select 1 from mission_requisitions mr
+                     where mr.mission_id = m.id and mr.asset_id ilike $1
+                  )
+               or exists (
+                    select 1 from unnest(coalesce(m.required_loadout, ARRAY[]::text[])) rl
+                     where rl ilike $1
+                  )`;
   if (identity) {
     return `m.id ilike $1 or coalesce(m.code,'') ilike $1 or m.name ilike $1
+               or ${requisitionHit}
                or exists (
                     select 1 from mission_constraints c
                      where c.mission_id = m.id and c.label ilike $1
@@ -277,6 +294,7 @@ function missionWhere(identity: boolean): string {
   return `m.id ilike $1 or coalesce(m.code,'') ilike $1 or m.name ilike $1
                or coalesce(m.objective,'') ilike $1
                or coalesce(m.environment,'') ilike $1
+               or ${requisitionHit}
                or exists (
                     select 1 from mission_after_actions a
                      where a.mission_id = m.id and a.text ilike $1
@@ -474,6 +492,12 @@ async function main() {
       (
         await client.query(
           `select m.id, m.code, m.name, m.status, m.objective, m.environment,
+                  (select string_agg(mr.asset_id, ', ' order by mr.asset_id)
+                     from mission_requisitions mr
+                    where mr.mission_id = m.id and mr.asset_id ilike $1) as matching_requisitions,
+                  (select string_agg(rl, ', ' order by rl)
+                     from unnest(coalesce(m.required_loadout, ARRAY[]::text[])) rl
+                    where rl ilike $1) as matching_loadout,
                   ${
                     identity
                       ? `null::text as matching_after_actions,
@@ -490,7 +514,7 @@ async function main() {
                   (select string_agg(c.label || ' ' || c.value::text || c.unit, ', ' order by c.id)
                      from mission_constraints c
                     where c.mission_id = m.id
-                      and (c.label ilike $1 or c.unit ilike $1)) as matching_constraints`
+                       and (c.label ilike $1 or c.unit ilike $1)) as matching_constraints`
                   }
              from missions m
             where ${missionWhere(identity)}
