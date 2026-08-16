@@ -2,7 +2,6 @@ import type { Metadata } from 'next';
 import { JetBrains_Mono, Inter, Outfit } from 'next/font/google';
 import './globals.css';
 import { HangarProvider } from '@/components/HangarProvider';
-import { HangarDown } from '@/components/HangarDown';
 import { Shell } from '@/components/Shell';
 import { getHangarSpine } from '@/server/hangar/spine';
 import { normalizeLibraryBaseUrl } from '@/lib/documents';
@@ -32,17 +31,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} ${outfit.variable}`}>
       <body>
-        {spine.source === 'unavailable' ? (
-          <HangarDown reason={spine.fallbackReason} />
-        ) : (
-          <HangarProvider
-            initialData={spine.data}
-            initialSpineRead={spineReadStatus}
-            initialLibraryBaseUrl={libraryBaseUrl}
-          >
-            <Shell>{children}</Shell>
-          </HangarProvider>
-        )}
+        <HangarProvider
+          initialData={spine.data}
+          initialSpineRead={spineReadStatus}
+          initialLibraryBaseUrl={libraryBaseUrl}
+        >
+          <Shell>{children}</Shell>
+        </HangarProvider>
         <div className="crt-overlay" aria-hidden />
       </body>
     </html>

@@ -1,4 +1,4 @@
-import { isHangarBayId } from '@/data/hangar';
+import { hangarData as staticHangarData, isHangarBayId } from '@/data/hangar';
 import type {
   ActivityEvent,
   Bay,
@@ -55,7 +55,7 @@ import {
 
 export type HangarSpineRead =
   | { source: 'postgres'; data: HangarData }
-  | { source: 'unavailable'; fallbackReason: HangarFallbackReason };
+  | { source: 'static'; fallbackReason: HangarFallbackReason; data: HangarData };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -80,10 +80,11 @@ function isHangarDataPayload(value: unknown): value is HangarData {
   );
 }
 
-function unavailable(reason: HangarFallbackReason): HangarSpineRead {
+function staticFallback(reason: HangarFallbackReason): HangarSpineRead {
   return {
-    source: 'unavailable',
+    source: 'static',
     fallbackReason: reason,
+    data: staticHangarData,
   };
 }
 
@@ -846,11 +847,11 @@ export async function buildHangarDataFromDb(db: HangarDrizzle): Promise<HangarDa
 export async function getHangarSpine(): Promise<HangarSpineRead> {
   try {
     const db = await getHangarDrizzle();
-    if (!db) return unavailable('not-configured');
+    if (!db) return staticFallback('not-configured');
 
     const data = await buildHangarDataFromDb(db);
     if (!isHangarDataPayload(data)) {
-      return unavailable('postgres-error');
+      return staticFallback('postgres-error');
     }
 
     return { source: 'postgres', data };
