@@ -21,17 +21,20 @@ with the product model.
 
 ## Current Persistence
 
-Current persistence is source-backed:
+Live facts go through `POST /api/hangar/ingest` (`AGENTS.md` op verbs), not
+`src/data/hangar.ts`. That file is a stale CI fixture. Query live Hangar rows with
+`doppler run --project homelab --config dev -- npx tsx db/hangar/find.ts <term>`
+before asserting hardware or inventory, and before asking Patrick.
 
-- `src/data/hangar.ts` is the app-visible content spine.
 - `src/data/types.ts` defines the TypeScript shape.
-- `db/hangar/schema.sql`, `db/hangar/gen-seed.ts`, and `db/hangar/seed.sql` mirror the
-  source-backed spine into Postgres.
-- Content changes require a branch, commit, and PR because the content ships with the app image.
+- `db/hangar/schema.sql`, `db/hangar/standup.md` own schema and migrations.
+- `src/data/hangar.ts` / `src/data/datacore-corpus.ts` are CI fixtures and loud
+  offline fallbacks only. Never edit them for live content.
 
-Postgres already has homes for the three logbook lanes: `insights`, `activity_log`, and
-`mission_after_actions`. Before adding DB writes, keep writing through source-backed content and
-regenerate the seed when source data changes.
+Postgres homes for the logbook lanes: `insights`, `activity_log`, and
+`mission_after_actions`. Land durable writes with ingest (`append_insight`,
+`append_activity`, mission after-actions on `land_mission` / the mission record).
+Do not regenerate seed from a fixture edit.
 
 ## Storage Router
 
@@ -94,12 +97,11 @@ One tight paragraph with the important change.
 
 ## Apply The Entry
 
-1. Inspect `src/data/types.ts`, `src/data/hangar.ts`, the relevant app page, and any owner doc
-   before editing.
-2. Add or update only the surfaces needed by the draft.
+1. Query Hangar (`find.ts`) and inspect `src/data/types.ts`, the relevant app page,
+   and any owner doc before writing. Do not treat `src/data/hangar.ts` as live.
+2. Add or update only the surfaces needed by the draft, via ingest for live facts.
 3. Preserve existing ID and ordering style. Use stable lowercase IDs for new records.
-4. If `src/data/hangar.ts` changes, regenerate `db/hangar/seed.sql` with `db/hangar/gen-seed.ts`
-   unless the change intentionally does not belong in seed data.
+4. Never edit `src/data/hangar.ts` or `src/data/datacore-corpus.ts` for live content.
 5. Run focused validation:
    - `npm run lint`
    - `npm run test:run` or focused tests touching the changed data/surface

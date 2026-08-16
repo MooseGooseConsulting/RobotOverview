@@ -9,19 +9,16 @@ export type HangarRead<T> =
       data: T;
     }
   | {
-      source: 'static';
+      source: 'unavailable';
       fallbackReason: HangarFallbackReason;
-      data: T;
     };
 
-export async function readWithStaticFallback<T>({
+export async function readHangarOrUnavailable<T>({
   label,
-  staticData,
   readFromPostgres,
   getClient = getHangarPool,
 }: {
   label: string;
-  staticData: T;
   readFromPostgres: (client: Queryable) => Promise<T>;
   getClient?: () => Promise<Queryable | null>;
 }): Promise<HangarRead<T>> {
@@ -29,9 +26,8 @@ export async function readWithStaticFallback<T>({
     const pool = await getClient();
     if (!pool) {
       return {
-        source: 'static',
+        source: 'unavailable',
         fallbackReason: 'not-configured',
-        data: staticData,
       };
     }
 
@@ -40,11 +36,10 @@ export async function readWithStaticFallback<T>({
       data: await readFromPostgres(pool),
     };
   } catch (error) {
-    console.warn(`Hangar Postgres ${label} read failed; falling back to static spine.`, error);
+    console.warn(`Hangar Postgres ${label} read failed; not serving a TypeScript roster.`, error);
     return {
-      source: 'static',
+      source: 'unavailable',
       fallbackReason: 'postgres-error',
-      data: staticData,
     };
   }
 }

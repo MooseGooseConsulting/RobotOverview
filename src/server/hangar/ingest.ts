@@ -283,6 +283,28 @@ const patchStatusInput = z.object({
   status: z.string().min(1),
 });
 
+/** Partial identity/spec update. Does not touch kind, callsign, status, power, tags, or sockets. */
+const patchAssetInput = z
+  .object({
+    id: z.string().min(1),
+    manufacturer: z.string().nullable().optional(),
+    model: z.string().nullable().optional(),
+    summary: z.string().optional(),
+    description: z.string().nullable().optional(),
+    specs: z.array(specRowSchema).optional(),
+    planningNotes: z.string().nullable().optional(),
+  })
+  .refine(
+    (v) =>
+      v.manufacturer !== undefined ||
+      v.model !== undefined ||
+      v.summary !== undefined ||
+      v.description !== undefined ||
+      v.specs !== undefined ||
+      v.planningNotes !== undefined,
+    { message: 'patch_asset requires at least one field besides id' },
+  );
+
 const assignLoadoutInput = z.object({
   hostAssetId: z.string().min(1),
   slot: z.string().min(1),
@@ -323,6 +345,7 @@ const ingestBodySchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('append_insight'), input: appendInsightInput }),
   z.object({ op: z.literal('append_activity'), input: appendActivityInput }),
   z.object({ op: z.literal('patch_status'), input: patchStatusInput }),
+  z.object({ op: z.literal('patch_asset'), input: patchAssetInput }),
   z.object({ op: z.literal('assign_loadout'), input: assignLoadoutInput }),
   z.object({ op: z.literal('link_insight'), input: linkInsightInput }),
   z.object({ op: z.literal('land_unit'), input: unitRecordSchema }),
@@ -554,6 +577,48 @@ export async function opPatchStatus(
     });
   });
 
+  return input.id;
+}
+
+export async function opPatchAsset(
+  db: IngestDb,
+  input: z.infer<typeof patchAssetInput>,
+): Promise<string> {
+  const rows = await db
+    .select({
+      id: assets.id,
+      kind: assets.kind,
+      callsign: assets.callsign,
+      status: assets.status,
+      powerWatts: assets.powerWatts,
+      powerVolts: assets.powerVolts,
+      powerRail: assets.powerRail,
+    })
+    .from(assets)
+    .where(eq(assets.id, input.id))
+    .limit(1);
+  const row = rows[0];
+  if (!row) {
+    throw new IngestNotFoundError(`Asset '${input.id}' not found`, { id: input.id });
+  }
+
+  const set: {
+    manufacturer?: string | null;
+    model?: string | null;
+    summary?: string;
+    description?: string | null;
+    specs?: { label: string; value: string }[];
+    planningNotes?: string | null;
+    updatedAt: Date;
+  } = { updatedAt: new Date() };
+  if (input.manufacturer !== undefined) set.manufacturer = input.manufacturer;
+  if (input.model !== undefined) set.model = input.model;
+  if (input.summary !== undefined) set.summary = input.summary;
+  if (input.description !== undefined) set.description = input.description;
+  if (input.specs !== undefined) set.specs = input.specs;
+  if (input.planningNotes !== undefined) set.planningNotes = input.planningNotes;
+
+  await db.update(assets).set(set).where(eq(assets.id, input.id));
   return input.id;
 }
 
@@ -1271,6 +1336,9 @@ export async function executeIngestOp(db: IngestDb, body: IngestBody): Promise<I
       break;
     case 'patch_status':
       id = await opPatchStatus(db, body.input);
+      break;
+    case 'patch_asset':
+      id = await opPatchAsset(db, body.input);
       break;
     case 'assign_loadout':
       id = await opAssignLoadout(db, body.input);

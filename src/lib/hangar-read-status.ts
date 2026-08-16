@@ -1,4 +1,4 @@
-export const HANGAR_READ_SOURCES = ['postgres', 'static'] as const;
+export const HANGAR_READ_SOURCES = ['postgres', 'unavailable'] as const;
 export type HangarReadSource = (typeof HANGAR_READ_SOURCES)[number];
 
 export const HANGAR_FALLBACK_REASONS = ['not-configured', 'postgres-error'] as const;
@@ -13,7 +13,7 @@ export type HangarReadStatus =
       fallbackReason?: undefined;
     }
   | {
-      source: 'static';
+      source: 'unavailable';
       fallbackReason?: HangarFallbackReason;
     };
 
@@ -28,8 +28,8 @@ export const HANGAR_READ_SOURCE_META: Record<
     label: 'PG',
     dotClass: 'bg-signal-ok',
   },
-  static: {
-    label: 'STATIC',
+  unavailable: {
+    label: 'DOWN',
     dotClass: 'bg-amber',
   },
 };
@@ -51,26 +51,22 @@ export const HANGAR_FALLBACK_REASON_META: Record<
 export const HANGAR_READ_LANE_META: Record<
   HangarReadLane,
   {
-    fallbackDetail: string;
-    fallbackReasonDetails: Record<HangarFallbackReason, string>;
+    downDetail: string;
+    downReasonDetails: Record<HangarFallbackReason, string>;
   }
 > = {
   inventory: {
-    fallbackDetail: 'Serving inventory items from the static hangar.ts spine.',
-    fallbackReasonDetails: {
-      'not-configured':
-        'Inventory Postgres is not configured — items are coming from the hangar.ts spine.',
-      'postgres-error':
-        'Inventory Postgres read FAILED — serving items from the hangar.ts spine.',
+    downDetail: 'Inventory Postgres is unreachable. There is no TypeScript catalog.',
+    downReasonDetails: {
+      'not-configured': 'Inventory Postgres is not configured. There is no TypeScript catalog.',
+      'postgres-error': 'Inventory Postgres read failed. There is no TypeScript catalog.',
     },
   },
   spine: {
-    fallbackDetail: 'Serving the Hangar UI spine from the static hangar.ts fixture.',
-    fallbackReasonDetails: {
-      'not-configured':
-        'Hangar Postgres is not configured — UI spine is coming from hangar.ts.',
-      'postgres-error':
-        'Hangar Postgres spine read FAILED — serving hangar.ts fixture.',
+    downDetail: 'Hangar Postgres is unreachable. There is no offline inventory.',
+    downReasonDetails: {
+      'not-configured': 'Hangar Postgres is not configured. There is no offline inventory.',
+      'postgres-error': 'Hangar Postgres spine read failed. There is no offline inventory.',
     },
   },
 };
@@ -91,7 +87,5 @@ export function hangarFallbackDetail(
   fallbackReason?: HangarFallbackReason,
 ): string {
   const laneMeta = HANGAR_READ_LANE_META[lane];
-  return fallbackReason
-    ? laneMeta.fallbackReasonDetails[fallbackReason]
-    : laneMeta.fallbackDetail;
+  return fallbackReason ? laneMeta.downReasonDetails[fallbackReason] : laneMeta.downDetail;
 }

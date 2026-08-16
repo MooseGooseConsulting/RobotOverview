@@ -4,7 +4,6 @@ import {
   GET as GET_PREFLIGHT,
   toHangarPreflightPayload,
 } from '@/app/api/hangar/preflight/route';
-import { hangarData } from '@/data/hangar';
 import {
   checkHangarDatabaseReachability,
   closeHangarPoolForTests,
@@ -15,7 +14,8 @@ import {
   mapInventoryItemRow,
   readInventoryItemsFromPostgres,
 } from '@/server/hangar/items';
-import { readWithStaticFallback } from '@/server/hangar/read-model';
+import { readHangarOrUnavailable } from '@/server/hangar/read-model';
+import type { Queryable } from '@/server/hangar/queryable';
 
 afterEach(async () => {
   await closeHangarPoolForTests();
@@ -56,46 +56,43 @@ describe('Hangar inventory Postgres read path', () => {
     };
   }
 
-  it('shared read helper falls back to static data when a configured Postgres read fails', async () => {
+  it('shared read helper reports unavailable when a configured Postgres read fails', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const staticData = [{ id: 'static-item' }];
-    const client = {
+    const client: Queryable = {
       query: async <T,>(): Promise<{ rows: T[] }> => {
         throw new Error('query failed');
       },
     };
 
-    const result = await readWithStaticFallback({
+    const result = await readHangarOrUnavailable({
       label: 'test records',
-      staticData,
       getClient: async () => client,
-      readFromPostgres: async (queryable) => {
+      readFromPostgres: async (queryable: Queryable) => {
         await queryable.query('SELECT explode');
         return [{ id: 'postgres-item' }];
       },
     });
 
     expect(result).toEqual({
-      source: 'static',
+      source: 'unavailable',
       fallbackReason: 'postgres-error',
-      data: staticData,
     });
     expect(console.warn).toHaveBeenCalledWith(
-      'Hangar Postgres test records read failed; falling back to static spine.',
+      'Hangar Postgres test records read failed; not serving a TypeScript roster.',
       expect.any(Error),
     );
   });
 
-  it('falls back to the static inventory spine when no database config is present', async () => {
+  it('reports unavailable when no database config is present', async () => {
     vi.stubEnv('HANGAR_DB_HOST', '');
     vi.stubEnv('HANGAR_DATABASE_URL', '');
     vi.stubEnv('DATABASE_URL', '');
 
     const result = await getInventoryItems();
 
-    expect(result.source).toBe('static');
+    expect(result.source).toBe('unavailable');
     expect(result.fallbackReason).toBe('not-configured');
-    expect(result.items).toBe(hangarData.items);
+    expect(result.items).toBeUndefined();
   });
 
   it('prefers structured Hangar database config over credential-bearing URLs', () => {
@@ -145,7 +142,7 @@ describe('Hangar inventory Postgres read path', () => {
 
     const result = await getInventoryItems();
 
-    expect(result.source).toBe('static');
+    expect(result.source).toBe('unavailable');
     expect(result.fallbackReason).toBe('postgres-error');
   });
 
@@ -519,7 +516,7 @@ describe('Hangar inventory Postgres read path', () => {
     expect(items[0].id).toBe('lafaer-lwr02-presence-sensor');
   });
 
-  it('exposes the read path through a non-static route handler', async () => {
+  it('returns 503 and unavailable state when Postgres is unconfigured', async () => {
     vi.stubEnv('HANGAR_DB_HOST', '');
     vi.stubEnv('HANGAR_DATABASE_URL', '');
     vi.stubEnv('DATABASE_URL', '');
@@ -527,10 +524,11 @@ describe('Hangar inventory Postgres read path', () => {
     const response = await GET();
     const payload = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(payload.source).toBe('static');
+    expect(response.status).toBe(503);
+    expect(payload.source).toBe('unavailable');
     expect(payload.fallbackReason).toBe('not-configured');
-    expect(payload.count).toBe(hangarData.items.length);
+    expect(payload.count).toBe(0);
+    expect(payload.items).toEqual([]);
   });
 
   it('exposes a database preflight route that does not treat fallback as healthy', async () => {

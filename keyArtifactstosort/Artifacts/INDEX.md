@@ -49,10 +49,10 @@ This is the only image in `keyArtifactstosort/` showing real assembled hardware 
 vendor render or a web-page capture — the intake register's "none of these is a photograph"
 line scopes to the twelve **root-level** images, not to this file.
 
-**Provenance not established.** The 2026-07-27 capture date and framing are consistent with a
-still from Waveshare's assembly video (see `../reference/INDEX.md`), but nothing in the file
-states its source, and it has not been confirmed to be BEAST-01's own chassis. Do not cite it
-as evidence of this robot's build.
+**Owner-confirmed BEAST-01 bay (2026-08-14).** The wrap SKU is Panasonic/Sanyo `NCR18650GA`
+(3.6 V, 3.4 Ah nominal), three cells in the Waveshare UPS Module 3S holder (`stock-ups`).
+This is not UPS Power Module (C). Do not treat an earlier "provenance unstated" hedge as
+current — that line was an agent disclaimer, not an owner fact.
 
 ## `../tmp/pdfs/ros-driver-1.png`
 

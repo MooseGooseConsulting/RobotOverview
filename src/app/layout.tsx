@@ -23,7 +23,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     spine.source === 'postgres'
       ? { source: 'postgres' as const }
       : {
-          source: 'static' as const,
+          source: 'unavailable' as const,
           fallbackReason: spine.fallbackReason,
         };
   const libraryBaseUrl = normalizeLibraryBaseUrl(process.env.DATACORE_LIBRARY_URL);

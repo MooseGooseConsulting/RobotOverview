@@ -98,7 +98,7 @@ function staticBriefingsFallback(reason: 'not-configured' | 'postgres-error'): B
   // List/search UI does not need bodies — keep the RSC → client payload small.
   // Detail pages load full rows via getBriefing (corpus or Postgres).
   return {
-    source: 'static',
+    source: 'unavailable',
     fallbackReason: reason,
     briefings: DATACORE_CORPUS_BRIEFINGS.map((b) => ({ ...b, bodyMarkdown: null })),
   };
@@ -108,7 +108,7 @@ function staticPacksFallback(
   reason: 'not-configured' | 'postgres-error',
 ): PacksRead {
   return {
-    source: 'static',
+    source: 'unavailable',
     fallbackReason: reason,
     packs: DATACORE_CORPUS_PACKS,
   };

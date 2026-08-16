@@ -23,8 +23,10 @@ import {
   executeIngestOp,
   IngestAuthError,
   IngestConflictError,
+  IngestNotFoundError,
   opAppendInsight,
   opAssignLoadout,
+  opPatchAsset,
   opPatchStatus,
   parseIngestBody,
   type IngestDb,
@@ -209,6 +211,24 @@ describe('parseIngestBody', () => {
     if (body.op === 'append_insight') expect(body.input.id).toBe('insight-x');
   });
 
+  it('parses patch_asset and rejects id-only', () => {
+    const body = parseIngestBody({
+      op: 'patch_asset',
+      input: {
+        id: 'stock-ups',
+        model: 'NCR18650GA',
+        specs: [{ label: 'Cells', value: '3× NCR18650GA' }],
+      },
+    });
+    expect(body.op).toBe('patch_asset');
+    expect(() =>
+      parseIngestBody({
+        op: 'patch_asset',
+        input: { id: 'stock-ups' },
+      }),
+    ).toThrow();
+  });
+
   it('rejects partial land_mission payloads', () => {
     expect(() =>
       parseIngestBody({
@@ -291,6 +311,60 @@ describe('hangar ingest ops (pg-mem)', () => {
     const rows = await db.select().from(activityLog).where(eq(activityLog.id, 'act-ingest-1'));
     expect(rows).toHaveLength(1);
     expect(rows[0]?.text).toBe('Hello activity');
+  });
+
+  it('patch_asset updates specs on a module without changing kind or power', async () => {
+    const before = await db.select().from(assets).where(eq(assets.id, 'stock-ups'));
+    expect(before[0]?.kind).toBe('module');
+    expect(before[0]?.status).toBe('operational');
+    const kind = before[0]?.kind;
+    const callsign = before[0]?.callsign;
+    const status = before[0]?.status;
+    const powerVolts = before[0]?.powerVolts;
+    const powerRail = before[0]?.powerRail;
+
+    await executeIngestOp(db, {
+      op: 'patch_asset',
+      input: {
+        id: 'stock-ups',
+        manufacturer: 'Panasonic / Sanyo',
+        model: 'NCR18650GA',
+        summary: 'Patched summary',
+        specs: [
+          { label: 'Cells', value: '3× Panasonic NCR18650GA (3.6 V, 3.4 Ah nominal)' },
+          { label: 'Module', value: 'Waveshare UPS Module 3S' },
+        ],
+      },
+    });
+
+    const after = await db.select().from(assets).where(eq(assets.id, 'stock-ups'));
+    expect(after[0]?.manufacturer).toBe('Panasonic / Sanyo');
+    expect(after[0]?.model).toBe('NCR18650GA');
+    expect(after[0]?.summary).toBe('Patched summary');
+    expect(after[0]?.specs).toEqual([
+      { label: 'Cells', value: '3× Panasonic NCR18650GA (3.6 V, 3.4 Ah nominal)' },
+      { label: 'Module', value: 'Waveshare UPS Module 3S' },
+    ]);
+    expect(after[0]?.kind).toBe(kind);
+    expect(after[0]?.callsign).toBe(callsign);
+    expect(after[0]?.status).toBe(status);
+    expect(after[0]?.powerVolts).toBe(powerVolts);
+    expect(after[0]?.powerRail).toBe(powerRail);
+  });
+
+  it('patch_asset refuses unknown id with 404', async () => {
+    await expect(opPatchAsset(db, { id: 'no-such-asset', model: 'x' })).rejects.toBeInstanceOf(
+      IngestNotFoundError,
+    );
+    try {
+      await opPatchAsset(db, { id: 'no-such-asset', model: 'x' });
+    } catch (e) {
+      expect(e).toBeInstanceOf(IngestNotFoundError);
+      expect((e as IngestNotFoundError).status).toBe(404);
+      expect((e as IngestNotFoundError).body).toEqual(
+        expect.objectContaining({ id: 'no-such-asset' }),
+      );
+    }
   });
 
   it('patch_status updates asset and appends activity in one tx', async () => {

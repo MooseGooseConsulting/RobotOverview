@@ -23,33 +23,18 @@ Concrete triggers. If you catch yourself writing or thinking any of these, you o
 - "I'll assume the pack is …", "presumably 12 V", "typically these are …"
 - "This isn't documented anywhere" / "we don't have a record of" — you have not checked yet.
 - "What is the … rated at?" for any part, cable, connector, rail, or unit.
-- Picking a threshold, abort floor, timeout, rate limit or tolerance for your own script
-  or subagent. A number that gets compared against a sensor reading, or that gates an
-  action on the robot, is a hardware claim — nobody has to have asked you a question.
 - Starting research on a topic — check `briefings` and `insights` before redoing it.
 - Reaching for `grep` to answer a *hardware* question rather than a *code* question.
 
-It searches `assets` (including the `specs` JSON, where most hardware detail hides),
-`terminals` (connectors, rails, voltages), `sockets`, `insights`, and `briefings`.
+It searches the Hangar fact surfaces: `assets` (including `specs`, `planning_notes`,
+`sources`, `links`, `limitations`), `terminals`, `sockets`, `documents`, `nets`,
+`activity_log`, `missions` (plus after-actions, objectives, constraints),
+`capabilities`, `wishlist_meta`, `insights`, and `briefings`. Silent empty output
+is gone — no hits prints `No matches.` Use `--full` for long briefing/insight bodies.
 Only ask Patrick for something after `find.ts` comes back empty — and say where you
 looked. Re-asking for recorded facts is the single most expensive mistake in this repo:
 on 2026-08-07 an agent asked him to photograph a battery and a charger whose specs were
 both already stored (`assets.stock-ups`, `terminals.ups-charge-in`).
-
-A thin search is not evidence of absence. Keyword guesses only find what you thought to
-guess, and the richest detail sits in briefing **prose**, not in `specs` — so search by
-distinctive *value* (part numbers, brands, capacities: `NCR`, `mAh`, `2600`) as well as by
-category word, and name the terms and tables you tried whenever you report absence. On
-2026-08-14 an agent searched `assets` for "18650 / cell / battery", enumerated all 25
-assets, and reported the cell model unrecorded; `NCR18650GA` was in the `artifact-intake`
-briefing all along.
-
-Insights are dated claims, not an index — they drift exactly like the docs do.
-`ins-beast-pack-capacity-unknown` (2026-08-08) says the cell model and the full-charge
-anchor are unrecorded; the model was already in a briefing, and the anchor has since been
-measured (`ins-beast-full-charge-vmax-2026-08-14`). "X is unknown" is evidence about that
-insight's `captured_at`, never about today — re-search before repeating it, and land a
-superseding insight when it is wrong.
 
 Two different questions, two different sources: the **DB** holds what the hardware
 **is**; **SSH to the robot** tells you what it is **doing** (see "Robot ground truth").
@@ -94,26 +79,6 @@ Working on UI? Follow [`docs/rich-ui.md`](docs/rich-ui.md) — enrich surfaces, 
 because you are already mid-task; a wrong assumption laundered through three commits is
 more expensive than one query.
 
-### Handing facts to subagents
-
-A brief is read as authoritative and then enforced against real hardware, so facts,
-identities and numbers you pass *down* need the same sourcing bar as facts you tell
-Patrick — a record id, or an explicit "invented, unverified" label. And the caveat travels
-with the fact: `artifact-intake` deliberately records provenance limits beside its contents
-("not confirmed to be BEAST-01's own chassis"; "preservation capture, not an approved BEAST
-part"). Quoting the content while dropping the disclaimer converts a carefully hedged
-record into a false assertion.
-
-On 2026-08-14 one session did both in an afternoon. It handed a driving subagent a "hard
-abort below 9.9 V" pack floor reasoned from nothing — the record says 8.368 V measured hard
-cutoff with ~9.6 V recommended as the operational floor (`ins-beast-pack-cutoff-measured`;
-`terminals.ups-rail-out` is 9–12.6 V) — and that invented number aborted a live navigation
-test with ~1.3 V and ~12 measured minutes of reserve left. It then told a research subagent
-the UPS is a Waveshare "UPS Power Module (C)", lifted from a directory name in
-`artifact-intake` a few lines above the caveat calling that module a preservation capture,
-not an installed part — and its 15–19 V input contradicts `terminals.ups-charge-in`
-(DC5521, 12.6 V / 2 A).
-
 ### Writing facts
 
 Facts and research persist to Postgres via `POST /api/hangar/ingest` (Bearer
@@ -144,6 +109,7 @@ docs — never author research bodies as new markdown files.
 | `append_insight` | `{ id, title, body, confidence: "high"\|"medium"\|"low", source?, bay?, capturedAt?, units?, missions?, tags? }` |
 | `append_activity` | `{ id, kind: "acquired"\|"price-drop"\|"shipped"\|"insight"\|"mission"\|"researched", text, at? }` |
 | `patch_status` | `{ target: "unit"\|"item"\|"wishlist", id, status }` |
+| `patch_asset` | Partial identity/spec update: `{ id, manufacturer?, model?, summary?, description?, specs?, planningNotes? }`. Does **not** touch `kind`, `callsign`, `status`, power rails, tags, or sockets. Use this for modules (`stock-ups`); **never** `land_item` an already-landed module — that rewrites it as a peripheral and wipes callsign/power. |
 | `assign_loadout` | `{ hostAssetId, slot, assetId: string\|null }` |
 | `link_insight` | `{ insightId, units?, missions? }` |
 | `land_unit` | Strict full unit record (`id`, `name`, `bay`, `class`, `status`, `summary`, `specs`, …) |

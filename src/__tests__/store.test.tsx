@@ -289,11 +289,11 @@ describe('item() accessor', () => {
     expect(result.current.inventoryRead).toEqual({ source: 'postgres' });
   });
 
-  it('exposes static inventory fallback status when no server read status is supplied', () => {
+  it('exposes unavailable inventory fallback status when no server read status is supplied', () => {
     const { result } = renderHook(() => useHangar(), { wrapper });
 
     expect(result.current.inventoryRead).toEqual({
-      source: 'static',
+      source: 'unavailable',
       fallbackReason: 'not-configured',
     });
   });
