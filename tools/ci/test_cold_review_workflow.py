@@ -1,6 +1,6 @@
 # Copyright 2026 Coldaine
 # SPDX-License-Identifier: Apache-2.0
-"""Contract tests for the OpenHands Cold Review workflow and skill.
+"""Contract tests for the OpenHands Cold Review workflow.
 
 These are the cheap checks that notice a silent regression (wrong model,
 effort flag hacks, pull_request_target, missing auth cleanup) before a
@@ -15,7 +15,6 @@ import yaml
 
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github" / "workflows" / "cold-review.yml"
-SKILL = REPO / ".agents" / "skills" / "custom-codereview-guide.md"
 
 
 def _load_workflow() -> dict:
@@ -29,13 +28,8 @@ def _on(wf: dict) -> dict:
     return wf.get("on") or wf[True]
 
 
-def test_workflow_and_skill_paths_exist():
+def test_workflow_path_exists():
     assert WORKFLOW.is_file()
-    assert SKILL.is_file()
-    assert SKILL.name != "code-review.md"
-    skill = SKILL.read_text(encoding="utf-8")
-    assert "triggers:" in skill
-    assert "/codereview" in skill
 
 
 def test_triggers_and_guards():
