@@ -293,8 +293,6 @@ export class BeastRosClient implements BeastRobotBridge {
   }
 
   async navigateToPose(input: NavigateToPoseInput): Promise<MotionToolResult> {
-    // Math to compute duration (very roughly based on distance + turn)
-    const dist = Math.sqrt(input.x * input.x + input.y * input.y);
     return this.runAction('navToPose', {
       pose: {
         header: { frame_id: 'map' },
@@ -350,9 +348,11 @@ export class BeastRosClient implements BeastRobotBridge {
     if (this.roslib) return this.roslib;
 
     // Prevent NaN scan defect from crashing roslib handlers upstream
-    if (!(JSON.parse as any)._nanPatched) {
+    type PatchedJsonParse = typeof JSON.parse & { _nanPatched?: boolean };
+    const jsonParse = JSON.parse as PatchedJsonParse;
+    if (!jsonParse._nanPatched) {
       const origParse = JSON.parse;
-      JSON.parse = function (text: string, reviver?: (this: any, key: string, value: any) => any) {
+      JSON.parse = function (text: string, reviver?: Parameters<typeof origParse>[1]) {
         try {
           return origParse(text, reviver);
         } catch (err) {
@@ -362,7 +362,7 @@ export class BeastRosClient implements BeastRobotBridge {
           throw err;
         }
       };
-      (JSON.parse as any)._nanPatched = true;
+      (JSON.parse as PatchedJsonParse)._nanPatched = true;
     }
 
     if (this.injectedRoslib) {
