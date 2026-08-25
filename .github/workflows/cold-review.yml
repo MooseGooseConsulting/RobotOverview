@@ -50,7 +50,7 @@ jobs:
     environment: openhands-review
     timeout-minutes: 45
     steps:
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
       - name: User-space gh
@@ -64,7 +64,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: App token
         id: app
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
           app-id: ${{ vars.OPENHANDS_COLD_REVIEW_APP_ID }}
           private-key: ${{ secrets.OPENHANDS_COLD_REVIEW_PRIVATE_KEY }}
@@ -80,7 +80,7 @@ jobs:
           printf '%s' "$CODEX_AUTH_JSON_B64" | base64 -d > "$HOME/.codex/auth.json"
           chmod 600 "$HOME/.codex/auth.json"
       - name: Run PR Review
-        uses: OpenHands/extensions/plugins/pr-review@main
+        uses: OpenHands/extensions/plugins/pr-review@806dfe52084f0af9a7b2f3de1e4ab406c9abecad # main
         with:
           agent-kind: acp
           acp-command: npx -y @agentclientprotocol/codex-acp@1.1.9

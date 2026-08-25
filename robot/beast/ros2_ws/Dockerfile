@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
 #
 # BEAST-01 ROS 2 Humble workspace image (linux/arm64).
 #
@@ -14,7 +14,7 @@
 #   coldaine-homelab/deployments/beast-01/ (verify-beast / beast-pull) —
 # not in this image.
 
-FROM --platform=$TARGETPLATFORM ros:humble-ros-base AS build
+FROM --platform=$TARGETPLATFORM ros:humble-ros-base@sha256:75dd3aba34a3838dadbb31a9f7bef769bdfa8713e6cec686fc868db2981b0987 AS build
 
 ARG TARGETPLATFORM=linux/arm64
 ARG DEBIAN_FRONTEND=noninteractive
@@ -85,7 +85,7 @@ RUN source /opt/ros/humble/setup.bash \
  && rm -rf /ws/build /ws/log /ws/src
 
 # --- runtime ---
-FROM --platform=$TARGETPLATFORM ros:humble-ros-base
+FROM --platform=$TARGETPLATFORM ros:humble-ros-base@sha256:75dd3aba34a3838dadbb31a9f7bef769bdfa8713e6cec686fc868db2981b0987
 
 ARG DEBIAN_FRONTEND=noninteractive
 
