@@ -49,16 +49,38 @@ Four decisions block everything below. Recommendations attached; the decision is
    explicitly temporary shim with a written expiry — the same mechanism the plan already
    grants `beast_base` — and let the roslib-convergence plan's close-out decide its final
    home. It must not block the rebuild and must not survive by inertia.
-3. **Artifact form for the new tree.** Recommendation: **source release directories with A/B
-   swap on the robot** (`/opt/beast/releases/<sha>` + `current`/`previous` symlinks),
-   deployed by one small tool that keeps `beast-pull`'s proven properties. The container
-   image is retained as **CI proof of declaration completeness** (rung 3), not as the deploy
-   vehicle — promoting it to deploy vehicle later is a small, already-proven step once the
-   new cluster's BuildKit exists. Rationale: the two-slot/rollback pattern is standard
-   practice (A/B rootfs slots in Android/ChromeOS/Mender/RAUC; Jetson Linux itself ships
-   `ROOTFS_AB`; blue-green at the app layer), and this repo has already proven the semantics
-   in source mode — changing the artifact form and the tree in the same step doubles the
-   unknowns for zero rung-7 benefit.
+3. **Artifact form for the new tree** — researched 2026-08-28; the evidence moved this
+   recommendation. Two real practitioner paths:
+   - **Container as the deploy vehicle** — the mainstream way robot stacks ship in 2026:
+     CI builds the arm64 image, the robot's systemd units run it (host networking +
+     `--ipc=host` for DDS, explicit `--device` maps by-id, the node as PID 1 so death
+     propagates to the container exit and systemd sees it); update is pull + restart,
+     rollback is retagging to the retained `previous` image. The decisive property: the
+     artifact CI proved at rung 3 is **byte-for-byte the artifact the robot runs** — C2
+     stops being a proxy proof. The classic Jetson-container trap — CUDA/TensorRT/multimedia
+     userspace in the container must match the flashed JetPack, so generic Ubuntu bases
+     break subtly — does **not** bite this robot today: the stack is CPU-only ROS and the
+     OAK-D runs its inference on-camera, so the pinned `ros:humble-ros-base` the existing
+     Dockerfile already uses is correct. Record the rule with the decision: **the day
+     Orin-GPU inference enters scope, the base must switch to an L4T/JetPack-aligned image
+     (`nvcr.io/nvidia/l4t-jetpack` or `dustynv/ros`) matched to the flashed JetPack**, and
+     the units gain `--runtime nvidia` — or it fails in exactly the ways the field warns
+     about.
+   - **Source release dirs with A/B symlinks** (`/opt/beast/releases/<sha>` +
+     `current`/`previous`): keeps `beast-pull`'s proven semantics with no docker in the
+     robot's runtime loop, but keeps on-robot colcon builds alive — the path that
+     historically drifted — and leaves C2 proving the manifests rather than the shipped
+     artifact.
+   Recommendation: **container as the deploy vehicle**, with `beast-pull`'s proven gates
+   (health-verify before swap, parked gate while motion-armed, failed-target memory)
+   carried into the successor tool, and release dirs as the fallback if robot-side
+   container plumbing throws surprises at rung 5. Either way, OS-layer A/B (`ROOTFS_AB` /
+   `nvbootctrl`) stays out of scope: it is real and fleet-proven (RDFM, meta-tegra), but it
+   is a flash-time partition-layout choice that halves rootfs storage, requires a
+   boot-health service calling `nvbootctrl mark-boot-successful` on every boot (otherwise
+   the retry counter silently switches slots — watchdog resets and kernel panics decrement
+   it too), and has documented auto-recovery quirks on Orin Nano r36.x. Application and OS
+   updates stay separate planes; the flash runbook remains the OS-layer recovery.
 4. **Repo shape: stay one repo.** The split that matters — knowledge out of the repo — is
    already designed: facts live in the Hangar DB, code lives here. The confusion has come
    from knowledge leaking into markdown, not from the monorepo. Splitting now would freeze
@@ -141,6 +163,13 @@ cache hits.
 - Layer order: base → apt (keyed on `apt.manifest` hash) → source deps (keyed on
   `beast.repos`) → our packages. A dependency change rebuilds one layer; a code change
   rebuilds only ours.
+- Build-speed honesty: today's workflow builds arm64 under QEMU on amd64 runners, and QEMU
+  costs roughly 3–10× on compile-heavy layers (measured reports; one full ROS workspace:
+  8 h emulated vs 1 h native). Post-rebuild that cost is confined to the colcon layer of
+  two or three small packages, so the existing QEMU + layer-cache path is acceptable. If it
+  grows, the standard fix is a **native arm64 builder** — GitHub's hosted `ubuntu-24.04-arm`
+  runners or a self-hosted arm64 machine — building per-arch and merging manifests with
+  `imagetools create`; not more cache, and never CI on the robot itself.
 - Stated honestly, as the plan does: a container cannot prove udev rules, group
   memberships, or the RTC ordering. Those are rung 6's job. Everything else that made
   bring-up historically fail — missing apt package, undeclared pip dep, accidental
@@ -163,8 +192,9 @@ wheels off the ground.
 
 ## Rung 5 — C1: functional, on the robot, side-by-side
 
-Install the new tree to `/opt/beast/releases/<sha>` with differently-named units, nothing
-enabled. Old stack untouched and running. Supervised bring-up under the `/beast-paces`
+Stand the new stack up beside the old one in its rung-0 artifact form — the candidate
+image (or a release dir under `/opt/beast/releases/<sha>`) with differently-named units,
+nothing enabled. Old stack untouched and running. Supervised bring-up under the `/beast-paces`
 staging discipline (ground-truth checks, cmd_vel-timeout gate, explicit zeros — never rely
 on ceasing to publish). Rollback: do nothing; the old stack was never stopped.
 
@@ -182,10 +212,12 @@ the plan's done-condition 1.
 
 ## Rung 7 — Cut over, then delete in one commit
 
-- The deploy tool (successor to `beast-pull`, one tool, small): fetch release → build or
-  unpack under `releases/<sha>` → health gate → flip `current` → restart enabled units →
-  verify; on failure flip back to `previous` and remember the failed target. The parked
-  gate (no swap while motion-armed) carries over unchanged.
+- The deploy tool (successor to `beast-pull`, one tool, small), in the rung-0 artifact
+  form: fetch the new image (or release) → stand it up dark → health gate → swap (retag
+  `current`, or flip the symlink) → restart enabled units → verify; on failure swap back
+  to the retained `previous` and remember the failed target. The parked gate (no swap
+  while motion-armed) carries over unchanged. This is the two-image workflow made literal:
+  the robot always holds the last-good artifact, and rollback is one retag.
 - Enablement flips to the new units, from the repo's enablement manifest.
 - Then the plan's Phase D exactly as written: delete `robot/beast/ros2_ws` — the whole old
   tree, scripts, units — in a single commit. Deleted, not parked.
