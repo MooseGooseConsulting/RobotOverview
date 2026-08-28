@@ -239,7 +239,22 @@ nothing enabled. Old stack untouched and running. Supervised bring-up under the 
 staging discipline (ground-truth checks, cmd_vel-timeout gate, explicit zeros — never rely
 on ceasing to publish). Rollback: do nothing; the old stack was never stopped.
 
-Done when: the new stack drives supervised, on the robot the old stack still owns.
+Rung 5 also carries the **OAK-D Lite qualification** — the hardware half of the camera
+preserve item. The repo record (`docs/beast-ops.md`, first light 2026-07-31): RGB and
+aligned depth both ~16 FPS, TF correct, MXID `1944301091FCBE2F00` — a working camera,
+but negotiating `USB SPEED: HIGH` (USB 2.0), with the in-box Lite cable presumed the
+cause and a written five-minute discriminator that has never been run: a known-USB3
+USB-C cable into a direct Orin USB3 port, then read the driver log. `SUPER` (+ ~30 FPS)
+clears the unit — the limitation was the cable. Still `HIGH` on a known-good cable and
+port makes the unit or the Orin port genuinely suspect, and that verdict decides whether
+the camera item means "carry the pipeline" or "replace the sensor first". Check IMU
+presence on this Lite revision in the same session (unchecked since first light — the
+`depthai` python module was absent). Land the verdict as a measurement-class insight
+either way; if the owner has observed symptoms since 2026-07-31 that live in no record,
+capture them as the hypothesis this test discriminates.
+
+Done when: the new stack drives supervised, on the robot the old stack still owns, and
+the OAK qualification verdict is in the DB.
 
 ## Rung 6 — C2: fresh metal
 
