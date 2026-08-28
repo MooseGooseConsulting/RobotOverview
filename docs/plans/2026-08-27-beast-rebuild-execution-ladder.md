@@ -1,10 +1,12 @@
 # BEAST-01 rebuild — the execution ladder
 
-**Status:** PROPOSED — 2026-08-27. Companion to the governing clean-room rebuild plan held on
+**Status:** PROPOSED — 2026-08-27; amended 2026-08-28 after owner discussion (preserve-list
+candidates from the autonomy on-ramp's executed phases, decision 5, the plans-harvest rule).
+Companion to the governing clean-room rebuild plan held on
 [PR #247](https://github.com/MooseGooseConsulting/RobotOverview/pull/247)
 (`docs/plans/2026-08-15-beast-platform-rebuild.md`). That plan owns **what survives and why**
 (the preserve list, the evidence, the watch-outs). This document owns **how the work is
-sequenced**: rungs, artifacts, gates, and the four decisions the owner must ratify before
+sequenced**: rungs, artifacts, gates, and the five decisions the owner must ratify before
 rung 1 starts. Nothing here relaxes the plan; where the two disagree, the plan wins until the
 owner says otherwise.
 
@@ -37,7 +39,7 @@ correct.
 
 ## Rung 0 — Ratify (owner; ~30 minutes; no robot)
 
-Four decisions block everything below. Recommendations attached; the decision is the owner's.
+Five decisions block everything below. Recommendations attached; the decision is the owner's.
 
 1. **Merge PR #247 as the governing plan**, after these corrections:
    - Every measured number in the preserve list cited to a Hangar insight id. Known
@@ -45,6 +47,24 @@ Four decisions block everything below. Recommendations attached; the decision is
      tooling reports `ins-beast-pack-cutoff-measured` as 8.368 V. Do not guess — resolve
      from the DB record's provenance (rung 1 owns this).
    - Note in the plan that its counts are a 2026-08-15 snapshot (see Snapshot warning above).
+   - **Three preserve-list additions surfaced 2026-08-28.** The plan's burden-of-proof rule
+     still applies, but each carries evidence the six items don't cover:
+     1. **The camera-to-cockpit pipeline.** `docs/NORTH_STAR.md` G7 names *video* as a
+        portal surface, so this is decided by intent, not taste — yet the only node serving
+        it (`cam_oak_webrtc` in `ugv_vision`) dies at Phase D with no named successor. The
+        pipeline's shape and the OAK-D device facts become a seventh knowledge item; a
+        small owned camera node joins the new tree.
+     2. **The measured calibration constants and EKF fusion config.** The autonomy
+        on-ramp's Phase 1 (2026-08-14) measured `b_eff`/`wheel_base`, the gyro bias, and
+        the linear scale, and landed them as parameters with the `ekf.yaml` fusion
+        decisions and written rationale. The insights (`ins-beast-odom-calibration-2026-08-14`
+        and siblings) record the findings, but the **operative values live in old-tree
+        launch/param files that Phase D deletes**. They cost a supervised owner session on
+        the real floor; rung 1 extracts them into `params/` with insight ids like every
+        other number.
+     3. **Kinematics and the robot model.** Wheel radius, track width, and the URDF
+        (`ugv_description`) are chassis facts embedded in vendor code;
+        `diff_drive_controller` and every TF consumer need them on day 1.
 2. **`ugv_cockpit` disposition** (the review's open question). Recommendation: carry it as an
    explicitly temporary shim with a written expiry — the same mechanism the plan already
    grants `beast_base` — and let the roslib-convergence plan's close-out decide its final
@@ -88,9 +108,17 @@ Four decisions block everything below. Recommendations attached; the decision is
    API, and shared types during the riskiest project of the year. Re-evaluate after rung 7,
    when the robot tree is a few packages and a split would be cheap — if the pain is gone,
    the split was never the fix.
+5. **Run the first real mapping run on the old stack before cutover** (recommended;
+   declining does not block the rebuild). The autonomy on-ramp's Phase 2 has never run.
+   It is owner-driven WASD with `slam_toolbox` observing — not gated by the roslib NaN
+   defect (F13), which only blocks agent-issued goals. The map stem lands in
+   `/data/beast/maps/`, off-tree and untouched by Phase D, and gives rung 5's
+   side-by-side a real map and identical goals to compare old stack against new.
+   Without it, C1 validates on the residue of the 2026-08-13 incident. Decline if robot
+   time is the constraint; nothing below depends on it.
 
-Emit: #247 merged; the four decisions recorded in one `append_activity` entry.
-Done when: an agent starting rung 1 can cite a decision for all four without asking.
+Emit: #247 merged; the five decisions recorded in one `append_activity` entry.
+Done when: an agent starting rung 1 can cite a decision for all five without asking.
 
 ## Rung 1 — Knowledge extraction and memory triage (DB access; no robot)
 
@@ -122,9 +150,22 @@ from instrument readings. Triage by **evidence class**, not by re-litigating inc
    the only archaeology in the whole ladder. Do not comb further: the 2026-08-15 audit
    already measured the tree, and the plan's anti-goal stands — "we found we still needed
    it" is the mechanism that built the current system.
+5. **Harvest the plans directory.** Most live plans in `docs/plans/` are work orders
+   against the old tree, and several carry hazards that exist **only in their prose**:
+   the rosbridge bare-`NaN` defect and its consequences for the agent-side stop, the
+   `keyboard_ctrl` SIGHUP hazard, the no-RTC `time-sync.target` ordering rule, the ESP32
+   velocity latch, the abort-path order. Land each as an insight with its evidence class
+   before the code it describes is deleted. The triage rule mirrors the memory triage —
+   a doc is (a) a work order against code Phase D deletes: harvest its hazards, then
+   delete it in the same commit that deletes its target; (b) a hardware fact: belongs in
+   the DB, not markdown; (c) an operating fact about the *new* stack: rewritten fresh,
+   never ported. The roslib-convergence plan is the exception that proves the rule: it
+   targets the web app (`src/server/beast/ros-singleton.ts`), survives Phase D untouched,
+   and proceeds in parallel — the rebuild neither waits for it nor absorbs it.
 
 Done when: the briefing renders in Datacore; every numeric fact in it cites an insight id;
-each insight carries an evidence class; the voltage discrepancy is closed with provenance.
+each insight carries an evidence class; the voltage discrepancy is closed with provenance;
+the plans-directory hazards are landed as insights.
 
 ## Rung 2 — Pin the world (no robot)
 
@@ -230,7 +271,10 @@ deploy is one command that was exercised once on purpose.
 Per the plan's Phase E: update `docs/beast-ops.md` Quick connect (dated), `docs/deploy.md`,
 `README.md`, `AGENTS.md`'s parked-package list (obsolete after deletion); retire the
 strip-down and vendored-surface plans; delete the executed plans including this one;
-`append_activity` the cutover. Two items specific to this ladder:
+`append_activity` the cutover. **Plans die with their target code** (the rung-1 harvest
+rule): every plan whose subject was deleted at rung 7 is deleted here, its hazards already
+in the DB — an orphaned work order against code that no longer exists is doc drift waiting
+to mislead the next agent. Two items specific to this ladder:
 
 - Verify nothing robot-side references `coldaine-homelab` — that repo is frozen for
   demolition, and the Hangar app's deploy pin currently writes into it. The app-side pin
