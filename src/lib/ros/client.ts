@@ -17,21 +17,33 @@ export type ConnectionState = 'connecting' | 'connected' | 'disconnected';
 //                            Do NOT "harmonize" this with pt_steady_ctrl; they
 //                            are different robot-side subscribers.)
 //   /imu/raw                 sensor_msgs/msg/Imu (nothing publishes /imu/data)
+//
+// ── THE BRIDGE ALLOWLIST IS THE CONTRACT ────────────────────────────────────
+// rosbridge on BEAST-01 runs glob allowlists (beast-ros `config/bridge.yaml`),
+// so a topic that is not on `topics_sub_glob` is refused, and a topic with no
+// publisher is silent. Both render as a panel that waits forever. Every entry
+// below is on the read allowlist AND had a live publisher when checked
+// (2026-09-14, `ros2 topic list` on the robot).
+//
+// REMOVED 2026-09-14 — none of these exist on the robot or on the allowlist:
+//   /ugv/allow_motion, /ugv/set_allow_motion  the arming latch is GONE from the
+//       stack. beast-ros `config/twist_mux.yaml` states it deliberately: "There
+//       are deliberately NO locks: stop authority is the collision monitor,
+//       teleop deadman is the source timeout." The cockpit no longer gates
+//       driving on a flag that can never arrive.
+//   /cockpit/status               replaced by the twist_mux entry inside
+//       /diagnostics, which the robot really does publish (see MUX SLICE).
+//   /cockpit/depth/compressed     its only producer was the retired legacy
+//       ugv_cockpit colorizer; bridge.yaml refuses it by name.
+//   /cockpit/overhead_clearance   no publisher anywhere in the stack.
 export const ROS_SUBSCRIPTIONS = [
   { topic: '/ugv/voltage', type: 'sensor_msgs/msg/BatteryState' },
   { topic: '/scan', type: 'sensor_msgs/msg/LaserScan' },
   { topic: '/odom', type: 'nav_msgs/msg/Odometry' },
   // ugv_bringup publishes /imu/raw. /imu/data has no publisher on this robot.
   { topic: '/imu/raw', type: 'sensor_msgs/msg/Imu' },
-  { topic: '/cockpit/overhead_clearance', type: 'std_msgs/msg/Float32' },
-  { topic: '/cockpit/status', type: 'diagnostic_msgs/msg/DiagnosticArray' },
   { topic: '/diagnostics', type: 'diagnostic_msgs/msg/DiagnosticArray' },
-  // Dedicated safety topics, latched robot-side. `/ugv/allow_motion` is the
-  // rendered motion authority (see SET_ALLOW_MOTION_SERVICE below); a field it
-  // feeds must render UNKNOWN when silent, never a cleared/false default.
-  { topic: '/ugv/allow_motion', type: 'std_msgs/msg/Bool' },
   { topic: '/oak/rgb/image_raw/compressed', type: 'sensor_msgs/msg/CompressedImage' },
-  { topic: '/cockpit/depth/compressed', type: 'sensor_msgs/msg/CompressedImage' },
   // Phase E (2026-08-13): slam_toolbox occupancy grid + the map→odom TF the
   // client composes with the /odom pose to place the robot on the map.
   { topic: '/map', type: 'nav_msgs/msg/OccupancyGrid' },
@@ -45,10 +57,13 @@ export const ROS_PUBLICATIONS = [
   { topic: '/ugv/pt_steady_ctrl', type: 'std_msgs/msg/Float32MultiArray' },
 ] as const;
 
-export const IMAGE_TOPICS = [
-  '/oak/rgb/image_raw/compressed',
-  '/cockpit/depth/compressed',
-] as const;
+// Only feeds a browser can actually decode into an <img>. The robot's depth
+// stream (/oak/stereo/image_raw/compressedDepth) is allowlisted for read but is
+// NOT one of these: `compressedDepth` is a 12-byte ConfigHeader followed by a
+// 16-bit PNG, which no <img> renders as a picture. Colorizing it needs a robot-
+// side node, and bridge.yaml says that node has to land before the topic earns
+// an entry here.
+export const IMAGE_TOPICS = ['/oak/rgb/image_raw/compressed'] as const;
 
 /** Per-topic subscribe throttles; anything absent gets the 50 ms default. */
 const TOPIC_THROTTLE_MS: Record<string, number> = {
@@ -181,8 +196,8 @@ const FRESHNESS_MS = {
   voltage: 2000,
   odom: 1000,
   imu: 1000,
-  clearance: 2000,
-  status: 2000,
+  // twist_mux runs its diagnostic updater at 1 Hz; two missed ticks is stale.
+  mux: 3000,
   diagnostics: 2000,
   scan: 2000,
   // slam_toolbox republishes /map on its 5 s update timer; give it room.
@@ -205,12 +220,15 @@ export interface CockpitVoltage extends SliceMeta {
    */
   current: number | null;
   /**
-   * State of charge 0..1 from the 3S OCV table (beast_power/soc.py), or null
-   * when the publisher reports NaN/no sensor. OCV-only: reads LOW under load
-   * and HIGH while charging — consumers alarming on SOC must gate on charging
-   * state. NaN arrives as null via the rosbridge NaN repair above.
+   * DELIBERATELY NOT INGESTED: `BatteryState.percentage`.
+   *
+   * On BEAST-01 that field is exactly `voltage / 12.6` — measured live
+   * 2026-09-14: 12.1100 V reported alongside percentage 0.96111, and
+   * 12.11/12.6 = 0.96111. It is a restatement of the volts, not a charge
+   * estimate: no coulomb count, no OCV curve, no load or temperature term. A
+   * cockpit that prints it as "96%" tells the operator the pack is nearly full
+   * when it is sitting near its resting nominal. The panels show VOLTS.
    */
-  percentage: number | null;
   /** sensor_msgs/BatteryState power_supply_status (1=CHARGING … 4=FULL), null if unreported/UNKNOWN-0. */
   powerSupplyStatus: number | null;
   /** BatteryState.present — false is the publisher's own absent-sensor report. */
@@ -234,29 +252,39 @@ export interface CockpitImu extends SliceMeta {
   gz: number | null;
 }
 
-export interface CockpitClearance extends SliceMeta {
-  meters: number | null;
+/** One configured twist_mux input, as the robot describes it in /diagnostics. */
+export interface MuxInput {
+  /** twist_mux's own key for the input, e.g. `ui`, `nav`, `joy_robot`. */
+  name: string;
+  /** The cmd_vel topic it listens on, e.g. `cmd_vel_ui`. Null if unparsable. */
+  topic: string | null;
+  /** Rung priority — higher wins. Null if unparsable. */
+  priority: number | null;
+  /** Seconds of silence after which twist_mux drops this source. */
+  timeoutSec: number | null;
 }
 
 /**
- * Every field is `null` until the robot actually reports it. `null` means
- * UNKNOWN and must render as such — it is NOT "false", "clear", or "NONE".
- * The topics behind `allowMotion` / `muxSource` are not deployed
- * on the robot yet, so `null` is the expected steady state today.
+ * The twist_mux rung ladder, read from the `twist_mux: Twist mux status` entry
+ * of /diagnostics — the roll-up the ROBOT actually publishes. (`/cockpit/status`
+ * never existed on this stack; it was removed 2026-09-14.)
+ *
+ * Every field is `null` until the robot reports it. `null` means UNKNOWN and
+ * must render as such — it is NOT "false", "clear", or "NONE".
  */
-export interface CockpitStatus extends SliceMeta {
-  muxSource: string | null;
-  /** Seconds since the last /cmd_vel. The robot sends -1 for "unknown". */
-  cmdAge: number | null;
-  pubCount: number | null;
-  allowMotion: boolean | null;
-  wifiRssi: number | null;
-  diskFree: string | null;
-  cpuTemp: number | null;
-  gpuTemp: number | null;
-  /** Physical tether / charging motion lock status */
-  isCharging: boolean | null;
-  isEthernetConnected: boolean | null;
+export interface CockpitMux extends SliceMeta {
+  /**
+   * twist_mux's `current priority` — its LOCK priority, not the winning
+   * velocity source's. `getLockPriority()` (twist_mux.cpp, humble) returns the
+   * priority of the engaged lock and 0 when none is engaged, so this says
+   * nothing about which rung holds the floor. Null means twist_mux has not
+   * reported.
+   */
+  lockPriority: number | null;
+  /** twist_mux's `data age in [sec]` — how long since the winning cmd_vel. */
+  dataAgeSec: number | null;
+  /** The configured rungs, in the order twist_mux lists them. */
+  inputs: MuxInput[];
 }
 
 export interface CockpitScanPoint {
@@ -349,12 +377,6 @@ function finite(value: unknown): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
-function safeBool(value: string | undefined): boolean | null {
-  if (value === 'true') return true;
-  if (value === 'false') return false;
-  return null;
-}
-
 function stampToMs(header: InboundMsg['header']): number | null {
   const sec = header?.stamp?.sec;
   const nanosec = header?.stamp?.nanosec;
@@ -375,8 +397,7 @@ const meta: Record<SliceKey, SliceMeta> = {
   voltage: blankMeta(),
   odom: blankMeta(),
   imu: blankMeta(),
-  clearance: blankMeta(),
-  status: blankMeta(),
+  mux: blankMeta(),
   diagnostics: blankMeta(),
   scan: blankMeta(),
   map: blankMeta(),
@@ -386,25 +407,55 @@ const meta: Record<SliceKey, SliceMeta> = {
 type VoltageData = Omit<CockpitVoltage, keyof SliceMeta>;
 type OdomData = Omit<CockpitOdom, keyof SliceMeta>;
 type ImuData = Omit<CockpitImu, keyof SliceMeta>;
-type ClearanceData = { meters: number | null };
-type StatusData = Omit<CockpitStatus, keyof SliceMeta>;
+type MuxData = Omit<CockpitMux, keyof SliceMeta>;
 type ScanData = Omit<CockpitScan, keyof SliceMeta>;
 type MapData = Omit<CockpitMap, keyof SliceMeta>;
 type MapOdomData = Omit<CockpitMapOdom, keyof SliceMeta>;
 type DiagnosticsData = { items: DiagnosticsItem[] };
 
-function blankStatus(): StatusData {
+function blankMux(): MuxData {
+  return { lockPriority: null, dataAgeSec: null, inputs: [] };
+}
+
+// ── TWIST_MUX LADDER, FROM /diagnostics ─────────────────────────────────────
+// Live sample from BEAST-01, 2026-09-14 (`ros2 topic echo /diagnostics`):
+//   name:  'twist_mux: Twist mux status'
+//   key:   'velocity topics.ui'
+//   value: ' masked (listening to cmd_vel_ui @ 0.500000s with priority #50)'
+//   key:   'current priority'      value: '0'
+//   key:   'data age in [sec]'     value: '0'
+//
+// The winning rung is NOT on this wire. `current priority` is the LOCK
+// priority: `getLockPriority()` (twist_mux.cpp, humble branch) returns the
+// engaged lock's priority, 0 when none is engaged — the same number for every
+// velocity source. The per-topic masked/unmasked prose is likewise computed
+// against the lock, not against the winner. So we ingest the rung list, their
+// priorities and timeouts, the lock priority and the command age, and we do not
+// claim to know which source is driving.
+const TWIST_MUX_DIAG_NAME = 'twist_mux';
+const MUX_INPUT_KEY_PREFIX = 'velocity topics.';
+const MUX_INPUT_VALUE = /listening to (\S+) @ ([0-9.]+)s with priority #(\d+)/;
+
+function parseMuxDiagnostic(values: Record<string, string>): MuxData {
+  const inputs: MuxInput[] = [];
+  Object.keys(values).forEach((key) => {
+    if (!key.startsWith(MUX_INPUT_KEY_PREFIX)) return;
+    const match = MUX_INPUT_VALUE.exec(values[key] ?? '');
+    inputs.push({
+      name: key.slice(MUX_INPUT_KEY_PREFIX.length),
+      topic: match ? match[1] : null,
+      priority: match ? safeNumber(match[3]) : null,
+      timeoutSec: match ? safeNumber(match[2]) : null,
+    });
+  });
+  // twist_mux lists its inputs alphabetically; a ladder reads by priority.
+  // Rungs we could not parse a priority for sink to the bottom rather than
+  // silently sorting as if they were priority zero.
+  inputs.sort((a, b) => (b.priority ?? -1) - (a.priority ?? -1));
   return {
-    muxSource: null,
-    cmdAge: null,
-    pubCount: null,
-    allowMotion: null,
-    wifiRssi: null,
-    diskFree: null,
-    cpuTemp: null,
-    gpuTemp: null,
-    isCharging: null,
-    isEthernetConnected: null,
+    lockPriority: safeNumber(values['current priority']),
+    dataAgeSec: safeNumber(values['data age in [sec]']),
+    inputs,
   };
 }
 
@@ -421,30 +472,13 @@ function blankScan(): ScanData {
 }
 
 function blankVoltage(): VoltageData {
-  return { voltage: null, current: null, percentage: null, powerSupplyStatus: null, present: null };
+  return { voltage: null, current: null, powerSupplyStatus: null, present: null };
 }
 
 let voltageData: VoltageData = blankVoltage();
 let odomData: OdomData = { x: null, y: null, yaw: null, linearSpeed: null, angularSpeed: null };
 let imuData: ImuData = { ax: null, ay: null, az: null, gx: null, gy: null, gz: null };
-let clearanceData: ClearanceData = { meters: null };
-let statusData: StatusData = blankStatus();
-
-// ── DIRECT TOPIC vs AGGREGATOR PROVENANCE ───────────────────────────────────
-// `/cockpit/status` is a 1 Hz roll-up that also reports allow_motion. When the
-// robot has nothing real to put there it emits placeholders, and those would
-// overwrite the dedicated `/ugv/allow_motion` topic we subscribe to precisely
-// so we do not depend on the roll-up — the aggregator would defeat its own
-// hedge, once a second.
-//
-// So the dedicated topic wins while it is fresh, and the aggregator fills in
-// only where the dedicated topic has never published or has gone stale.
-const DIRECT_TOPIC_AUTHORITY_MS = 2000;
-let allowMotionDirectAt: number | null = null;
-
-function directStillAuthoritative(at: number | null): boolean {
-  return at !== null && Date.now() - at <= DIRECT_TOPIC_AUTHORITY_MS;
-}
+let muxData: MuxData = blankMux();
 let scanData: ScanData = blankScan();
 let mapData: MapData = { width: 0, height: 0, resolution: 0.05, originX: 0, originY: 0, data: [] };
 // True once we dropped /map on this wire (fragment storm or oversized grid).
@@ -458,8 +492,7 @@ let connectionState: ConnectionState = 'disconnected';
 let voltageState: CockpitVoltage = { ...voltageData, ...meta.voltage };
 let odomState: CockpitOdom = { ...odomData, ...meta.odom };
 let imuState: CockpitImu = { ...imuData, ...meta.imu };
-let clearanceState: CockpitClearance = { ...clearanceData, ...meta.clearance };
-let statusState: CockpitStatus = { ...statusData, ...meta.status };
+let muxState: CockpitMux = { ...muxData, ...meta.mux };
 let scanState: CockpitScan = { ...scanData, ...meta.scan };
 let mapState: CockpitMap = { ...mapData, ...meta.map };
 let mapOdomState: CockpitMapOdom = { ...mapOdomData, ...meta.mapOdom };
@@ -472,8 +505,7 @@ const listeners = {
   voltage: new Set<() => void>(),
   odom: new Set<() => void>(),
   imu: new Set<() => void>(),
-  clearance: new Set<() => void>(),
-  status: new Set<() => void>(),
+  mux: new Set<() => void>(),
   diagnostics: new Set<() => void>(),
   scan: new Set<() => void>(),
   map: new Set<() => void>(),
@@ -500,13 +532,9 @@ const rebuild: Record<SliceKey, () => void> = {
     imuState = { ...imuData, ...meta.imu };
     notify('imu');
   },
-  clearance: () => {
-    clearanceState = { ...clearanceData, ...meta.clearance };
-    notify('clearance');
-  },
-  status: () => {
-    statusState = { ...statusData, ...meta.status };
-    notify('status');
+  mux: () => {
+    muxState = { ...muxData, ...meta.mux };
+    notify('mux');
   },
   diagnostics: () => {
     diagnosticsState = { ...diagnosticsData, ...meta.diagnostics };
@@ -563,14 +591,12 @@ function resetSlicesForNewConnection() {
   voltageData = blankVoltage();
   odomData = { x: null, y: null, yaw: null, linearSpeed: null, angularSpeed: null };
   imuData = { ax: null, ay: null, az: null, gx: null, gy: null, gz: null };
-  clearanceData = { meters: null };
-  statusData = blankStatus();
+  muxData = blankMux();
   scanData = blankScan();
   mapData = { width: 0, height: 0, resolution: 0.05, originX: 0, originY: 0, data: [] };
   mapOdomData = { x: 0, y: 0, yaw: 0 };
   diagnosticsData = { items: [] };
   scanArrivals = [];
-  allowMotionDirectAt = null;
   (Object.keys(meta) as SliceKey[]).forEach((key) => {
     meta[key] = blankMeta();
     rebuild[key]();
@@ -592,40 +618,20 @@ const MAX_RECONNECT_DELAY = 10000;
 let lastWsUrl = '';
 let scanArrivals: number[] = [];
 
-// ── MOTION AUTHORITY: /ugv/set_allow_motion ─────────────────────────────────
-// The cockpit never publishes a mux lock. Motion authority is the latched
-// `allow_motion` flag inside ugv_bringup, flipped through the
-// `std_srvs/SetBool` service below. That flag gates the serial write to the
-// ESP32 below the mux, so it covers every command source (UI, pads, nav), and
-// it survives twist_mux restarts because it does not live in the mux at all.
-// The UI renders ARMED/DISARMED from the latched `/ugv/allow_motion` topic —
-// never from what it last asked for.
-export const SET_ALLOW_MOTION_SERVICE = '/ugv/set_allow_motion';
-
-export interface ServiceResult {
-  /** True only when the bridge delivered the call AND the service answered success. */
-  ok: boolean;
-  /** Service's own message (SetBool.message) or a local failure reason. */
-  message: string | null;
-}
-
-const SERVICE_CALL_TIMEOUT_MS = 3000;
-
-interface PendingServiceCall {
-  resolve: (result: ServiceResult) => void;
-  timer: ReturnType<typeof setTimeout>;
-}
-
-const pendingServiceCalls = new Map<string, PendingServiceCall>();
-
-/** Every in-flight call fails when the socket goes away — resolve, don't hang. */
-function failPendingServiceCalls(reason: string) {
-  pendingServiceCalls.forEach((pending) => {
-    clearTimeout(pending.timer);
-    pending.resolve({ ok: false, message: reason });
-  });
-  pendingServiceCalls.clear();
-}
+// ── NO MOTION-AUTHORITY SERVICE ─────────────────────────────────────────────
+// There is deliberately no arming call here, and the whole service-call
+// machinery went with it (2026-09-14). `/ugv/set_allow_motion` and
+// `/ugv/allow_motion` do not exist on BEAST-01 — not in `ros2 service list`,
+// not in `ros2 topic list`, not in the bridge allowlist — and the cockpit used
+// to refuse to drive until that flag read true, which it never could. Stop
+// authority on this stack is, per beast-ros `config/twist_mux.yaml`, the
+// collision monitor, the 0.5 s twist_mux source timeout, and the driver's
+// zero-on-shutdown. The cockpit's own contribution is the zero tail on release
+// (see drive-law.ts), not a software latch it invents for itself.
+//
+// If a service ever does earn a place here (bridge.yaml allowlists
+// /slam_toolbox/save_map, for instance), re-add the call plumbing WITH its
+// caller, not before it.
 
 // ── ROSBRIDGE STATUS FRAMES ─────────────────────────────────────────────────
 // rosbridge 2.0.7 answers a refused op with
@@ -775,8 +781,7 @@ const serverState = {
   imu: { ax: null, ay: null, az: null, gx: null, gy: null, gz: null, ...blankMeta() } as CockpitImu,
   map: { width: 0, height: 0, resolution: 0.05, originX: 0, originY: 0, data: [], ...blankMeta() } as CockpitMap,
   mapOdom: { x: 0, y: 0, yaw: 0, ...blankMeta() } as CockpitMapOdom,
-  clearance: { meters: null, ...blankMeta() } as CockpitClearance,
-  status: { ...blankStatus(), ...blankMeta() } as CockpitStatus,
+  mux: { ...blankMux(), ...blankMeta() } as CockpitMux,
   diagnostics: { items: [], ...blankMeta() } as CockpitDiagnostics,
   scan: { ...blankScan(), ...blankMeta() } as CockpitScan,
   bridge: { faults: [], deadTopics: [] } as CockpitBridge,
@@ -806,7 +811,6 @@ export const rosClient = {
       reconnectTimer = null;
     }
     this.stopStalenessTicker();
-    failPendingServiceCalls('socket disconnected');
     releaseImageUrls();
     if (socket) {
       socket.onopen = null;
@@ -825,8 +829,7 @@ export const rosClient = {
     notify('voltage');
     notify('odom');
     notify('imu');
-    notify('clearance');
-    notify('status');
+    notify('mux');
     notify('diagnostics');
     notify('scan');
   },
@@ -868,7 +871,6 @@ export const rosClient = {
     socket.onclose = () => {
       connectionState = 'disconnected';
       this.stopStalenessTicker();
-      failPendingServiceCalls('socket closed');
       markAllStale();
       notify('connection');
       this.handleScheduleReconnect(url);
@@ -877,7 +879,6 @@ export const rosClient = {
     socket.onerror = () => {
       connectionState = 'disconnected';
       this.stopStalenessTicker();
-      failPendingServiceCalls('socket error');
       markAllStale();
       notify('connection');
     };
@@ -890,19 +891,9 @@ export const rosClient = {
           msg?: InboundMsg;
           level?: string;
           id?: string;
-          result?: boolean;
-          values?: { success?: boolean; message?: string };
         };
         if (data.op === 'publish' && data.topic) {
           this.handleInboundPublish(data.topic, data.msg as InboundMsg);
-        } else if (data.op === 'service_response' && data.id) {
-          const pending = pendingServiceCalls.get(data.id);
-          if (pending) {
-            pendingServiceCalls.delete(data.id);
-            clearTimeout(pending.timer);
-            const success = data.values?.success ?? data.result === true;
-            pending.resolve({ ok: success, message: data.values?.message ?? null });
-          }
         } else if (data.op === 'fragment') {
           // Humble 2.0.7 fragments oversized /map dumps. We do not reassemble
           // 80 MB JSON; drop /map so /scan can use the socket. Fragment frames
@@ -997,44 +988,6 @@ export const rosClient = {
     return true;
   },
 
-  /**
-   * Call a ROS service and await the bridge's `service_response`. Resolves
-   * `{ok: false, message}` on a closed socket, a timeout, or a bridge-level
-   * failure — it never throws and never hangs, because the caller renders a
-   * motion-authority state from the answer.
-   */
-  callService(serviceName: string, args: unknown): Promise<ServiceResult> {
-    return new Promise((resolve) => {
-      if (!socket || socket.readyState !== WebSocket.OPEN) {
-        resolve({ ok: false, message: 'socket not open' });
-        return;
-      }
-      const callId = `call_${Math.random().toString(36).slice(2, 11)}`;
-      const timer = setTimeout(() => {
-        if (pendingServiceCalls.delete(callId)) {
-          resolve({ ok: false, message: `no service_response within ${SERVICE_CALL_TIMEOUT_MS} ms` });
-        }
-      }, SERVICE_CALL_TIMEOUT_MS);
-      pendingServiceCalls.set(callId, { resolve, timer });
-      socket.send(JSON.stringify({
-        op: 'call_service',
-        service: serviceName,
-        args,
-        id: callId,
-      }));
-    });
-  },
-
-  /**
-   * The cockpit's ONLY motion-authority operation. `false` disarms (one click,
-   * immediate); `true` re-arms (behind the SafetyStrip hold-to-confirm). The
-   * answer to "did it work" comes from the latched `/ugv/allow_motion` topic
-   * echo — this Promise only answers "did the service call complete".
-   */
-  setMotionAllowed(allowed: boolean): Promise<ServiceResult> {
-    return this.callService(SET_ALLOW_MOTION_SERVICE, { data: allowed });
-  },
-
   registerImageCallback(topic: string, callback: (frame: ImageFrame) => void) {
     imageCallbacks.set(topic, callback);
     return () => {
@@ -1075,10 +1028,10 @@ export const rosClient = {
           msg.present === true ? true : msg.present === false ? false : null;
         const status = finite(msg.power_supply_status);
         const measured = present !== false && status !== null && status > 0;
+        // `msg.percentage` is READ AND DROPPED on purpose — see CockpitVoltage.
         voltageData = {
           voltage: present === false ? null : finite(msg.voltage),
           current: measured ? finite(msg.current) : null,
-          percentage: present === false ? null : finite(msg.percentage),
           powerSupplyStatus: status !== null && status > 0 ? status : null,
           present,
         };
@@ -1110,62 +1063,6 @@ export const rosClient = {
         commit('imu');
         break;
       }
-      case '/cockpit/overhead_clearance': {
-        clearanceData = { meters: finite(msg.data) };
-        commit('clearance');
-        break;
-      }
-      case '/ugv/allow_motion': {
-        // A std_msgs/Bool carries a real boolean. Anything else is a malformed
-        // frame, and `=== true` would silently render that as "motion locked"
-        // instead of "we do not know".
-        statusData = {
-          ...statusData,
-          allowMotion: typeof msg.data === 'boolean' ? msg.data : null,
-        };
-        allowMotionDirectAt = Date.now();
-        commit('status');
-        break;
-      }
-      case '/cockpit/status': {
-        const next: StatusData = { ...statusData };
-        const diagArray = msg.status;
-        if (diagArray && Array.isArray(diagArray)) {
-          diagArray.forEach((d) => {
-            const values: Record<string, string> = {};
-            if (d.values && Array.isArray(d.values)) {
-              d.values.forEach((kv) => {
-                values[kv.key] = kv.value;
-              });
-            }
-
-            if (d.name === 'twist_mux') {
-              // No fallback to 'NONE': absent means unknown, and "NONE" reads
-              // as a positive report that nothing holds the mux.
-              next.muxSource = values.active_source ?? null;
-              next.cmdAge = safeNumber(values.command_age);
-              const pubs = safeNumber(values.publisher_count);
-              next.pubCount = pubs === null ? null : Math.max(0, pubs);
-            } else if (d.name === 'bringup') {
-              if (!directStillAuthoritative(allowMotionDirectAt)) {
-                next.allowMotion = safeBool(values.allow_motion);
-              }
-            } else if (d.name === 'system_metrics' || d.name === 'power') {
-              if (values.charging !== undefined) next.isCharging = safeBool(values.charging);
-              if (values.ethernet !== undefined || values.ethernet_connected !== undefined) {
-                next.isEthernetConnected = safeBool(values.ethernet_connected ?? values.ethernet);
-              }
-              next.wifiRssi = safeNumber(values.wifi_rssi);
-              next.diskFree = values.disk_free || null;
-              next.cpuTemp = safeNumber(values.cpu_temp);
-              next.gpuTemp = safeNumber(values.gpu_temp);
-            }
-          });
-        }
-        statusData = next;
-        commit('status');
-        break;
-      }
       case '/diagnostics': {
         const rawDiags = msg.status;
         if (rawDiags && Array.isArray(rawDiags)) {
@@ -1191,6 +1088,16 @@ export const rosClient = {
             }),
           };
           commit('diagnostics');
+
+          // twist_mux publishes its own status into this array. It arrives in
+          // its OWN DiagnosticArray (each publisher sends separately), so the
+          // mux slice is committed only when that entry is present — a Nav2
+          // heartbeat array must not stamp the ladder as fresh.
+          const muxEntry = diagnosticsData.items.find((d) => d.name.startsWith(TWIST_MUX_DIAG_NAME));
+          if (muxEntry) {
+            muxData = parseMuxDiagnostic(muxEntry.values);
+            commit('mux');
+          }
         }
         break;
       }
@@ -1319,8 +1226,7 @@ const subscribeConnection = makeSubscriber('connection');
 const subscribeVoltage = makeSubscriber('voltage');
 const subscribeOdom = makeSubscriber('odom');
 const subscribeImu = makeSubscriber('imu');
-const subscribeClearance = makeSubscriber('clearance');
-const subscribeStatus = makeSubscriber('status');
+const subscribeMux = makeSubscriber('mux');
 const subscribeDiagnostics = makeSubscriber('diagnostics');
 const subscribeBridge = makeSubscriber('bridge');
 const subscribeScan = makeSubscriber('scan');
@@ -1331,8 +1237,7 @@ const getConnection = () => connectionState;
 const getVoltage = () => voltageState;
 const getOdom = () => odomState;
 const getImu = () => imuState;
-const getClearance = () => clearanceState;
-const getStatus = () => statusState;
+const getMux = () => muxState;
 const getDiagnostics = () => diagnosticsState;
 const getBridge = () => bridgeState;
 const getScan = () => scanState;
@@ -1344,8 +1249,7 @@ const getServerConnection = () => serverState.connection;
 const getServerVoltage = () => serverState.voltage;
 const getServerOdom = () => serverState.odom;
 const getServerImu = () => serverState.imu;
-const getServerClearance = () => serverState.clearance;
-const getServerStatus = () => serverState.status;
+const getServerMux = () => serverState.mux;
 const getServerDiagnostics = () => serverState.diagnostics;
 const getServerBridge = () => serverState.bridge;
 const getServerScan = () => serverState.scan;
@@ -1368,12 +1272,8 @@ export function useCockpitImu(): CockpitImu {
   return useSyncExternalStore(subscribeImu, getImu, getServerImu);
 }
 
-export function useCockpitOverheadClearance(): CockpitClearance {
-  return useSyncExternalStore(subscribeClearance, getClearance, getServerClearance);
-}
-
-export function useCockpitStatus(): CockpitStatus {
-  return useSyncExternalStore(subscribeStatus, getStatus, getServerStatus);
+export function useCockpitMux(): CockpitMux {
+  return useSyncExternalStore(subscribeMux, getMux, getServerMux);
 }
 
 export function useCockpitDiagnostics(): CockpitDiagnostics {
