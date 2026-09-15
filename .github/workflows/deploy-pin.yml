@@ -79,7 +79,7 @@ env:
 jobs:
   pin:
     name: Pin ${{ github.event.workflow_run.name || inputs.surface }}
-    runs-on: ${{ vars.CI_FORCE_HOSTED == 'true' && 'ubuntu-latest' || 'moosegoose-general' }}
+    runs-on: ${{ vars.CI_FORCE_HOSTED == 'true' && 'ubuntu-latest' || 'moosegoose-linux' }}
     # Generous: this job waits for the test workflows to finish before pinning.
     timeout-minutes: 45
     # A failed or cancelled build must never move a pin. PR builds are excluded
@@ -522,7 +522,7 @@ jobs:
     name: Advance the BEAST-01 deploy ref
     needs: pin
     if: needs.pin.outputs.skip != 'true' && needs.pin.outputs.surface == 'beast'
-    runs-on: ${{ vars.CI_FORCE_HOSTED == 'true' && 'ubuntu-latest' || 'moosegoose-general' }}
+    runs-on: ${{ vars.CI_FORCE_HOSTED == 'true' && 'ubuntu-latest' || 'moosegoose-linux' }}
     timeout-minutes: 10
     permissions:
       contents: write
