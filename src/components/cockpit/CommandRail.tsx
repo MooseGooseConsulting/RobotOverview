@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   rosClient,
-  useCockpitStatus,
+  useCockpitMux,
   useCockpitBridge,
   useConnectionState,
 } from '@/lib/ros/client';
@@ -39,14 +39,21 @@ import {
 
 // ── DRIVE INTENT ────────────────────────────────────────────────────────────
 // Held intent, not edge-triggered pulses. A button press sets the intent and a
-// 10 Hz interval republishes it until release, because twist_mux expires a
-// source after 0.5 s of silence — a single Twist on mousedown makes the robot
-// twitch and stop, which is exactly what the old edge-triggered drive() did.
+// 20 Hz interval republishes it until release — a single Twist on mousedown
+// makes the robot twitch and stop, which is exactly what the old edge-triggered
+// drive() did.
 //
-// The control law itself (composition, throttle, arcs, stop tail) lives in
-// `@/lib/ros/drive-law` — a pure module ported from Waveshare's Pi cockpit.
-// This component owns only the wiring: events in, publishes out.
-const DRIVE_PUBLISH_HZ = 10;
+// WHY 20 Hz AND NOT 10 (raised 2026-09-14): the rate is set by the SLOWEST
+// consumer downstream, and that is `velocity_smoother`, whose
+// `velocity_timeout` is 0.1 s — it zeroes a command source that has gone quiet
+// for 100 ms. A 10 Hz publisher has a period of exactly 100 ms, so it sits ON
+// the timeout with zero margin: one late browser timer tick (a background tab
+// throttling its interval, a GC pause, a slow websocket write) and the smoother
+// zeroes mid-drive, which the operator feels as the robot stuttering while a
+// key is still held. twist_mux's own `ui` timeout is 0.5 s and is not the
+// binding constraint. 20 Hz gives 2x margin against the 0.1 s limit and matches
+// what the robot's own `scripts/drive` teleop publishes.
+const DRIVE_PUBLISH_HZ = 20;
 const DRIVE_PUBLISH_MS = 1000 / DRIVE_PUBLISH_HZ;
 
 /** Keyboard → drive key. Waveshare's `moveKeyMap`, minus the keycode numbers. */
@@ -80,7 +87,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 const signed = (v: number, digits: number) => (v < 0 ? '' : '+') + v.toFixed(digits);
 
 export function CommandRail() {
-  const status = useCockpitStatus();
+  const mux = useCockpitMux();
   const bridge = useCockpitBridge();
   const connection = useConnectionState();
 
@@ -107,9 +114,6 @@ export function CommandRail() {
     sent: number;
     reason: string;
   } | null>(null);
-  const [disarming, setDisarming] = useState(false);
-  const [disarmError, setDisarmError] = useState<string | null>(null);
-
   const gimbalBoxRef = useRef<HTMLDivElement | null>(null);
   const driveIntentRef = useRef<DriveIntent | null>(null);
   const driveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -127,22 +131,27 @@ export function CommandRail() {
 
   const connected = connection === 'connected';
 
-  // ── MOTION GATE: DISARM STATE ─────────────────────────────────────────────
-  // Motion is disabled when the robot is disarmed (via /ugv/set_allow_motion,
-  // an operator action in the safety strip), or when the bridge refuses the
-  // drive topic. No automatic charging/Ethernet interlock — that apparatus
-  // (ugv_safety_monitor) was removed 2026-08-07; charging/Ethernet state
-  // remain telemetry fields when a publisher supplies them, but they never
-  // block driving here.
+  // ── WHEN DRIVING IS OFF ───────────────────────────────────────────────────
+  // Two reasons, and both are observed facts about THIS browser's link, not
+  // policy this cockpit invents:
+  //   * the socket is not open, so nothing we publish can leave; or
+  //   * rosbridge answered our /cmd_vel_ui advertise with an op:"status" error,
+  //     so the topic is refused and the control is genuinely dead.
+  //
+  // REMOVED 2026-09-14 — the `allow_motion` arming gate. It required
+  // `/ugv/allow_motion` to publish `true` before the D-pad would do anything,
+  // and that topic does not exist on this robot: the gate therefore failed
+  // closed forever and the cockpit could not drive at all. The current stack
+  // dropped the lock deliberately (beast-ros `config/twist_mux.yaml`), so this
+  // is not replaced with a different interlock — stop authority lives on the
+  // robot (collision monitor, 0.5 s source timeout) and in the zero tail below.
+  // There is likewise no charging/Ethernet interlock; that apparatus
+  // (ugv_safety_monitor) was removed 2026-08-07.
   const driveGateReason: string | null = !connected
     ? 'robot unreachable'
-    : status.allowMotion === false
-      ? 'motion disarmed — RE-ARM in the safety strip'
-      : status.allowMotion !== true
-        ? 'motion state unknown — waiting for /ugv/allow_motion'
-        : bridge.deadTopics.includes('/cmd_vel_ui')
-        ? 'bridge refused /cmd_vel_ui'
-        : null;
+    : bridge.deadTopics.includes('/cmd_vel_ui')
+      ? 'bridge refused /cmd_vel_ui'
+      : null;
   const driveEnabled = driveGateReason === null;
 
   const isDead = (topic: string) => bridge.deadTopics.includes(topic);
@@ -507,30 +516,6 @@ export function CommandRail() {
     applyDriveInput({ rateIndex: index }, 'throttle changed');
   };
 
-  /**
-   * Emergency disarm from the STOP-NOT-CONFIRMED banner.
-   *
-   * `setMotionAllowed` resolves `{ok: false}` on a closed socket, a timeout, or
-   * a bridge-level failure — it never throws. Discarding that would render a
-   * FAILED disarm as success, which is the same defect as the single unchecked
-   * zero this whole rewrite replaced, in the one place it matters most. The
-   * Promise only answers "did the call complete"; whether motion is actually
-   * disarmed comes from the latched /ugv/allow_motion echo in the safety strip,
-   * so success is reported by that chip flipping, not by anything claimed here.
-   */
-  const disarmMotion = async () => {
-    setDisarming(true);
-    setDisarmError(null);
-    try {
-      const result = await rosClient.setMotionAllowed(false);
-      if (!result.ok) {
-        setDisarmError(result.message ?? 'no response from /ugv/set_allow_motion');
-      }
-    } finally {
-      setDisarming(false);
-    }
-  };
-
   // Each arrow lights on its own flag, so a W+A diagonal visibly lights two —
   // the cheap, visible proof that composition works.
   const padClass = (driveKey: DriveKey) =>
@@ -604,18 +589,29 @@ export function CommandRail() {
   const gimbalDraggingRef = useRef(false);
   const gimbalDead = isDead('/pt_joint_position_controller/commands');
 
-  const rungState = (source: string) => {
-    if (status.muxSource === null) return { label: 'UNKNOWN', active: false, unknown: true };
-    const active = status.muxSource === source;
+  // ── THE LADDER IS THE ROBOT'S, NOT OURS ───────────────────────────────────
+  // Rungs come from the twist_mux entry in /diagnostics, so the panel shows the
+  // mux that is actually running rather than a list typed here. (The typed list
+  // had drifted: it claimed four rungs, and the robot runs five — it was
+  // missing `operator` at priority 90.) `/cmd_vel_ui` is ours, and it is
+  // highlighted wherever twist_mux reports it.
+  const OUR_TOPIC = 'cmd_vel_ui';
+  const rungs = mux.inputs.map((input) => ({
+    key: input.name,
+    pri: input.priority,
+    name: input.topic ?? input.name,
+    tone: input.topic === OUR_TOPIC ? ('emerald' as const) : ('cyan' as const),
+  }));
+
+  const rungState = (pri: number | null) => {
+    // `activePriority === 0` is twist_mux saying "nobody is driving" — a real
+    // answer, and different from never having heard from twist_mux at all.
+    if (mux.activePriority === null || pri === null || !mux.hasReceived) {
+      return { label: 'UNKNOWN', active: false, unknown: true };
+    }
+    const active = mux.activePriority === pri;
     return { label: active ? 'ACTIVE' : 'IDLE', active, unknown: false };
   };
-
-  const rungs = [
-    { pri: 150, name: 'BT Pad · Robot', source: 'BT pad · robot', tone: 'cyan' as const },
-    { pri: 100, name: 'Operator Pad', source: 'Operator pad', tone: 'cyan' as const },
-    { pri: 50, name: 'UI Teleop (WASD)', source: 'UI teleop', tone: 'emerald' as const },
-    { pri: 10, name: 'nav2', source: 'nav2', tone: 'cyan' as const },
-  ];
 
   return (
     <div className="flex flex-col gap-3">
@@ -623,15 +619,17 @@ export function CommandRail() {
       <section className="panel border-rim bg-panel/85 flex flex-col p-4 shadow-md">
         <h2 className="font-display text-[11px] font-bold tracking-[0.16em] text-cyan uppercase flex items-center gap-1.5 leading-none mb-3">
           <Sliders className="h-3.5 w-3.5" /> twist_mux ladder{' '}
-          <span className="text-ink-dim/70 font-normal font-mono text-[9.5px]">→ /cmd_vel</span>
+          <span className="text-ink-dim/70 font-normal font-mono text-[9.5px]">
+            /diagnostics → /cmd_vel
+          </span>
         </h2>
 
         <div className="flex flex-col gap-1.5">
           {rungs.map((r) => {
-            const state = rungState(r.source);
+            const state = rungState(r.pri);
             return (
               <div
-                key={r.pri}
+                key={r.key}
                 className={clsx(
                   'grid grid-cols-[36px_1fr_auto] gap-2 items-center border border-rim/60 rounded-md px-3 py-1.5 bg-hull/40 font-mono text-xs',
                   state.active &&
@@ -642,7 +640,7 @@ export function CommandRail() {
                     'border-emerald-500/50 bg-emerald-950/20 text-glow-emerald text-emerald-400 font-bold',
                 )}
               >
-                <span className="font-extrabold text-ink-dim/70">{r.pri}</span>
+                <span className="font-extrabold text-ink-dim/70">{r.pri ?? '—'}</span>
                 <span className="tracking-wide">{r.name}</span>
                 <span
                   className={clsx(
@@ -655,7 +653,9 @@ export function CommandRail() {
                           : 'text-cyan'
                         : 'text-zinc-600',
                   )}
-                  title={state.unknown ? '/cockpit/status has no publisher yet' : undefined}
+                  title={
+                    state.unknown ? 'twist_mux has not reported on /diagnostics yet' : undefined
+                  }
                 >
                   {state.label}
                 </span>
@@ -664,9 +664,17 @@ export function CommandRail() {
           })}
         </div>
 
-        {status.muxSource === null && (
+        {!mux.hasReceived ? (
           <p className="font-mono text-[9px] text-ink-dim/70 mt-2 leading-snug">
-            Ladder state is UNKNOWN — /cockpit/status is not published by the robot yet.
+            No twist_mux entry on /diagnostics yet — the ladder is UNKNOWN, not empty.
+          </p>
+        ) : (
+          <p className="font-mono text-[9px] text-ink-dim/70 mt-2 leading-snug">
+            {mux.activePriority === 0
+              ? 'No source is driving'
+              : `Priority ${mux.activePriority} holds the mux`}
+            {mux.dataAgeSec !== null && ` · last cmd ${mux.dataAgeSec.toFixed(2)}s ago`}
+            {mux.stale && ' · STALE'}
           </p>
         )}
       </section>
@@ -686,25 +694,20 @@ export function CommandRail() {
               <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-red-400" />
               <span>
                 <b className="uppercase tracking-wider text-red-400">Stop not confirmed</b> —{' '}
-                {stopUnconfirmed.sent} of {STOP_TAIL_COUNT} zero commands left the browser. The
-                robot may still be driving: the ESP32 latches its last command and there is no
-                robot-side cmd_vel watchdog.
+                {stopUnconfirmed.sent} of {STOP_TAIL_COUNT} zero commands left the browser, so the
+                robot was never told to stop by this cockpit.
               </span>
             </span>
-            <button
-              onClick={disarmMotion}
-              disabled={disarming}
-              className="self-start rounded border border-red-500/70 bg-red-500/15 px-2 py-1 font-bold uppercase tracking-widest text-red-200 hover:bg-red-500/25 disabled:opacity-60"
-              title="Disarm motion — /ugv/set_allow_motion false"
-            >
-              {disarming ? 'Disarming…' : 'Disarm motion'}
-            </button>
-            {disarmError && (
-              <span className="font-bold text-red-200">
-                DISARM FAILED — {disarmError}. Motion authority is unchanged; use the safety strip
-                or cut power.
-              </span>
-            )}
+            {/* There is no software disarm to offer here: `/ugv/set_allow_motion`
+                does not exist on this robot, and the button that used to call it
+                was reporting failures of a service that could never answer. What
+                this cockpit can honestly say is what it will do — re-fire the
+                stop the instant the link is back (see the reconnect effect) —
+                and what is left to the operator if it does not. */}
+            <span className="text-red-200">
+              The stop re-fires automatically on reconnect. If the robot is moving and the link does
+              not come back, stop it at the hardware.
+            </span>
           </div>
         )}
 

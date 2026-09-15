@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { rosClient, useCockpitOverheadClearance } from '@/lib/ros/client';
+import { rosClient } from '@/lib/ros/client';
 import { Eye, Video } from 'lucide-react';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
@@ -13,67 +13,39 @@ type FeedState = { fps: number; active: boolean; latencyMs: number | null };
 const IDLE_FEED: FeedState = { fps: 0, active: false, latencyMs: null };
 
 export function OpticsWall() {
-  const clearance = useCockpitOverheadClearance();
-
   const rgbRef = useRef<HTMLImageElement | null>(null);
-  const depthRef = useRef<HTMLImageElement | null>(null);
 
   // Frame counts live in refs so inbound frames never re-render React (the
   // image bytes go straight to <img>.src). Only the once-a-second FPS tick
   // touches state.
   const rgbFrameCount = useRef(0);
-  const depthFrameCount = useRef(0);
   const rgbLatency = useRef<number | null>(null);
-  const depthLatency = useRef<number | null>(null);
   const [rgb, setRgb] = useState<FeedState>(IDLE_FEED);
-  const [depth, setDepth] = useState<FeedState>(IDLE_FEED);
 
   // Sample the frame counters once per second for FPS + liveness.
   useEffect(() => {
     const timer = setInterval(() => {
       const r = rgbFrameCount.current;
-      const d = depthFrameCount.current;
       setRgb({ fps: r, active: r > 0, latencyMs: rgbLatency.current });
-      setDepth({ fps: d, active: d > 0, latencyMs: depthLatency.current });
       rgbFrameCount.current = 0;
-      depthFrameCount.current = 0;
     }, 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // Hook up image topic subscriptions
+  // ── ONE LIVE FEED ─────────────────────────────────────────────────────────
+  // The depth subscription (/cockpit/depth/compressed) was removed 2026-09-14:
+  // its only producer was the colorizer in the retired legacy ugv_cockpit
+  // package, and the bridge allowlist refuses the topic by name. The overhead
+  // clearance chip went with it (/cockpit/overhead_clearance has no publisher
+  // anywhere in the stack). Both rendered as permanent "AWAITING…" panels.
   useEffect(() => {
     const unsubRgb = rosClient.registerImageCallback('/oak/rgb/image_raw/compressed', (frame) => {
       if (rgbRef.current) rgbRef.current.src = frame.src;
       rgbFrameCount.current += 1;
       rgbLatency.current = frame.latencyMs;
     });
-
-    const unsubDepth = rosClient.registerImageCallback('/cockpit/depth/compressed', (frame) => {
-      if (depthRef.current) depthRef.current.src = frame.src;
-      depthFrameCount.current += 1;
-      depthLatency.current = frame.latencyMs;
-    });
-
-    return () => {
-      unsubRgb();
-      unsubDepth();
-    };
+    return unsubRgb;
   }, []);
-
-  // Determine safety limits for overhead clearance
-  // Mission Undercroft duct clearance floor. Below 0.16m is critical, below 0.28m is warning
-  const clearanceStatus = (() => {
-    const m = clearance.meters;
-    if (!clearance.hasReceived) {
-      return { label: 'UNKNOWN', cls: 'text-ink-dim border-rim/60 bg-panel-2/20' };
-    }
-    if (clearance.stale) return { label: 'STALE', cls: 'text-ink-dim border-rim/60 bg-panel-2/20 line-through' };
-    if (m === null || m <= 0 || m > 5.0) return { label: 'UNKNOWN', cls: 'text-ink-dim border-rim/60 bg-panel-2/20' };
-    if (m < 0.16) return { label: 'CRITICAL', cls: 'text-rose-400 border-rose-500/30 bg-rose-500/10 animate-pulse text-glow-red' };
-    if (m < 0.28) return { label: 'WARNING', cls: 'text-amber-400 border-amber-500/30 bg-amber-500/10' };
-    return { label: 'CLEAR', cls: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' };
-  })();
 
   const laggy = (f: FeedState) => f.active && f.latencyMs !== null && f.latencyMs > LATENCY_ALARM_MS;
 
@@ -94,19 +66,6 @@ export function OpticsWall() {
           <Eye className="h-3.5 w-3.5" /> Optics{' '}
           <span className="text-ink-dim/70 font-normal font-mono text-[9.5px]">/compressed transports over bridge</span>
         </h2>
-        {/* Overhead Clearance HUD */}
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[9.5px] uppercase text-ink-dim scale-90">Clearance:</span>
-          <div
-            className={clsx(
-              'chip flex items-center gap-1.5 rounded-full px-2 py-0.5 border font-mono text-[10px] font-bold leading-none tracking-wider',
-              clearanceStatus.cls,
-            )}
-          >
-            <span>{clearance.meters !== null && clearance.hasReceived ? `${clearance.meters.toFixed(2)}m` : '—'}</span>
-            <span>[{clearanceStatus.label}]</span>
-          </div>
-        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 flex-1">
@@ -179,59 +138,35 @@ export function OpticsWall() {
           </div>
         </div>
 
-        {/* ── OAK DEPTH FEED (SMALL) ─────────────── */}
-        <div
-          className={clsx(
-            'relative rounded-lg overflow-hidden border bg-hull aspect-[4/3] flex items-center justify-center',
-            laggy(depth) ? 'border-rose-500/70' : 'border-rim/70',
-          )}
-        >
-          {/* Scanline sheen */}
+        {/* ── OAK DEPTH (NOT PROVIDED) ───────────────
+            Not "awaiting" — this robot has no browser-renderable depth feed at
+            all, and saying so is the whole point of this tile. depthai publishes
+            /oak/stereo/image_raw/compressedDepth, which the bridge does allow us
+            to read, but `compressedDepth` is a 12-byte header plus a 16-bit PNG:
+            it is a depth buffer, not a picture, and an <img> cannot show it. The
+            colorized JPEG this panel used to read came from the legacy
+            ugv_cockpit stack, which cannot run alongside the current one. */}
+        <div className="relative rounded-lg overflow-hidden border border-rim/70 bg-hull aspect-[4/3] flex items-center justify-center">
           <div className="pointer-events-none absolute inset-0 z-20 bg-[repeating-linear-gradient(0deg,rgba(0,0,0,0.15)_0_1px,transparent_1px_3px)] opacity-30" />
 
-          {/* Fallback pattern */}
-          <div className="absolute inset-0 z-0 bg-[radial-gradient(circle_at_68%_78%,rgba(239,68,68,0.12),transparent_30%),radial-gradient(circle_at_25%_55%,rgba(54,224,224,0.12),transparent_42%),linear-gradient(180deg,#0a1b2d_0%,#090d16_100%)] opacity-80" />
-
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            ref={depthRef}
-            alt="Colorized Depth Feed"
-            className={clsx(
-              'absolute inset-0 w-full h-full object-cover z-10',
-              !depth.active && 'hidden',
-              laggy(depth) && 'opacity-30 grayscale',
-            )}
-          />
-
-          {depth.active && (
-            <motion.svg
-              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-12 pointer-events-none z-20 text-emerald-500/50 mix-blend-screen"
-              viewBox="0 0 100 100"
-              animate={{ opacity: [0.3, 0.8, 0.3] }}
-              transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-            >
-              <path d="M 30 20 L 20 20 L 20 30 M 70 20 L 80 20 L 80 30 M 20 70 L 20 80 L 30 80 M 80 70 L 80 80 L 70 80 M 50 40 L 50 60 M 40 50 L 60 50" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </motion.svg>
-          )}
-
           <span className="absolute left-3 top-3 z-30 chip border-rim/70 bg-hull/80 text-ink-dim py-0.5 px-2 rounded-full font-mono text-[9px] tracking-wider uppercase flex items-center gap-1">
-            <span className={clsx('h-1 w-1 rounded-full', depth.active ? 'bg-emerald-500 shadow-[0_0_4px_#34d399]' : 'bg-zinc-600')} /> OAK DEPTH
+            <span className="h-1 w-1 rounded-full bg-zinc-600" /> OAK DEPTH
           </span>
 
-          <span className="absolute right-3 top-3 z-30 chip border-rim/70 bg-hull/80 py-0.5 px-2 rounded-full font-mono text-[9px] tracking-wider uppercase flex items-center gap-1">
-            {latencyChip(depth)}
+          <span className="absolute right-3 top-3 z-30 chip border-rim/70 bg-hull/80 text-amber-500 py-0.5 px-2 rounded-full font-mono text-[9px] tracking-wider uppercase">
+            NOT PROVIDED
           </span>
 
-          {!depth.active && (
-            <div className="z-10 flex flex-col items-center gap-1 text-center font-mono opacity-60">
-              <Video className="h-6 w-6 text-ink-dim/40 animate-pulse" />
-              <span className="text-[10px] text-ink-dim tracking-wider">AWAITING DEPTH</span>
-            </div>
-          )}
+          <div className="z-10 flex flex-col items-center gap-1.5 px-3 text-center font-mono text-zinc-500 select-none">
+            <Video className="h-6 w-6 text-ink-dim/40" />
+            <span className="text-[9px] leading-snug text-zinc-400">
+              The robot publishes no colorized depth image. Needs a robot-side colorizer node.
+            </span>
+          </div>
 
           <div className="absolute left-3 right-3 bottom-2 z-30 flex justify-between items-center font-mono text-[8px] text-ink-dim/85 uppercase leading-none bg-hull/30 backdrop-blur-[1px] py-1 px-1.5 rounded">
-            <span>colorized · aligned→rgb</span>
-            <span>queue 1</span>
+            <span>compressedDepth ≠ an image</span>
+            <span>not subscribed</span>
           </div>
         </div>
 

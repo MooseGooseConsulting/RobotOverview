@@ -4,16 +4,14 @@ import {
   useConnectionState,
   useCockpitVoltage,
   useCockpitOdom,
-  useCockpitOverheadClearance,
   useCockpitScan,
   useCockpitMap,
   useCockpitMapOdom,
-  useCockpitStatus,
+  useCockpitMux,
   useCockpitBridge,
   useCockpitDiagnostics,
   ROS_SUBSCRIPTIONS,
   ROS_PUBLICATIONS,
-  SET_ALLOW_MOTION_SERVICE,
   LIDAR_CROP_SECTOR_DEG,
   LIDAR_SCAN_TO_BODY_YAW_DEG,
   DEFERRED_WIRE_TOPICS,
@@ -144,16 +142,18 @@ describe('rosClient and hooks', () => {
     });
 
     // Voltage hook should see new value, but odom hook MUST stay referentially stable!
-    // SOC is carried since 2026-08-13 (beast_power's OCV table is honest);
-    // absent from the message it surfaces as null, never a fake 0.
     expect(voltageHook.result.current.voltage).toBe(11.5);
-    expect(voltageHook.result.current.percentage).toBeNull();
     expect(voltageHook.result.current.hasReceived).toBe(true);
     expect(voltageHook.result.current).not.toBe(initialVoltage);
     expect(odomHook.result.current).toBe(initialOdom); // REFERENTIALLY EQUAL
   });
 
-  it('carries a finite OCV percentage and nulls a NaN one', () => {
+  // `BatteryState.percentage` from BEAST-01 is exactly voltage / 12.6 (measured
+  // 2026-09-14), i.e. the volts restated, not a charge estimate. It is dropped
+  // at ingest so no panel can render it as state-of-charge; this pins the drop
+  // so a future "we already have a percentage, why not show it" cannot land
+  // without deleting a test.
+  it('drops BatteryState.percentage instead of carrying it as a charge estimate', () => {
     openSocket();
     const voltageHook = renderHook(() => useCockpitVoltage());
 
@@ -161,19 +161,13 @@ describe('rosClient and hooks', () => {
       MockWebSocket.latestInstance?.triggerMessage({
         op: 'publish',
         topic: '/ugv/voltage',
-        msg: { voltage: 11.5, percentage: 0.64, present: true },
+        // A real frame off the robot: 12.11 / 12.6 = 0.96111.
+        msg: { voltage: 12.11, percentage: 0.9611111283302307, present: true },
       });
     });
-    expect(voltageHook.result.current.percentage).toBeCloseTo(0.64, 5);
 
-    act(() => {
-      MockWebSocket.latestInstance?.triggerMessage({
-        op: 'publish',
-        topic: '/ugv/voltage',
-        msg: { voltage: 11.5, percentage: NaN, present: true },
-      });
-    });
-    expect(voltageHook.result.current.percentage).toBeNull();
+    expect(voltageHook.result.current.voltage).toBeCloseTo(12.11, 5);
+    expect(voltageHook.result.current).not.toHaveProperty('percentage');
   });
 
   // BatteryState honesty gates (2026-08-07): current is a measurement only when
@@ -233,16 +227,16 @@ describe('rosClient and hooks', () => {
       '/scan': 'sensor_msgs/msg/LaserScan',
       '/odom': 'nav_msgs/msg/Odometry',
       '/imu/raw': 'sensor_msgs/msg/Imu',
-      '/cockpit/overhead_clearance': 'std_msgs/msg/Float32',
-      '/cockpit/status': 'diagnostic_msgs/msg/DiagnosticArray',
       '/diagnostics': 'diagnostic_msgs/msg/DiagnosticArray',
-      '/ugv/allow_motion': 'std_msgs/msg/Bool',
       '/oak/rgb/image_raw/compressed': 'sensor_msgs/msg/CompressedImage',
-      '/cockpit/depth/compressed': 'sensor_msgs/msg/CompressedImage',
       // Phase E: occupancy grid + the map→odom link for robot-on-map placement.
-      // Robot-side whitelist mirrors these in ugv_cockpit/launch/rosbridge.launch.py.
       '/map': 'nav_msgs/msg/OccupancyGrid',
       '/tf': 'tf2_msgs/msg/TFMessage',
+      // NOT HERE, and each absence is load-bearing (2026-09-14): the bridge
+      // allowlist in beast-ros config/bridge.yaml refuses /cockpit/status,
+      // /cockpit/depth/compressed and /cockpit/overhead_clearance, and
+      // /ugv/allow_motion does not exist on the robot at all. Subscribing to
+      // any of them buys a panel that waits forever.
     };
 
     const EXPECTED_PUBLICATIONS: Record<string, string> = {
@@ -253,8 +247,9 @@ describe('rosClient and hooks', () => {
       // Float32 topic above; they are different robot-side subscribers.
       '/pt_joint_position_controller/commands': 'std_msgs/msg/Float64MultiArray',
       '/ugv/pt_steady_ctrl': 'std_msgs/msg/Float32MultiArray',
-      // No /cmd_vel_estop_lock: the cockpit never publishes mux locks. Motion
-      // authority is the /ugv/set_allow_motion SERVICE call.
+      // No /cmd_vel_estop_lock: the cockpit never publishes mux locks, and
+      // there is no arming service either — twist_mux on this stack has no
+      // locks at all, by design.
     };
 
     it('declares exactly the robot-side topic set', () => {
@@ -303,7 +298,9 @@ describe('rosClient and hooks', () => {
       const images = wireOps(ws).filter(
         (o) => o.op === 'subscribe' && typeof o.topic === 'string' && o.topic.includes('compressed'),
       ) as Array<{ queue_length?: number }>;
-      expect(images).toHaveLength(2);
+      // One: the RGB feed. The depth topic the cockpit used to subscribe to is
+      // gone — see EXPECTED_SUBSCRIPTIONS.
+      expect(images).toHaveLength(1);
       images.forEach((op) => expect(op.queue_length).toBe(1));
     });
 
@@ -422,18 +419,6 @@ describe('rosClient and hooks', () => {
       expect(source).not.toMatch(/\(\?<[=!]/);
     });
 
-    it('rejects a non-finite clearance', () => {
-      openSocket();
-      const clearanceHook = renderHook(() => useCockpitOverheadClearance());
-
-      act(() => {
-        MockWebSocket.latestInstance?.triggerRaw(
-          '{"op":"publish","topic":"/cockpit/overhead_clearance","msg":{"data":Infinity}}',
-        );
-      });
-
-      expect(clearanceHook.result.current.meters).toBeNull();
-    });
   });
 
   // ── LiDAR CROP ────────────────────────────────────────────────────────────
@@ -688,13 +673,13 @@ describe('rosClient and hooks', () => {
 
     it('reports UNKNOWN (not a default) for a topic that never published', () => {
       openSocket();
-      const statusHook = renderHook(() => useCockpitStatus());
+      const muxHook = renderHook(() => useCockpitMux());
 
-      expect(statusHook.result.current.hasReceived).toBe(false);
-      // `allowMotion: false` would read as "the robot says motion is locked".
-      // It has said nothing at all.
-      expect(statusHook.result.current.allowMotion).toBeNull();
-      expect(statusHook.result.current.muxSource).toBeNull();
+      expect(muxHook.result.current.hasReceived).toBe(false);
+      // `activePriority: 0` would read as "twist_mux says nothing is driving".
+      // It has said nothing at all, which is a different claim.
+      expect(muxHook.result.current.activePriority).toBeNull();
+      expect(muxHook.result.current.inputs).toEqual([]);
     });
 
     it('clears has-received when a new connection opens', () => {
@@ -717,117 +702,124 @@ describe('rosClient and hooks', () => {
     });
   });
 
-  // ── ROBOT-REPORTED SAFETY STATE ───────────────────────────────────────────
-  describe('status parsing', () => {
-    it('reads allow_motion from its dedicated topic', () => {
-      const ws = openSocket();
-      const statusHook = renderHook(() => useCockpitStatus());
-
-      act(() => {
-        ws.triggerMessage({ op: 'publish', topic: '/ugv/allow_motion', msg: { data: true } });
-      });
-
-      expect(statusHook.result.current.allowMotion).toBe(true);
+  // ── TWIST_MUX LADDER, FROM /diagnostics ───────────────────────────────────
+  // Payloads below are copied from a live `ros2 topic echo /diagnostics` on
+  // BEAST-01 (2026-09-14), including twist_mux's leading space and its six-
+  // decimal timeout formatting, so the parser is pinned against the real wire
+  // rather than against a tidied-up idea of it.
+  describe('twist_mux parsing', () => {
+    const muxFrame = (values: Array<{ key: string; value: string }>) => ({
+      op: 'publish',
+      topic: '/diagnostics',
+      msg: {
+        status: [
+          { name: 'twist_mux: Twist mux status', level: 0, message: 'ok', values },
+        ],
+      },
     });
 
-    // ── N4: the 1 Hz roll-up must not clobber the dedicated topics ──────────
-    it('keeps a fresh direct allow_motion over an aggregator placeholder', () => {
+    const LIVE_VALUES = [
+      { key: 'velocity topics.joy_operator', value: ' masked (listening to cmd_vel_joy_operator @ 0.500000s with priority #100)' },
+      { key: 'velocity topics.joy_robot', value: ' masked (listening to cmd_vel_joy_robot @ 0.500000s with priority #150)' },
+      { key: 'velocity topics.nav', value: ' masked (listening to cmd_vel_nav @ 0.500000s with priority #10)' },
+      { key: 'velocity topics.operator', value: ' masked (listening to cmd_vel_operator @ 0.500000s with priority #90)' },
+      { key: 'velocity topics.ui', value: ' masked (listening to cmd_vel_ui @ 0.500000s with priority #50)' },
+      { key: 'current priority', value: '0' },
+      { key: 'loop time in [sec]', value: '0' },
+      { key: 'data age in [sec]', value: '0' },
+    ];
+
+    it('reads the rung list out of the twist_mux diagnostic, ordered by priority', () => {
       const ws = openSocket();
-      const statusHook = renderHook(() => useCockpitStatus());
+      const muxHook = renderHook(() => useCockpitMux());
 
       act(() => {
-        ws.triggerMessage({ op: 'publish', topic: '/ugv/allow_motion', msg: { data: true } });
+        ws.triggerMessage(muxFrame(LIVE_VALUES));
       });
-      expect(statusHook.result.current.allowMotion).toBe(true);
 
-      // The robot's aggregator emits a placeholder when it has nothing real.
-      // Letting it win would defeat the very hedge those direct subscriptions
-      // exist for — once a second, silently.
-      act(() => {
-        ws.triggerMessage({
-          op: 'publish',
-          topic: '/cockpit/status',
-          msg: { status: [{ name: 'bringup', values: [{ key: 'allow_motion', value: 'false' }] }] },
-        });
-      });
-      expect(statusHook.result.current.allowMotion).toBe(true);
+      const mux = muxHook.result.current;
+      expect(mux.hasReceived).toBe(true);
+      // Five rungs, not the four the hand-written ladder used to claim: the
+      // robot really does run `operator` at 90.
+      expect(mux.inputs.map((i) => i.priority)).toEqual([150, 100, 90, 50, 10]);
+      expect(mux.inputs.map((i) => i.topic)).toEqual([
+        'cmd_vel_joy_robot',
+        'cmd_vel_joy_operator',
+        'cmd_vel_operator',
+        'cmd_vel_ui',
+        'cmd_vel_nav',
+      ]);
+      expect(mux.inputs[3]).toMatchObject({ name: 'ui', timeoutSec: 0.5 });
     });
 
-    it('lets the aggregator fill in once the direct topic has gone stale', () => {
+    it('treats current priority 0 as "nothing is driving", not as unknown', () => {
       const ws = openSocket();
-      const statusHook = renderHook(() => useCockpitStatus());
+      const muxHook = renderHook(() => useCockpitMux());
 
       act(() => {
-        ws.triggerMessage({ op: 'publish', topic: '/ugv/allow_motion', msg: { data: true } });
+        ws.triggerMessage(muxFrame(LIVE_VALUES));
       });
 
-      act(() => {
-        vi.advanceTimersByTime(2500); // past the direct-topic authority window
-        ws.triggerMessage({
-          op: 'publish',
-          topic: '/cockpit/status',
-          msg: { status: [{ name: 'bringup', values: [{ key: 'allow_motion', value: 'false' }] }] },
-        });
-      });
-
-      // Deference is to a FRESH direct value, not to a permanently latched one.
-      expect(statusHook.result.current.allowMotion).toBe(false);
+      expect(muxHook.result.current.activePriority).toBe(0);
+      expect(muxHook.result.current.dataAgeSec).toBe(0);
     });
 
-    it('fills in from the aggregator when the direct topic never published', () => {
+    it('reports the active rung by priority, not by the masked/unmasked wording', () => {
       const ws = openSocket();
-      const statusHook = renderHook(() => useCockpitStatus());
+      const muxHook = renderHook(() => useCockpitMux());
 
       act(() => {
-        ws.triggerMessage({
-          op: 'publish',
-          topic: '/cockpit/status',
-          msg: { status: [{ name: 'bringup', values: [{ key: 'allow_motion', value: 'true' }] }] },
-        });
-      });
-      expect(statusHook.result.current.allowMotion).toBe(true);
-    });
-
-    // ── N10 ─────────────────────────────────────────────────────────────────
-    it('treats a non-boolean allow_motion payload as unknown, not as locked', () => {
-      const ws = openSocket();
-      const statusHook = renderHook(() => useCockpitStatus());
-
-      act(() => {
-        ws.triggerMessage({ op: 'publish', topic: '/ugv/allow_motion', msg: { data: 'true' } });
+        ws.triggerMessage(
+          muxFrame(
+            LIVE_VALUES.map((v) =>
+              v.key === 'current priority' ? { key: 'current priority', value: '50' } : v,
+            ),
+          ),
+        );
       });
 
-      // `msg.data === true` would render a malformed frame as a confident
-      // "robot reports motion locked".
-      expect(statusHook.result.current.allowMotion).toBeNull();
+      expect(muxHook.result.current.activePriority).toBe(50);
     });
 
-    it('keeps the mux source verbatim and does not invent NONE', () => {
+    it('does not stamp the ladder fresh on a diagnostics array without twist_mux', () => {
       const ws = openSocket();
-      const statusHook = renderHook(() => useCockpitStatus());
+      const muxHook = renderHook(() => useCockpitMux());
+      const diagHook = renderHook(() => useCockpitDiagnostics());
 
       act(() => {
         ws.triggerMessage({
           op: 'publish',
-          topic: '/cockpit/status',
+          topic: '/diagnostics',
           msg: {
             status: [
-              {
-                name: 'twist_mux',
-                values: [
-                  { key: 'active_source', value: 'E-STOP lock' },
-                  { key: 'command_age', value: '-1' },
-                  { key: 'publisher_count', value: '2' },
-                ],
-              },
+              { name: 'lifecycle_manager_navigation: Nav2 Health', level: 0, message: 'Nav2 is active', values: [] },
             ],
           },
         });
       });
 
-      expect(statusHook.result.current.muxSource).toBe('E-STOP lock');
-      expect(statusHook.result.current.cmdAge).toBe(-1); // robot's "unknown"
-      expect(statusHook.result.current.pubCount).toBe(2);
+      // Each publisher sends its OWN DiagnosticArray, so a Nav2 heartbeat must
+      // not read as "twist_mux reported just now".
+      expect(diagHook.result.current.hasReceived).toBe(true);
+      expect(muxHook.result.current.hasReceived).toBe(false);
+    });
+
+    it('keeps an unparsable rung rather than inventing a priority for it', () => {
+      const ws = openSocket();
+      const muxHook = renderHook(() => useCockpitMux());
+
+      act(() => {
+        ws.triggerMessage(
+          muxFrame([
+            { key: 'velocity topics.ui', value: 'some future wording we do not know' },
+            { key: 'current priority', value: '0' },
+          ]),
+        );
+      });
+
+      expect(muxHook.result.current.inputs).toEqual([
+        { name: 'ui', topic: null, priority: null, timeoutSec: null },
+      ]);
     });
   });
 
@@ -864,114 +856,29 @@ describe('rosClient and hooks', () => {
     });
   });
 
-  // ── SERVICE CALL CONTRACT (/ugv/set_allow_motion) ─────────────────────────
-  // The cockpit never publishes mux locks. Disarm/re-arm is a SetBool service
-  // call, and the Promise answers only "did the service call complete" — the
-  // /ugv/allow_motion topic echo is the confirmation.
-  describe('service call tracking', () => {
-    function lastServiceCall(ws: MockWebSocket): { service: string; args: { data: boolean }; id: string } {
-      const calls = wireOps(ws).filter((o) => o.op === 'call_service');
-      expect(calls).toHaveLength(1);
-      return calls[0] as unknown as { service: string; args: { data: boolean }; id: string };
-    }
-
-    it('sends SetBool to /ugv/set_allow_motion and resolves ok on service_response', async () => {
+  // ── NO SERVICE CALLS AT ALL ───────────────────────────────────────────────
+  // The service-call machinery existed for /ugv/set_allow_motion and went with
+  // it (2026-09-14). Nothing in the cockpit calls a service today, so nothing
+  // may put a `call_service` op on the wire — a live bridge would answer an
+  // unlisted service with a refusal, and a dead call path is how the arming gate
+  // came to look functional while doing nothing.
+  describe('service calls', () => {
+    it('puts no call_service op on the wire', () => {
       const ws = openSocket();
-      ws.send.mockClear();
-
-      let result: Awaited<ReturnType<typeof rosClient.setMotionAllowed>> | null = null;
-      act(() => {
-        void rosClient.setMotionAllowed(false).then((r) => { result = r; });
-      });
-
-      const call = lastServiceCall(ws);
-      expect(call.service).toBe(SET_ALLOW_MOTION_SERVICE);
-      expect(call.args).toEqual({ data: false });
-      expect(call.id).toMatch(/^call_/);
-
-      await act(async () => {
-        ws.triggerMessage({
-          op: 'service_response',
-          service: SET_ALLOW_MOTION_SERVICE,
-          id: call.id,
-          result: true,
-          values: { success: true, message: 'motion disabled' },
-        });
-      });
-
-      expect(result).toEqual({ ok: true, message: 'motion disabled' });
+      expect(wireOps(ws).some((o) => o.op === 'call_service')).toBe(false);
     });
 
-    it('resolves not-ok when the service answers success:false', async () => {
-      const ws = openSocket();
-      ws.send.mockClear();
-
-      let result: Awaited<ReturnType<typeof rosClient.setMotionAllowed>> | null = null;
-      act(() => {
-        void rosClient.setMotionAllowed(true).then((r) => { result = r; });
-      });
-      const call = lastServiceCall(ws);
-
-      await act(async () => {
-        ws.triggerMessage({
-          op: 'service_response',
-          service: SET_ALLOW_MOTION_SERVICE,
-          id: call.id,
-          result: true,
-          values: { success: false, message: 'refused: ethernet interlock active' },
-        });
-      });
-
-      expect(result).toEqual({ ok: false, message: 'refused: ethernet interlock active' });
+    it('exposes no motion-authority call', () => {
+      expect(rosClient).not.toHaveProperty('setMotionAllowed');
+      expect(rosClient).not.toHaveProperty('callService');
     });
 
-    it('resolves not-ok on timeout instead of hanging', async () => {
+    it('ignores an unsolicited service_response instead of throwing', () => {
       const ws = openSocket();
-      ws.send.mockClear();
-
-      const results: Array<Awaited<ReturnType<typeof rosClient.setMotionAllowed>>> = [];
-      act(() => {
-        void rosClient.setMotionAllowed(false).then((r) => { results.push(r); });
-      });
-      lastServiceCall(ws);
-
-      await act(async () => {
-        vi.advanceTimersByTime(3500);
-      });
-
-      expect(results[0]?.ok).toBe(false);
-      expect(results[0]?.message).toMatch(/no service_response/);
-    });
-
-    it('resolves not-ok for in-flight calls when the socket closes', async () => {
-      const ws = openSocket();
-      ws.send.mockClear();
-
-      const results: Array<Awaited<ReturnType<typeof rosClient.setMotionAllowed>>> = [];
-      act(() => {
-        void rosClient.setMotionAllowed(false).then((r) => { results.push(r); });
-      });
-      lastServiceCall(ws);
-
-      await act(async () => {
-        ws.triggerClose();
-      });
-
-      expect(results[0]?.ok).toBe(false);
-      expect(results[0]?.message).toMatch(/socket/);
-    });
-
-    it('resolves not-ok immediately when the socket is not open', async () => {
-      const result = await rosClient.setMotionAllowed(false);
-      expect(result).toEqual({ ok: false, message: 'socket not open' });
-    });
-
-    it('ignores a service_response with an unknown id', () => {
-      const ws = openSocket();
-      // Must not throw, and must not touch any other pending call.
       act(() => {
         ws.triggerMessage({ op: 'service_response', service: '/whatever', id: 'call_stale', result: true });
       });
+      expect(true).toBe(true);
     });
   });
 
@@ -992,7 +899,7 @@ describe('rosClient and hooks', () => {
         .filter((o) => o.op === 'subscribe')
         .map((o) => o.topic);
       expect(topics).toContain('/scan');
-      expect(topics).toContain('/cockpit/status');
+      expect(topics).toContain('/diagnostics');
     });
   });
 });
