@@ -52,7 +52,7 @@ def test_triggers_and_guards():
 def test_runner_environment_concurrency_and_permissions():
     wf = _load_workflow()
     job = wf["jobs"]["review"]
-    assert job["runs-on"] == "moosegoose-general"
+    assert job["runs-on"] == "moosegoose-linux"
     assert job["environment"] == "openhands-review"
     assert wf["concurrency"]["group"] == "cold-review-${{ github.event.pull_request.number }}"
     assert wf["concurrency"]["cancel-in-progress"] is True
