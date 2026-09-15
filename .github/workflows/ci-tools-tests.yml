@@ -57,7 +57,7 @@ permissions:
 
 jobs:
   tools:
-    runs-on: ${{ (github.event.pull_request.head.repo.fork || vars.CI_FORCE_HOSTED == 'true') && 'ubuntu-latest' || 'moosegoose-general' }}
+    runs-on: ${{ (github.event.pull_request.head.repo.fork || vars.CI_FORCE_HOSTED == 'true') && 'ubuntu-latest' || 'moosegoose-linux' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -73,7 +73,7 @@ jobs:
       - run: python -m pytest tools/ci -q
 
   actionlint-cold-review:
-    runs-on: ${{ (github.event.pull_request.head.repo.fork || vars.CI_FORCE_HOSTED == 'true') && 'ubuntu-latest' || 'moosegoose-general' }}
+    runs-on: ${{ (github.event.pull_request.head.repo.fork || vars.CI_FORCE_HOSTED == 'true') && 'ubuntu-latest' || 'moosegoose-linux' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
