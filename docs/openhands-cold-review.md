@@ -81,31 +81,19 @@ Optional Doppler `homelab/dev` copy of those **names** only — do not reuse
 
 ## Runner group (public repo)
 
-RobotOverview is public, and a public repository only gets a runner from an
-org group whose `allows_public_repositories` is true. That is the one
-provisioning fact this workflow depends on, and it does not follow the runner
-label around when the label changes.
+RobotOverview is public, and a public repository only gets a runner from an org
+group whose `allows_public_repositories` is true. That is the one provisioning
+fact this workflow depends on, and it does not follow the runner label around
+when the label changes.
 
-The `review` job asks for `moosegoose-linux`, a GARM scale set, and it asks
-unconditionally: there is no fork or `CI_FORCE_HOSTED` branch on that line, so
-`ubuntu-latest` is not a fallback here the way it is in the test workflows.
+The `review` job asks for `moosegoose-linux` unconditionally: there is no fork
+or `CI_FORCE_HOSTED` branch on that line, so `ubuntu-latest` is not a fallback
+here the way it is in the test workflows. If the group holding that scale set
+ever stops allowing public repositories, Cold Review queues until it is
+cancelled, with no error and no listener log, because nothing offers the job a
+runner.
 
-**As of 2026-09-15 this requirement is not met.** The `moosegoose-linux`
-runners are in the org's `Default` group (id 1), which has
-`allows_public_repositories: false`. The old `moosegoose-general` and
-`moosegoose-build` runners on Bloodarrow are in `moosegoose-arc-private`
-(id 3), which has it set to true and lists this repository. So a run started
-after the label change sits in `queued` until it is cancelled, with no error
-and no listener log to look at, because nothing ever offers it a runner.
-
-Check it before blaming the reviewer service:
-
-```bash
-gh api orgs/MooseGooseConsulting/actions/runner-groups --jq '.runner_groups[] | "\(.id) \(.name) public=\(.allows_public_repositories)"'
-gh api orgs/MooseGooseConsulting/actions/runner-groups/1/runners --jq '.runners[].name'
-```
-
-Either move the `moosegoose-linux` scale set into a group that allows public
-repositories and lists this repository, or give the `review` job the same
-hosted fallback the other workflows have. Until one of those is done, Cold
-Review on this repository queues forever.
+Which group holds the scale set today, and whether it is eligible, is deploy
+state rather than setup instructions. It lives in
+[`docs/deploy.md`](deploy.md), under CI runners. Check there first when a
+review sits in `queued`.

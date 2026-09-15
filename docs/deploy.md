@@ -1,6 +1,6 @@
 ---
 title: Deployment — verified facts
-last_verified: 2026-08-14
+last_verified: 2026-09-15
 ---
 
 # Deployment — verified facts
@@ -78,6 +78,38 @@ manifests, secrets (via Doppler/ESO), Gateway listeners, and Flux reconciliation
   fronts it as `wss://beast-01.tyrannosaurus-magellanic.ts.net/` on the tailnet only.
   `COCKPIT_ALLOWED_ORIGINS` is **unset**, so the bridge accepts any browser origin (tailnet is
   the perimeter); set it in `/etc/beast/ugv.env` only if origins should be restricted.
+
+## CI runners
+
+Verified 2026-09-15. Workflows ask for `moosegoose-linux`, a GARM scale set of
+ephemeral Kubernetes pods, which replaced `moosegoose-general` (the systemd
+runners on Bloodarrow) across this repository.
+
+- **Public-repo eligibility.** RobotOverview is public, so it only draws
+  runners from an org group with `allows_public_repositories: true`. The
+  `moosegoose-linux` runners register into the org `Default` group (id 1),
+  which has that set to true as of 2026-09-15 23:47Z. Before then it was
+  false, and `cold-review.yml`'s `review` job, the one job here that asks for
+  the label with no hosted fallback, sat `queued` for 54 minutes on run
+  35032854819 and was cancelled without ever being offered a runner. After the
+  change, run 35037319379 was picked up in three seconds by
+  `garm-gzdqwpqi7iab`. If Cold Review ever queues with nothing logged, check
+  this setting first:
+
+  ```bash
+  gh api orgs/MooseGooseConsulting/actions/runner-groups --jq '.runner_groups[] | "\(.id) \(.name) public=\(.allows_public_repositories)"'
+  ```
+
+- **`CI_FORCE_HOSTED=true` is set on this repository**, so every job written as
+  `${{ (fork || CI_FORCE_HOSTED) && 'ubuntu-latest' || 'moosegoose-linux' }}`
+  currently runs on GitHub-hosted runners. `cold-review.yml` is the exception
+  and is the only lane that exercises the self-hosted label today.
+
+- **Docker in jobs** works on these pods through a dind sidecar in the
+  provider pod template (`coldaine-codeOps`, `deploy/garm/provider-k8s.yaml`),
+  not ARC's `containerMode: dind`. The runner and the sidecar share the work
+  directory, so `docker run -v "$PWD:/work"` and `docker://` container actions
+  resolve the workspace. That was broken until coldaine-codeOps #62.
 
 ## Shipping a change
 
