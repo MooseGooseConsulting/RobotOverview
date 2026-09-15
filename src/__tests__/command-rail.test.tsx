@@ -13,45 +13,36 @@ import {
   STOP_TAIL_INTERVAL_MS,
 } from "@/lib/ros/drive-law";
 
-type ServiceResult = { ok: boolean; message?: string };
-
 const mocks = vi.hoisted(() => ({
   publish: vi.fn<(topic: string, message: unknown) => boolean>(() => true),
-  setMotionAllowed: vi.fn<(allowed: boolean) => Promise<{ ok: boolean; message?: string }>>(
-    async () => ({ ok: true }),
-  ),
-  callService: vi.fn<(name: string, args: unknown) => Promise<{ ok: boolean; message?: string }>>(
-    async () => ({ ok: true }),
-  ),
-  allowMotion: true as boolean | null,
-  isCharging: false,
-  isEthernetConnected: false,
 }));
 
 vi.mock("@/lib/ros/client", () => ({
   rosClient: {
     publish: mocks.publish,
-    setMotionAllowed: mocks.setMotionAllowed,
-    callService: mocks.callService,
   },
   useConnectionState: () => "connected",
   useCockpitBridge: () => ({ faults: [], deadTopics: [] }),
-  useCockpitStatus: () => ({
-    muxSource: "NONE",
-    commandAge: null,
-    publisherCount: 1,
-    allowMotion: mocks.allowMotion,
-    isCharging: mocks.isCharging,
-    isEthernetConnected: mocks.isEthernetConnected,
-    wifiRssi: null,
-    diskFree: null,
-    cpuTemp: null,
-    gpuTemp: null,
+  // The twist_mux ladder, as it arrives inside /diagnostics. Nothing here gates
+  // driving: the mux tells the cockpit who holds the floor, it does not grant
+  // permission to ask for it.
+  useCockpitMux: () => ({
+    lockPriority: 0,
+    dataAgeSec: 0,
+    inputs: [
+      { name: "joy_robot", topic: "cmd_vel_joy_robot", priority: 150, timeoutSec: 0.5 },
+      { name: "ui", topic: "cmd_vel_ui", priority: 50, timeoutSec: 0.5 },
+      { name: "nav", topic: "cmd_vel_nav", priority: 10, timeoutSec: 0.5 },
+    ],
     hasReceived: true,
     receivedAt: Date.now(),
     stale: false,
   }),
 }));
+
+// The held-intent republish period. Set by velocity_smoother's 0.1 s
+// velocity_timeout, not by twist_mux's 0.5 s — see CommandRail.
+const PUBLISH_MS = 50;
 
 type Twist = { linear: { x: number }; angular: { z: number } };
 
@@ -92,19 +83,16 @@ describe("CommandRail control lifecycle", () => {
     vi.useFakeTimers();
     mocks.publish.mockClear();
     mocks.publish.mockReturnValue(true);
-    mocks.setMotionAllowed.mockClear();
-    mocks.setMotionAllowed.mockResolvedValue({ ok: true } as ServiceResult);
-    mocks.callService.mockClear();
-    mocks.allowMotion = true;
-    mocks.isCharging = false;
-    mocks.isEthernetConnected = false;
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("publishes held intent at 10 Hz and a checked 5-zero tail on release", () => {
+  // 20 Hz, NOT 10: velocity_smoother's `velocity_timeout` is 0.1 s and zeroes a
+  // source that has been quiet that long, so a 100 ms period sits exactly on the
+  // limit and any late timer tick stutters the robot mid-drive.
+  it("publishes held intent at 20 Hz and a checked 5-zero tail on release", () => {
     render(<CommandRail />);
     act(() => vi.advanceTimersByTime(250));
     mocks.publish.mockClear();
@@ -115,8 +103,9 @@ describe("CommandRail control lifecycle", () => {
     expect(lastTwist().linear.x).toBeCloseTo(DEFAULT_STRAIGHT, PRECISION);
     expect(lastTwist().angular.z).toBe(0);
 
-    act(() => vi.advanceTimersByTime(300));
-    expect(movingPublishes()).toHaveLength(4);
+    // 300 ms at 50 ms per tick = 6 more, on top of the synchronous first.
+    act(() => vi.advanceTimersByTime(6 * PUBLISH_MS));
+    expect(movingPublishes()).toHaveLength(7);
 
     fireEvent.keyUp(window, { key: "w" });
     // The first zero is SYNCHRONOUS — a keyup still stops in the same tick.
@@ -127,8 +116,26 @@ describe("CommandRail control lifecycle", () => {
     // ...then silence. A bounded tail, not a stream: an idle-but-publishing
     // source at priority 50 would mask nav (10) forever.
     act(() => vi.advanceTimersByTime(300));
-    expect(movingPublishes()).toHaveLength(4);
-    expect(twistPublishes()).toHaveLength(4 + STOP_TAIL_COUNT);
+    expect(movingPublishes()).toHaveLength(7);
+    expect(twistPublishes()).toHaveLength(7 + STOP_TAIL_COUNT);
+  });
+
+  // The rate is a safety-relevant number, not a style choice: below 10 Hz the
+  // smoother zeroes us. Pin the gap between consecutive held publishes.
+  it("keeps the held-intent gap under the smoother's 100 ms timeout", () => {
+    render(<CommandRail />);
+    act(() => vi.advanceTimersByTime(250));
+    mocks.publish.mockClear();
+
+    fireEvent.keyDown(window, { key: "w", repeat: false });
+    expect(movingPublishes()).toHaveLength(1);
+
+    // One period short of the smoother's limit there must already be another.
+    act(() => vi.advanceTimersByTime(99));
+    expect(movingPublishes().length).toBeGreaterThan(1);
+
+    fireEvent.keyUp(window, { key: "w" });
+    drainStopTail();
   });
 
   it("stops a held pointer intent when the pointer leaves", () => {
@@ -139,8 +146,9 @@ describe("CommandRail control lifecycle", () => {
     forward.setPointerCapture = vi.fn();
 
     fireEvent.pointerDown(forward, { pointerId: 7 });
-    act(() => vi.advanceTimersByTime(200));
-    expect(movingPublishes()).toHaveLength(3);
+    // One synchronous publish, then one every PUBLISH_MS while held.
+    act(() => vi.advanceTimersByTime(4 * PUBLISH_MS));
+    expect(movingPublishes()).toHaveLength(5);
 
     fireEvent.pointerUp(forward, { pointerId: 7 });
     act(() => vi.advanceTimersByTime(200));
@@ -204,8 +212,8 @@ describe("CommandRail control lifecycle", () => {
     expect(lastTwist().linear.x).toBeCloseTo(LINEAR_MAX * RATE_PRESETS[1], PRECISION);
     expect(lastTwist().linear.x).toBeGreaterThan(before);
 
-    // The stream carries on at 10 Hz at the new magnitude.
-    act(() => vi.advanceTimersByTime(100));
+    // The stream carries on at 20 Hz at the new magnitude.
+    act(() => vi.advanceTimersByTime(PUBLISH_MS));
     expect(lastTwist().linear.x).toBeCloseTo(LINEAR_MAX * RATE_PRESETS[1], PRECISION);
   });
 
@@ -257,13 +265,13 @@ describe("CommandRail control lifecycle", () => {
     fireEvent.keyDown(window, { key: "w", repeat: false });
     expect(movingPublishes()).toHaveLength(1);
 
-    act(() => vi.advanceTimersByTime(50));
+    act(() => vi.advanceTimersByTime(PUBLISH_MS / 2));
     fireEvent.keyDown(window, { key: "w", repeat: false });
     expect(movingPublishes()).toHaveLength(1);
 
-    // The interval still fires on its original 100 ms cadence — had the
-    // duplicate restarted it, nothing would arrive until 150 ms.
-    act(() => vi.advanceTimersByTime(50));
+    // The interval still fires on its original cadence — had the duplicate
+    // restarted it, nothing would arrive until a full period after the repeat.
+    act(() => vi.advanceTimersByTime(PUBLISH_MS / 2));
     expect(movingPublishes()).toHaveLength(2);
   });
 
@@ -309,10 +317,12 @@ describe("CommandRail control lifecycle", () => {
     act(() => vi.advanceTimersByTime(500));
     expect(zeroPublishes()).toHaveLength(afterFailure);
 
-    // The banner carries a DISARM control: the robot may still be driving, and
-    // sending the operator hunting for the safety strip is not acceptable.
-    fireEvent.click(screen.getByTitle(/disarm motion/i));
-    expect(mocks.setMotionAllowed).toHaveBeenCalledWith(false);
+    // The banner offers no software disarm, because the robot has no such
+    // service. It states what the cockpit will do instead, and what is left to
+    // the operator.
+    expect(screen.queryByTitle(/disarm motion/i)).not.toBeInTheDocument();
+    expect(banner).toHaveTextContent(/re-fires automatically on reconnect/i);
+    expect(banner).toHaveTextContent(/stop it at the hardware/i);
   });
 
   it("the STOP NOT CONFIRMED banner survives a later successful publish and clears only on a full tail", () => {
@@ -487,92 +497,37 @@ describe("CommandRail control lifecycle", () => {
     expect(lastTwist().linear.x).toBeCloseTo(DEFAULT_STRAIGHT, PRECISION);
   });
 
-  it("does not register held keys in the readout while the motion gate is closed", () => {
-    mocks.allowMotion = false;
+  // ── THE BUG THIS CHANGE FIXES ─────────────────────────────────────────────
+  // The cockpit used to require `/ugv/allow_motion` to publish `true` before
+  // the D-pad would publish anything. That topic does not exist on BEAST-01, so
+  // the gate failed closed forever and the cockpit could not drive at all. A
+  // connected cockpit with a working /cmd_vel_ui advertise must drive, full
+  // stop — and the mux slice, which reports who holds the floor, must never be
+  // read as permission to ask for it.
+  it("drives on a connected bridge with no arming handshake at all", () => {
     render(<CommandRail />);
     act(() => vi.advanceTimersByTime(500));
     mocks.publish.mockClear();
 
     fireEvent.keyDown(window, { key: "w", repeat: false });
 
-    // Nothing left the browser, so the readout must not claim a command.
-    expect(mocks.publish).not.toHaveBeenCalled();
-    expect(screen.getByTitle(/^Commanded —/)).toHaveTextContent("X +0.00 m/s · Z +0.00 rad/s");
+    expect(movingPublishes()).toHaveLength(1);
+    expect(screen.queryByText(/drive disabled/i)).not.toBeInTheDocument();
+    // No arming call of any kind may be attempted.
+    expect(
+      mocks.publish.mock.calls.some(([topic]) => String(topic).includes("allow_motion")),
+    ).toBe(false);
+
+    fireEvent.keyUp(window, { key: "w" });
+    drainStopTail();
   });
 
-  it("reports a FAILED emergency disarm instead of rendering it as success", async () => {
+  it("renders no arming or disarm control anywhere in the rail", () => {
     render(<CommandRail />);
     act(() => vi.advanceTimersByTime(250));
 
-    fireEvent.keyDown(window, { key: "w", repeat: false });
-    fireEvent.keyUp(window, { key: "w" });
-    mocks.publish.mockReturnValue(false);
-    act(() => vi.advanceTimersByTime(STOP_TAIL_INTERVAL_MS));
-    expect(screen.getByRole("alert")).toHaveTextContent(/stop not confirmed/i);
-
-    // setMotionAllowed resolves {ok:false} on a closed socket, a timeout, or a
-    // bridge rejection — it never throws. Swallowing that would render a failed
-    // disarm as success, on the one control that must never lie.
-    mocks.setMotionAllowed.mockResolvedValue({
-      ok: false,
-      message: "socket not open",
-    } as ServiceResult);
-
-    await act(async () => {
-      fireEvent.click(screen.getByTitle(/disarm motion/i));
-    });
-
-    expect(mocks.setMotionAllowed).toHaveBeenCalledWith(false);
-    expect(screen.getByRole("alert")).toHaveTextContent(/DISARM FAILED — socket not open/);
-  });
-
-  it("does not gate drive controls while charging — no automatic interlock (ugv_safety_monitor removed 2026-08-07)", () => {
-    mocks.isCharging = true;
-    render(<CommandRail />);
-    act(() => vi.advanceTimersByTime(500));
-    mocks.publish.mockClear();
-
-    fireEvent.keyDown(window, { key: "w", repeat: false });
-
-    expect(mocks.publish).toHaveBeenCalled();
-    expect(screen.queryByText(/drive disabled/i)).not.toBeInTheDocument();
-  });
-
-  it("fails closed when motion state is unknown", () => {
-    mocks.allowMotion = null;
-    render(<CommandRail />);
-    act(() => vi.advanceTimersByTime(500));
-    mocks.publish.mockClear();
-
-    fireEvent.keyDown(window, { key: "w", repeat: false });
-
-    expect(mocks.publish).not.toHaveBeenCalled();
-    expect(screen.getAllByText(/motion state unknown/i).length).toBeGreaterThan(0);
-  });
-
-  it("gates drive controls when motion is disarmed", () => {
-    mocks.allowMotion = false;
-    render(<CommandRail />);
-    act(() => vi.advanceTimersByTime(500));
-    mocks.publish.mockClear();
-
-    fireEvent.keyDown(window, { key: "w", repeat: false });
-
-    expect(mocks.publish).not.toHaveBeenCalled();
-    expect(
-      screen.getAllByText(/motion disarmed/i).length,
-    ).toBeGreaterThan(0);
-  });
-
-  it("does not gate drive controls on Ethernet connection — no automatic interlock (ugv_safety_monitor removed 2026-08-07)", () => {
-    mocks.isEthernetConnected = true;
-    render(<CommandRail />);
-    act(() => vi.advanceTimersByTime(500));
-    mocks.publish.mockClear();
-
-    fireEvent.keyDown(window, { key: "w", repeat: false });
-
-    expect(mocks.publish).toHaveBeenCalled();
-    expect(screen.queryByText(/drive disabled/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/disarm/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/re-arm/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/motion state unknown/i)).not.toBeInTheDocument();
   });
 });

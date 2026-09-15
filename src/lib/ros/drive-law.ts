@@ -70,6 +70,24 @@ export type DriveIntent = { linearX: number; angularZ: number };
 // the arc ratios are dimensionless and unaffected.
 export const LINEAR_MAX = 0.15; // m/s
 
+// ── THE ROBOT'S OWN CEILING ─────────────────────────────────────────────────
+// beast-ros `config/velocity_smoother.yaml` sets `max_velocity: [0.5, 0.0, 1.5]`
+// — m/s, unused, rad/s. That is the limit the ROBOT enforces on whatever it
+// receives, and it is not the same thing as LINEAR_MAX/ANGULAR_MAX above, which
+// are this cockpit's deliberately lower, evidence-backed crawl limits.
+//
+// Both numbers are kept because they answer different questions. The pair above
+// is "how fast do we ask BEAST-01 to go", and it moves when someone measures.
+// The pair below is "what would the robot clip anyway", and it moves only when
+// the robot's config does. Today 0.15 < 0.5 and 1.0 < 1.5, so this clamp does
+// nothing at all — and that is the point: it is a floor under future edits, so
+// that raising LINEAR_MAX past the smoother's limit cannot silently command a
+// speed the robot will quietly clip while the readout claims otherwise.
+export const SMOOTHER_MAX_LINEAR = 0.5; // m/s
+export const SMOOTHER_MAX_ANGULAR = 1.5; // rad/s
+
+const clampMagnitude = (v: number, limit: number) => Math.min(limit, Math.max(-limit, v));
+
 // The one number with no Waveshare equivalent: its browser was differential
 // L/R and never named a yaw rate. 1.0 rad/s is what the nav2 params in this
 // repo use for max_vel_theta, and commanded yaw currently UNDER-delivers on
@@ -108,6 +126,12 @@ export const ARC_ANGULAR_SCALE = 0.423;
 // driving feels. 5 × 20 ms = 100 ms of zeros, then silence — well inside the
 // mux's 0.5 s `ui` timeout, so the rung still expires and hands the floor back
 // down the ladder instead of masking nav forever.
+//
+// The tail is also the ONLY thing that stops the robot on release: twist_mux
+// drops a source that has gone quiet, but dropping it does not publish a zero,
+// so silence alone leaves the last command standing at the bottom of the chain.
+// Zeros have to be sent, and they have to be checked — see CommandRail's
+// STOP-NOT-CONFIRMED banner for what happens when they do not leave the browser.
 export const STOP_TAIL_COUNT = 5;
 export const STOP_TAIL_INTERVAL_MS = 20;
 
@@ -180,6 +204,18 @@ export function straightSpeedAt(rateIndex: number): number {
  * browser would have to assume, duplicating a constant another agent owns.
  */
 export function composeTwist(input: DriveInput): DriveIntent {
+  return clampToRobotLimits(composeUnclamped(input));
+}
+
+/** Never command past what velocity_smoother would accept. See SMOOTHER_MAX_*. */
+export function clampToRobotLimits(intent: DriveIntent): DriveIntent {
+  return {
+    linearX: clampMagnitude(intent.linearX, SMOOTHER_MAX_LINEAR),
+    angularZ: clampMagnitude(intent.angularZ, SMOOTHER_MAX_ANGULAR),
+  };
+}
+
+function composeUnclamped(input: DriveInput): DriveIntent {
   const rate = effectiveRate(input);
   const lin = LINEAR_MAX * rate;
   const ang = ANGULAR_MAX * rate;

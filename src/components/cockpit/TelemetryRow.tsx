@@ -5,9 +5,7 @@ import {
   useCockpitVoltage,
   useCockpitImu,
   useCockpitDiagnostics,
-  useCockpitStatus,
 } from "@/lib/ros/client";
-import { Database, Thermometer, Wifi } from "lucide-react";
 import clsx from "clsx";
 
 const HISTORY = 50;
@@ -25,7 +23,6 @@ export function TelemetryRow() {
   const volts = useCockpitVoltage();
   const imu = useCockpitImu();
   const diags = useCockpitDiagnostics();
-  const status = useCockpitStatus();
 
   const voltCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const imuCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -312,29 +309,16 @@ export function TelemetryRow() {
             </span>
           </button>
 
-          <div className="flex items-center gap-2.5">
-            <span
-              className="hud-label font-mono text-[9px] flex items-center gap-1 scale-90"
-              title="Wi-Fi RSSI from /cockpit/status system_metrics"
-            >
-              <Wifi className="h-3 w-3 text-cyan" />{" "}
-              {status.wifiRssi !== null ? `${status.wifiRssi} dBm` : "—"}
-            </span>
-            <span
-              className="hud-label font-mono text-[9px] flex items-center gap-1 scale-90"
-              title="Jetson CPU / GPU temperature"
-            >
-              <Thermometer className="h-3 w-3 text-amber" />{" "}
-              {status.cpuTemp !== null && status.gpuTemp !== null
-                ? `${status.cpuTemp.toFixed(0)}/${status.gpuTemp.toFixed(0)}°C`
-                : "—"}
-            </span>
-            {/* No hardcoded '1.8 TB' fallback: unknown renders as unknown. */}
-            <span className="hud-label font-mono text-[9px] flex items-center gap-1.5 scale-90">
-              <Database className="h-3 w-3 text-cyan" />{" "}
-              {status.diskFree ?? "—"} free
-            </span>
-          </div>
+          {/* The Wi-Fi RSSI / Jetson temperature / disk-free chips that sat here
+              all read /cockpit/status, a topic this stack never publishes, so
+              all three rendered a permanent em-dash. Removed 2026-09-14; the
+              honest statement of the gap is cheaper than three dead gauges. */}
+          <span
+            className="hud-label font-mono text-[9px] scale-90 text-ink-dim/70"
+            title="Wi-Fi RSSI, Jetson CPU/GPU temperature and disk free came from /cockpit/status, which no node on this stack publishes."
+          >
+            host metrics · no publisher
+          </span>
         </div>
       </section>
     </div>
