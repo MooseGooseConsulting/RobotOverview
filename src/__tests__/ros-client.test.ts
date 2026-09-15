@@ -676,9 +676,9 @@ describe('rosClient and hooks', () => {
       const muxHook = renderHook(() => useCockpitMux());
 
       expect(muxHook.result.current.hasReceived).toBe(false);
-      // `activePriority: 0` would read as "twist_mux says nothing is driving".
+      // `lockPriority: 0` would read as "twist_mux says no lock is engaged".
       // It has said nothing at all, which is a different claim.
-      expect(muxHook.result.current.activePriority).toBeNull();
+      expect(muxHook.result.current.lockPriority).toBeNull();
       expect(muxHook.result.current.inputs).toEqual([]);
     });
 
@@ -752,7 +752,7 @@ describe('rosClient and hooks', () => {
       expect(mux.inputs[3]).toMatchObject({ name: 'ui', timeoutSec: 0.5 });
     });
 
-    it('treats current priority 0 as "nothing is driving", not as unknown', () => {
+    it('treats current priority 0 as "no lock engaged", not as unknown', () => {
       const ws = openSocket();
       const muxHook = renderHook(() => useCockpitMux());
 
@@ -760,11 +760,11 @@ describe('rosClient and hooks', () => {
         ws.triggerMessage(muxFrame(LIVE_VALUES));
       });
 
-      expect(muxHook.result.current.activePriority).toBe(0);
+      expect(muxHook.result.current.lockPriority).toBe(0);
       expect(muxHook.result.current.dataAgeSec).toBe(0);
     });
 
-    it('reports the active rung by priority, not by the masked/unmasked wording', () => {
+    it('ingests current priority as the lock priority, whatever its value', () => {
       const ws = openSocket();
       const muxHook = renderHook(() => useCockpitMux());
 
@@ -778,7 +778,7 @@ describe('rosClient and hooks', () => {
         );
       });
 
-      expect(muxHook.result.current.activePriority).toBe(50);
+      expect(muxHook.result.current.lockPriority).toBe(50);
     });
 
     it('does not stamp the ladder fresh on a diagnostics array without twist_mux', () => {

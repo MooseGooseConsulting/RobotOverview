@@ -27,7 +27,7 @@ vi.mock("@/lib/ros/client", () => ({
   // driving: the mux tells the cockpit who holds the floor, it does not grant
   // permission to ask for it.
   useCockpitMux: () => ({
-    activePriority: 0,
+    lockPriority: 0,
     dataAgeSec: 0,
     inputs: [
       { name: "joy_robot", topic: "cmd_vel_joy_robot", priority: 150, timeoutSec: 0.5 },

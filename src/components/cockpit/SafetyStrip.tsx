@@ -69,13 +69,11 @@ export function SafetyStrip() {
   // power_supply_status (a real measurement, not bringup's dummy 0.0).
   const current = voltStale ? null : (volts.current ?? null);
 
-  // twist_mux's own report. `activePriority === 0` is a real answer ("nothing
-  // is driving"), not a missing one, so it must not render as UNKNOWN.
+  // twist_mux's own report. What it publishes is the LOCK priority (0 = no lock
+  // engaged) and the age of the command it forwarded — never the winning rung,
+  // so this tile reports the lock and does not name a source.
   const muxLive = mux.hasReceived && !mux.stale;
-  const activeInput =
-    mux.activePriority === null
-      ? null
-      : (mux.inputs.find((i) => i.priority === mux.activePriority) ?? null);
+  const locked = mux.lockPriority !== null && mux.lockPriority > 0;
 
   // Measured motion, from /odom. This is what the robot DID, as against the
   // commanded twist the CommandRail prints — the two are deliberately separate
@@ -113,9 +111,9 @@ export function SafetyStrip() {
         </div>
       )}
 
-      {/* ── ACTIVE SOURCE ───────────────────────── */}
+      {/* ── MUX LOCK ────────────────────────────── */}
       <div className="flex flex-col justify-center min-w-0 z-10">
-        <span className="hud-label text-[10px]">Active source · age</span>
+        <span className="hud-label text-[10px]">Mux lock · cmd age</span>
         <span
           className={clsx(
             'font-mono text-lg font-bold tracking-wide mt-0.5 truncate',
@@ -124,11 +122,13 @@ export function SafetyStrip() {
         >
           {!mux.hasReceived ? (
             <Unknown reason="twist_mux has not reported on /diagnostics" />
-          ) : mux.activePriority === 0 || activeInput === null ? (
-            <span className="text-ink-dim">NONE</span>
+          ) : locked ? (
+            <span className="text-red-400 text-glow-red font-extrabold">
+              LOCKED #{mux.lockPriority}
+            </span>
           ) : (
             <span className={clsx(muxLive && 'text-cyan text-glow-cyan font-extrabold')}>
-              {activeInput.topic ?? activeInput.name}
+              NO LOCK
             </span>
           )}
           <span className="text-sm font-medium ml-1">
@@ -137,7 +137,7 @@ export function SafetyStrip() {
         </span>
         <span className="font-mono text-[10px] text-ink-dim truncate mt-1">
           {mux.hasReceived
-            ? `${mux.inputs.length} rungs · priority ${mux.activePriority ?? '—'}`
+            ? `${mux.inputs.length} rungs · winning source not published`
             : 'twist_mux: Twist mux status'}
         </span>
         {/* The absence of an arming control is a fact about the robot, so say

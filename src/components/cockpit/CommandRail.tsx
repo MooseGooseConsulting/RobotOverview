@@ -600,18 +600,14 @@ export function CommandRail() {
     key: input.name,
     pri: input.priority,
     name: input.topic ?? input.name,
-    tone: input.topic === OUR_TOPIC ? ('emerald' as const) : ('cyan' as const),
+    timeout: input.timeoutSec,
+    ours: input.topic === OUR_TOPIC,
   }));
 
-  const rungState = (pri: number | null) => {
-    // `activePriority === 0` is twist_mux saying "nobody is driving" — a real
-    // answer, and different from never having heard from twist_mux at all.
-    if (mux.activePriority === null || pri === null || !mux.hasReceived) {
-      return { label: 'UNKNOWN', active: false, unknown: true };
-    }
-    const active = mux.activePriority === pri;
-    return { label: active ? 'ACTIVE' : 'IDLE', active, unknown: false };
-  };
+  // No rung is marked ACTIVE here. twist_mux publishes its LOCK priority and the
+  // forwarded command's age; the winning source is not on /diagnostics at all,
+  // so the ladder shows the configured rungs and each one's expiry and leaves
+  // the arbitration outcome unclaimed rather than guessing it.
 
   return (
     <div className="flex flex-col gap-3">
@@ -625,43 +621,24 @@ export function CommandRail() {
         </h2>
 
         <div className="flex flex-col gap-1.5">
-          {rungs.map((r) => {
-            const state = rungState(r.pri);
-            return (
-              <div
-                key={r.key}
-                className={clsx(
-                  'grid grid-cols-[36px_1fr_auto] gap-2 items-center border border-rim/60 rounded-md px-3 py-1.5 bg-hull/40 font-mono text-xs',
-                  state.active &&
-                    r.tone === 'cyan' &&
-                    'border-cyan-500/50 bg-cyan-950/20 text-glow-cyan text-cyan-400 font-bold',
-                  state.active &&
-                    r.tone === 'emerald' &&
-                    'border-emerald-500/50 bg-emerald-950/20 text-glow-emerald text-emerald-400 font-bold',
-                )}
+          {rungs.map((r) => (
+            <div
+              key={r.key}
+              className={clsx(
+                'grid grid-cols-[36px_1fr_auto] gap-2 items-center border border-rim/60 rounded-md px-3 py-1.5 bg-hull/40 font-mono text-xs',
+                r.ours && 'border-emerald-500/50 bg-emerald-950/20 text-emerald-400 font-bold',
+              )}
+            >
+              <span className="font-extrabold text-ink-dim/70">{r.pri ?? '—'}</span>
+              <span className="tracking-wide">{r.name}</span>
+              <span
+                className="font-bold text-[9px] uppercase tracking-widest text-ink-dim/70"
+                title="twist_mux drops a source this long after its last message"
               >
-                <span className="font-extrabold text-ink-dim/70">{r.pri ?? '—'}</span>
-                <span className="tracking-wide">{r.name}</span>
-                <span
-                  className={clsx(
-                    'font-bold text-[9px] uppercase tracking-widest',
-                    state.unknown
-                      ? 'text-ink-dim/50'
-                      : state.active
-                        ? r.tone === 'emerald'
-                          ? 'text-emerald-400'
-                          : 'text-cyan'
-                        : 'text-zinc-600',
-                  )}
-                  title={
-                    state.unknown ? 'twist_mux has not reported on /diagnostics yet' : undefined
-                  }
-                >
-                  {state.label}
-                </span>
-              </div>
-            );
-          })}
+                {r.timeout !== null ? `${r.timeout.toFixed(2)}s` : '—'}
+              </span>
+            </div>
+          ))}
         </div>
 
         {!mux.hasReceived ? (
@@ -670,9 +647,9 @@ export function CommandRail() {
           </p>
         ) : (
           <p className="font-mono text-[9px] text-ink-dim/70 mt-2 leading-snug">
-            {mux.activePriority === 0
-              ? 'No source is driving'
-              : `Priority ${mux.activePriority} holds the mux`}
+            {mux.lockPriority !== null && mux.lockPriority > 0
+              ? `Lock #${mux.lockPriority} engaged — sources below it are masked`
+              : 'No lock engaged · twist_mux does not publish which rung is winning'}
             {mux.dataAgeSec !== null && ` · last cmd ${mux.dataAgeSec.toFixed(2)}s ago`}
             {mux.stale && ' · STALE'}
           </p>

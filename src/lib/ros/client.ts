@@ -274,10 +274,13 @@ export interface MuxInput {
  */
 export interface CockpitMux extends SliceMeta {
   /**
-   * twist_mux's `current priority`. 0 is its real value for "no source is
-   * driving right now", NOT unknown — the UI must distinguish the two.
+   * twist_mux's `current priority` — its LOCK priority, not the winning
+   * velocity source's. `getLockPriority()` (twist_mux.cpp, humble) returns the
+   * priority of the engaged lock and 0 when none is engaged, so this says
+   * nothing about which rung holds the floor. Null means twist_mux has not
+   * reported.
    */
-  activePriority: number | null;
+  lockPriority: number | null;
   /** twist_mux's `data age in [sec]` — how long since the winning cmd_vel. */
   dataAgeSec: number | null;
   /** The configured rungs, in the order twist_mux lists them. */
@@ -411,7 +414,7 @@ type MapOdomData = Omit<CockpitMapOdom, keyof SliceMeta>;
 type DiagnosticsData = { items: DiagnosticsItem[] };
 
 function blankMux(): MuxData {
-  return { activePriority: null, dataAgeSec: null, inputs: [] };
+  return { lockPriority: null, dataAgeSec: null, inputs: [] };
 }
 
 // ── TWIST_MUX LADDER, FROM /diagnostics ─────────────────────────────────────
@@ -422,11 +425,13 @@ function blankMux(): MuxData {
 //   key:   'current priority'      value: '0'
 //   key:   'data age in [sec]'     value: '0'
 //
-// The ACTIVE rung is read from `current priority` alone, never from the
-// masked/unmasked wording: the prose is twist_mux's own and can change between
-// releases, whereas the priority number is the thing the mux actually arbitrates
-// on. `current priority` 0 is a real report meaning "no source is driving",
-// which is why the field is `number | null` and 0 is not treated as unknown.
+// The winning rung is NOT on this wire. `current priority` is the LOCK
+// priority: `getLockPriority()` (twist_mux.cpp, humble branch) returns the
+// engaged lock's priority, 0 when none is engaged — the same number for every
+// velocity source. The per-topic masked/unmasked prose is likewise computed
+// against the lock, not against the winner. So we ingest the rung list, their
+// priorities and timeouts, the lock priority and the command age, and we do not
+// claim to know which source is driving.
 const TWIST_MUX_DIAG_NAME = 'twist_mux';
 const MUX_INPUT_KEY_PREFIX = 'velocity topics.';
 const MUX_INPUT_VALUE = /listening to (\S+) @ ([0-9.]+)s with priority #(\d+)/;
@@ -448,7 +453,7 @@ function parseMuxDiagnostic(values: Record<string, string>): MuxData {
   // silently sorting as if they were priority zero.
   inputs.sort((a, b) => (b.priority ?? -1) - (a.priority ?? -1));
   return {
-    activePriority: safeNumber(values['current priority']),
+    lockPriority: safeNumber(values['current priority']),
     dataAgeSec: safeNumber(values['data age in [sec]']),
     inputs,
   };

@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   powerSupplyStatus: null as number | null,
   voltageStale: false,
   voltageHasReceived: false,
-  muxActivePriority: null as number | null,
+  muxLockPriority: null as number | null,
   muxDataAgeSec: null as number | null,
   muxInputs: [] as Array<{
     name: string;
@@ -42,7 +42,7 @@ vi.mock('@/lib/ros/client', () => ({
     receivedAt: 1_000,
   }),
   useCockpitMux: () => ({
-    activePriority: mocks.muxActivePriority,
+    lockPriority: mocks.muxLockPriority,
     dataAgeSec: mocks.muxDataAgeSec,
     inputs: mocks.muxInputs,
     hasReceived: mocks.muxHasReceived,
@@ -72,7 +72,7 @@ function reset() {
   mocks.powerSupplyStatus = null;
   mocks.voltageStale = false;
   mocks.voltageHasReceived = false;
-  mocks.muxActivePriority = null;
+  mocks.muxLockPriority = null;
   mocks.muxDataAgeSec = null;
   mocks.muxInputs = [];
   mocks.muxHasReceived = false;
@@ -83,8 +83,8 @@ function reset() {
   mocks.odomStale = false;
 }
 
-function activeSource() {
-  return screen.getByText('Active source · age').parentElement!;
+function muxLock() {
+  return screen.getByText('Mux lock · cmd age').parentElement!;
 }
 
 function measuredMotion() {
@@ -124,32 +124,36 @@ describe('SafetyStrip active source', () => {
 
   it('renders UNKNOWN before twist_mux has reported', () => {
     render(<SafetyStrip />);
-    expect(within(activeSource()).getByText('UNKNOWN')).toBeInTheDocument();
+    expect(within(muxLock()).getByText('UNKNOWN')).toBeInTheDocument();
   });
 
-  it('renders NONE — not UNKNOWN — when twist_mux reports priority 0', () => {
+  it('reads NO LOCK — not UNKNOWN — when twist_mux reports lock priority 0', () => {
     mocks.muxHasReceived = true;
-    mocks.muxActivePriority = 0;
+    mocks.muxLockPriority = 0;
     mocks.muxDataAgeSec = 0;
     mocks.muxInputs = LADDER;
 
     render(<SafetyStrip />);
 
-    // "nothing is driving" is an answer; "we have not heard" is not.
-    expect(within(activeSource()).getByText('NONE')).toBeInTheDocument();
-    expect(within(activeSource()).queryByText('UNKNOWN')).not.toBeInTheDocument();
+    // "no lock is engaged" is an answer; "we have not heard" is not.
+    expect(within(muxLock()).getByText('NO LOCK')).toBeInTheDocument();
+    expect(within(muxLock()).queryByText('UNKNOWN')).not.toBeInTheDocument();
   });
 
-  it('names the topic holding the mux', () => {
+  it('never names a rung as the winner — twist_mux does not publish one', () => {
     mocks.muxHasReceived = true;
-    mocks.muxActivePriority = 50;
+    // 50 is the `ui` rung's priority. `current priority` is the LOCK priority,
+    // so matching it against a rung would have named cmd_vel_ui as the winner
+    // on nothing but a coincidence of numbers.
+    mocks.muxLockPriority = 50;
     mocks.muxDataAgeSec = 0.04;
     mocks.muxInputs = LADDER;
 
     render(<SafetyStrip />);
 
-    expect(within(activeSource()).getByText('cmd_vel_ui')).toBeInTheDocument();
-    expect(activeSource()).toHaveTextContent('0.04s');
+    expect(within(muxLock()).queryByText('cmd_vel_ui')).not.toBeInTheDocument();
+    expect(within(muxLock()).getByText('LOCKED #50')).toBeInTheDocument();
+    expect(muxLock()).toHaveTextContent('0.04s');
   });
 });
 
